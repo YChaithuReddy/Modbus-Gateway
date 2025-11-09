@@ -25,6 +25,10 @@ static ppp_config_t modem_config;
 static EventGroupHandle_t ppp_event_group;
 static const int PPP_CONNECTED_BIT = BIT0;
 
+// UART RX task control
+static TaskHandle_t uart_rx_task_handle = NULL;
+static volatile bool uart_rx_task_running = false;
+
 // Signal strength storage (checked before entering PPP mode)
 static signal_strength_t current_signal = {0};
 static bool signal_checked = false;
@@ -158,8 +162,11 @@ static esp_err_t ppp_output_callback(void *ctx, void *data, size_t len) {
 // UART receive task - feeds data from modem to PPP stack
 static void uart_rx_task(void *pvParameters) {
     uint8_t *data = (uint8_t*)malloc(2048);
+    uart_rx_task_running = true;
 
-    while (1) {
+    ESP_LOGI(TAG, "UART RX task started");
+
+    while (uart_rx_task_running) {
         int len = uart_read_bytes(modem_config.uart_num, data, 2048, pdMS_TO_TICKS(100));
         if (len > 0 && ppp_netif) {
             // Feed received data to PPP stack
@@ -168,6 +175,8 @@ static void uart_rx_task(void *pvParameters) {
     }
 
     free(data);
+    ESP_LOGI(TAG, "UART RX task stopped");
+    uart_rx_task_handle = NULL;
     vTaskDelete(NULL);
 }
 
@@ -461,7 +470,7 @@ esp_err_t a7670c_ppp_connect(void) {
     esp_netif_action_start(ppp_netif, 0, 0, NULL);
 
     // Start UART receive task to feed data to PPP
-    xTaskCreate(uart_rx_task, "uart_rx", 4096, NULL, 12, NULL);
+    xTaskCreate(uart_rx_task, "uart_rx", 4096, NULL, 12, &uart_rx_task_handle);
 
     // Wait for IP
     ESP_LOGI(TAG, "⏳ Waiting for PPP IP address...");
@@ -527,13 +536,35 @@ esp_err_t a7670c_ppp_deinit(void) {
         a7670c_ppp_disconnect();
     }
 
+    // Stop UART RX task BEFORE deleting UART driver
+    if (uart_rx_task_handle != NULL) {
+        ESP_LOGI(TAG, "Stopping UART RX task...");
+        uart_rx_task_running = false;  // Signal task to exit
+
+        // Wait up to 2 seconds for task to finish
+        int wait_count = 0;
+        while (uart_rx_task_handle != NULL && wait_count < 20) {
+            vTaskDelay(pdMS_TO_TICKS(100));
+            wait_count++;
+        }
+
+        if (uart_rx_task_handle != NULL) {
+            ESP_LOGW(TAG, "UART RX task did not stop gracefully, deleting forcefully");
+            vTaskDelete(uart_rx_task_handle);
+            uart_rx_task_handle = NULL;
+        } else {
+            ESP_LOGI(TAG, "UART RX task stopped successfully");
+        }
+    }
+
     // Delete event group
     if (ppp_event_group) {
         vEventGroupDelete(ppp_event_group);
         ppp_event_group = NULL;
     }
 
-    // Deinitialize UART
+    // Now safe to deinitialize UART
+    ESP_LOGI(TAG, "Deleting UART driver...");
     uart_driver_delete(modem_config.uart_num);
 
     // Reset GPIO pins to input

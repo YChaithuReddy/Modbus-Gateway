@@ -23,6 +23,9 @@ static modbus_stats_t stats = {0};
 // Global variable to track current baud rate
 static int current_baud_rate = 9600;
 
+// Flag to track if Modbus is already initialized
+static bool modbus_initialized = false;
+
 // Function to set baud rate dynamically
 esp_err_t modbus_set_baud_rate(int baud_rate)
 {
@@ -55,6 +58,12 @@ esp_err_t modbus_set_baud_rate(int baud_rate)
 // Initialize Modbus communication
 esp_err_t modbus_init(void)
 {
+    // Check if already initialized
+    if (modbus_initialized) {
+        ESP_LOGI(TAG, "[INFO] Modbus already initialized - skipping reinitialization");
+        return ESP_OK;
+    }
+
     ESP_LOGI(TAG, "[CONFIG] Initializing Modbus RS485 Communication");
     ESP_LOGI(TAG, "[LOC] Hardware Configuration:");
     ESP_LOGI(TAG, "   • UART Port: UART%d", RS485_UART_PORT);
@@ -63,7 +72,7 @@ esp_err_t modbus_init(void)
     ESP_LOGI(TAG, "   • RX Pin: GPIO %d", RXD2);
     ESP_LOGI(TAG, "   • RTS Pin: GPIO %d", RS485_RTS_PIN);
     ESP_LOGI(TAG, "   • Buffer Size: %d bytes", RS485_BUF_SIZE);
-    
+
     current_baud_rate = RS485_BAUD_RATE;
     
     uart_config_t uart_config = {
@@ -115,9 +124,12 @@ esp_err_t modbus_init(void)
     ESP_LOGI(TAG, "   • Connect RTS to GPIO %d", RS485_RTS_PIN);
     ESP_LOGI(TAG, "   • Ensure common ground connection");
     ESP_LOGI(TAG, "   • Check device baud rate matches %d bps", RS485_BAUD_RATE);
-    
+
     modbus_reset_statistics();
-    
+
+    // Mark as initialized
+    modbus_initialized = true;
+
     return ESP_OK;
 }
 
@@ -128,6 +140,10 @@ void modbus_deinit(void)
         uart_driver_delete(RS485_UART_PORT);
         uart_queue = NULL;
     }
+
+    // Mark as deinitialized
+    modbus_initialized = false;
+
     ESP_LOGI(TAG, "Modbus deinitialized");
 }
 

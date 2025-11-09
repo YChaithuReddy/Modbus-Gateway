@@ -7666,6 +7666,27 @@ static esp_err_t api_rtc_set_handler(httpd_req_t *req) {
 // Start AP mode for normal operation
 esp_err_t web_config_start_ap_mode(void)
 {
+    // Check network mode - only initialize WiFi if using WiFi mode
+    if (g_system_config.network_mode == NETWORK_MODE_SIM) {
+        ESP_LOGI(TAG, "Network mode: SIM Module - Skipping WiFi initialization");
+        ESP_LOGI(TAG, "💡 WiFi will only start if you trigger web config mode (GPIO pin)");
+
+        // Still need to initialize netif and event loop for PPP
+        esp_err_t ret = esp_netif_init();
+        if (ret != ESP_OK && ret != ESP_ERR_INVALID_STATE) {
+            ESP_LOGE(TAG, "Failed to initialize netif: %s", esp_err_to_name(ret));
+            return ret;
+        }
+
+        ret = esp_event_loop_create_default();
+        if (ret != ESP_OK && ret != ESP_ERR_INVALID_STATE) {
+            ESP_LOGE(TAG, "Failed to create event loop: %s", esp_err_to_name(ret));
+            return ret;
+        }
+
+        return ESP_OK;  // Skip WiFi initialization
+    }
+
     ESP_LOGI(TAG, "Starting WiFi in STA mode for operation");
 
     // Initialize WiFi infrastructure - allow ESP_ERR_INVALID_STATE for reinit
