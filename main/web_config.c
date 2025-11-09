@@ -850,6 +850,7 @@ static esp_err_t save_sim_config_handler(httpd_req_t *req);
 static esp_err_t save_sd_config_handler(httpd_req_t *req);
 static esp_err_t save_rtc_config_handler(httpd_req_t *req);
 static esp_err_t api_sim_test_handler(httpd_req_t *req);
+static esp_err_t api_sim_test_status_handler(httpd_req_t *req);
 static esp_err_t api_sd_status_handler(httpd_req_t *req);
 static esp_err_t api_sd_clear_handler(httpd_req_t *req);
 static esp_err_t api_sd_replay_handler(httpd_req_t *req);
