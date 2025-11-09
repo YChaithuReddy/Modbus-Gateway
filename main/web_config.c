@@ -1152,7 +1152,7 @@ static esp_err_t config_page_handler(httpd_req_t *req)
         "<div class='sensor-card'>"
         "<h3>Network Connectivity Mode</h3>"
         "<p style='color:#666;margin-bottom:15px'>Choose your network connectivity method</p>"
-        "<form method='POST' action='/save_network_mode'>"
+        "<form id='network_mode_form' onsubmit='return saveNetworkMode(event)'>"
         "<div style='margin:15px 0'>"
         "<label style='display:inline-block;margin-right:30px;cursor:pointer;padding:10px 15px;border:2px solid #ddd;border-radius:6px;background:#f8f9fa'>"
         "<input type='radio' name='network_mode' value='0' id='mode_wifi' %s onchange='toggleNetworkMode()' style='margin-right:8px'>"
@@ -1163,6 +1163,7 @@ static esp_err_t config_page_handler(httpd_req_t *req)
         "<span style='font-weight:600'>SIM Module (4G)</span>"
         "</label>"
         "</div>"
+        "<div id='network_mode_result' style='display:none;padding:12px;margin:15px 0;border-radius:5px'></div>"
         "<div style='background:#d4edda;padding:12px;margin:15px 0;border-radius:5px;border:1px solid #c3e6cb'>"
         "<button type='submit' style='background:#28a745;color:white;padding:10px 15px;border:none;border-radius:4px;font-weight:bold'>Save Network Mode</button>"
         "</div>"
@@ -2486,6 +2487,37 @@ static esp_err_t config_page_handler(httpd_req_t *req)
         "}"
         "})"
         ".catch(err=>{alert('Sync failed: '+err);});"
+        "}"
+        "function saveNetworkMode(e){"
+        "e.preventDefault();"
+        "const formData=new URLSearchParams(new FormData(e.target));"
+        "const resultDiv=document.getElementById('network_mode_result');"
+        "resultDiv.innerHTML='<span style=\"color:#856404\">Saving network mode...</span>';"
+        "resultDiv.style.display='block';"
+        "resultDiv.style.backgroundColor='#fff3cd';"
+        "resultDiv.style.borderColor='#ffeaa7';"
+        "fetch('/save_network_mode',{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},body:formData})"
+        ".then(r=>r.json())"
+        ".then(data=>{"
+        "if(data.status==='success'){"
+        "resultDiv.innerHTML='<span style=\"color:#28a745\">✅ '+data.message+'</span>';"
+        "resultDiv.style.backgroundColor='#d4edda';"
+        "resultDiv.style.borderColor='#c3e6cb';"
+        "setTimeout(()=>{"
+        "resultDiv.style.display='none';"
+        "},3000);"
+        "}else{"
+        "resultDiv.innerHTML='<span style=\"color:#721c24\">❌ Failed to save: '+data.message+'</span>';"
+        "resultDiv.style.backgroundColor='#f8d7da';"
+        "resultDiv.style.borderColor='#f5c6cb';"
+        "}"
+        "})"
+        ".catch(err=>{"
+        "resultDiv.innerHTML='<span style=\"color:#721c24\">❌ Error: '+err+'</span>';"
+        "resultDiv.style.backgroundColor='#f8d7da';"
+        "resultDiv.style.borderColor='#f5c6cb';"
+        "});"
+        "return false;"
         "}"
         "function saveSDConfig(){"
         "const formData=new URLSearchParams();"
@@ -7404,11 +7436,7 @@ static void sim_test_task(void *pvParameters) {
     ESP_LOGI(TAG, "Modem initialized, waiting 10 seconds...");
     vTaskDelay(pdMS_TO_TICKS(10000));
 
-    // Get signal strength
-    signal_strength_t signal;
-    esp_err_t signal_ret = a7670c_get_signal_strength(&signal);
-
-    // Try to connect PPP
+    // Try to connect PPP (signal strength is checked during this process)
     esp_err_t ppp_ret = a7670c_ppp_connect();
 
     if (ppp_ret == ESP_OK) {
@@ -7430,6 +7458,11 @@ static void sim_test_task(void *pvParameters) {
             }
         }
 
+        // Get stored signal strength (checked during PPP init before entering PPP mode)
+        signal_strength_t signal;
+        memset(&signal, 0, sizeof(signal));
+        esp_err_t signal_ret = a7670c_get_stored_signal_strength(&signal);
+
         xSemaphoreTake(g_sim_test_mutex, portMAX_DELAY);
         g_sim_test_status.in_progress = false;
         g_sim_test_status.completed = true;
@@ -7437,42 +7470,64 @@ static void sim_test_task(void *pvParameters) {
         if (got_ip) {
             g_sim_test_status.success = true;
             strncpy(g_sim_test_status.ip, ip_str, sizeof(g_sim_test_status.ip) - 1);
-            g_sim_test_status.signal = signal.rssi_dbm;
-            strncpy(g_sim_test_status.signal_quality, signal.quality, sizeof(g_sim_test_status.signal_quality) - 1);
-            strncpy(g_sim_test_status.operator_name, signal.operator_name, sizeof(g_sim_test_status.operator_name) - 1);
+
+            // Store signal info (retrieved during PPP init)
+            if (signal_ret == ESP_OK) {
+                g_sim_test_status.signal = signal.rssi_dbm;
+                if (signal.quality != NULL) {
+                    strncpy(g_sim_test_status.signal_quality, signal.quality, sizeof(g_sim_test_status.signal_quality) - 1);
+                }
+                strncpy(g_sim_test_status.operator_name, signal.operator_name, sizeof(g_sim_test_status.operator_name) - 1);
+            } else {
+                g_sim_test_status.signal = 0;
+                strncpy(g_sim_test_status.signal_quality, "Unknown", sizeof(g_sim_test_status.signal_quality) - 1);
+                strncpy(g_sim_test_status.operator_name, "Unknown", sizeof(g_sim_test_status.operator_name) - 1);
+            }
             strncpy(g_sim_test_status.apn, g_system_config.sim_config.apn, sizeof(g_sim_test_status.apn) - 1);
         } else {
             g_sim_test_status.success = false;
             snprintf(g_sim_test_status.error, sizeof(g_sim_test_status.error),
                      "Timeout waiting for IP address");
+
+            // Store signal info even on failure
+            if (signal_ret == ESP_OK) {
+                g_sim_test_status.signal = signal.rssi_dbm;
+                strncpy(g_sim_test_status.operator_name, signal.operator_name, sizeof(g_sim_test_status.operator_name) - 1);
+            }
+        }
+        xSemaphoreGive(g_sim_test_mutex);
+    } else {
+        // PPP connection failed - try to get signal anyway
+        signal_strength_t signal;
+        memset(&signal, 0, sizeof(signal));
+        esp_err_t signal_ret = a7670c_get_stored_signal_strength(&signal);
+
+        xSemaphoreTake(g_sim_test_mutex, portMAX_DELAY);
+        g_sim_test_status.in_progress = false;
+        g_sim_test_status.completed = true;
+        g_sim_test_status.success = false;
+        snprintf(g_sim_test_status.error, sizeof(g_sim_test_status.error),
+                 "PPP connection failed: %s", esp_err_to_name(ppp_ret));
+
+        if (signal_ret == ESP_OK && signal.rssi_dbm != 0) {
             g_sim_test_status.signal = signal.rssi_dbm;
+            if (signal.quality != NULL) {
+                strncpy(g_sim_test_status.signal_quality, signal.quality, sizeof(g_sim_test_status.signal_quality) - 1);
+            }
             strncpy(g_sim_test_status.operator_name, signal.operator_name, sizeof(g_sim_test_status.operator_name) - 1);
         }
         xSemaphoreGive(g_sim_test_mutex);
-    } else if (signal_ret == ESP_OK && signal.rssi_dbm != 0) {
-        xSemaphoreTake(g_sim_test_mutex, portMAX_DELAY);
-        g_sim_test_status.in_progress = false;
-        g_sim_test_status.completed = true;
-        g_sim_test_status.success = false;
-        snprintf(g_sim_test_status.error, sizeof(g_sim_test_status.error),
-                 "PPP connection failed");
-        g_sim_test_status.signal = signal.rssi_dbm;
-        strncpy(g_sim_test_status.signal_quality, signal.quality, sizeof(g_sim_test_status.signal_quality) - 1);
-        strncpy(g_sim_test_status.operator_name, signal.operator_name, sizeof(g_sim_test_status.operator_name) - 1);
-        xSemaphoreGive(g_sim_test_mutex);
-    } else {
-        xSemaphoreTake(g_sim_test_mutex, portMAX_DELAY);
-        g_sim_test_status.in_progress = false;
-        g_sim_test_status.completed = true;
-        g_sim_test_status.success = false;
-        snprintf(g_sim_test_status.error, sizeof(g_sim_test_status.error),
-                 "No response from modem or no signal");
-        xSemaphoreGive(g_sim_test_mutex);
     }
 
-    // Cleanup
+    // Cleanup - disconnect and deinitialize modem
+    ESP_LOGI(TAG, "Cleaning up SIM test - disconnecting PPP...");
     a7670c_ppp_disconnect();
+    vTaskDelay(pdMS_TO_TICKS(2000));  // Wait for disconnect to complete
+
+    ESP_LOGI(TAG, "Deinitializing modem...");
     a7670c_ppp_deinit();
+    vTaskDelay(pdMS_TO_TICKS(1000));  // Wait for cleanup to complete
+
     ESP_LOGI(TAG, "SIM test task completed, modem deinitialized");
 
     vTaskDelete(NULL);
