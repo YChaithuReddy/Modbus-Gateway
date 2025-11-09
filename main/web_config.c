@@ -7671,7 +7671,7 @@ esp_err_t config_reset_to_defaults(void)
     strcpy(g_system_config.azure_hub_fqdn, "your-hub.azure-devices.net");
     strcpy(g_system_config.azure_device_id, "your-device-id");
     strcpy(g_system_config.azure_device_key, "");
-    g_system_config.telemetry_interval = 120;
+    g_system_config.telemetry_interval = 300;  // 5 minutes (300 seconds)
     g_system_config.sensor_count = 0;
     g_system_config.config_complete = false;
     g_system_config.modem_reset_enabled = false;

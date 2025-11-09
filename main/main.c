@@ -1294,7 +1294,7 @@ static void modbus_task(void *pvParameters)
             return;
         }
         
-        vTaskDelay(pdMS_TO_TICKS(5000)); // Read every 5 seconds
+        vTaskDelay(pdMS_TO_TICKS(120000)); // Read every 2 minutes (120 seconds)
     }
     
     // Task exiting normally (due to config mode request)

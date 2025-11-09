@@ -11,7 +11,7 @@
 #define IOT_CONFIG_DEVICE_KEY "YOUR_DEVICE_KEY_HERE"
 
 // Telemetry Configuration
-#define TELEMETRY_FREQUENCY_MILLISECS 120000  // 2 minutes (production setting)
+#define TELEMETRY_FREQUENCY_MILLISECS 300000  // 5 minutes (300 seconds)
 
 // Production Configuration
 #define MAX_MQTT_RECONNECT_ATTEMPTS 5
