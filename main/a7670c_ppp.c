@@ -140,16 +140,26 @@ static esp_err_t hardware_reset_modem(void) {
 // Power on modem
 static esp_err_t power_on_modem(void) {
     ESP_LOGI(TAG, "🔌 Powering on modem...");
+    ESP_LOGI(TAG, "   PWR Pin: GPIO %d", modem_config.pwr_pin);
+    ESP_LOGI(TAG, "   UART TX: GPIO %d", modem_config.tx_pin);
+    ESP_LOGI(TAG, "   UART RX: GPIO %d", modem_config.rx_pin);
+    ESP_LOGI(TAG, "   Baud Rate: %d", modem_config.baud_rate);
 
     // Power key pulse: LOW for 1.5s, then HIGH
+    ESP_LOGI(TAG, "   Sending power-on pulse (LOW for 1.5s)...");
     gpio_set_level(modem_config.pwr_pin, 0);
     vTaskDelay(pdMS_TO_TICKS(1500));
     gpio_set_level(modem_config.pwr_pin, 1);
+    ESP_LOGI(TAG, "   Power pulse sent (now HIGH)");
 
     // Wait 8 seconds for modem to fully boot
-    ESP_LOGI(TAG, "   Waiting for modem to boot...");
-    vTaskDelay(pdMS_TO_TICKS(8000));
+    ESP_LOGI(TAG, "   Waiting 8 seconds for modem to boot...");
+    for (int i = 8; i > 0; i -= 2) {
+        ESP_LOGI(TAG, "      %d seconds remaining...", i);
+        vTaskDelay(pdMS_TO_TICKS(2000));
+    }
 
+    ESP_LOGI(TAG, "   Boot wait complete, modem should be ready");
     return ESP_OK;
 }
 
