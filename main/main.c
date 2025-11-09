@@ -595,24 +595,48 @@ static void troubleshoot_azure_connectivity(void) {
 
 static int initialize_mqtt_client(void) {
     ESP_LOGI(TAG, "[LINK] Initializing MQTT client on core %d", xPortGetCoreID());
-    
-    // Check WiFi connection status first
-    wifi_ap_record_t ap_info;
-    esp_err_t wifi_status = esp_wifi_sta_get_ap_info(&ap_info);
-    if (wifi_status != ESP_OK) {
-        ESP_LOGE(TAG, "[ERROR] WiFi not connected: %s", esp_err_to_name(wifi_status));
-        return -1;
-    }
-    
-    ESP_LOGI(TAG, "[WIFI] WiFi connected to: %s (RSSI: %d dBm)", ap_info.ssid, ap_info.rssi);
-    
-    // Get and log IP address
-    esp_netif_ip_info_t ip_info;
-    esp_netif_t *netif = esp_netif_get_handle_from_ifkey("WIFI_STA_DEF");
-    if (netif && esp_netif_get_ip_info(netif, &ip_info) == ESP_OK) {
-        ESP_LOGI(TAG, "[WEB] IP Address: " IPSTR, IP2STR(&ip_info.ip));
-        ESP_LOGI(TAG, "[WEB] Gateway: " IPSTR, IP2STR(&ip_info.gw));
-        ESP_LOGI(TAG, "[WEB] Netmask: " IPSTR, IP2STR(&ip_info.netmask));
+
+    system_config_t* config = get_system_config();
+
+    // Check network connection based on mode
+    if (config->network_mode == NETWORK_MODE_WIFI) {
+        // WiFi mode - check WiFi connection
+        wifi_ap_record_t ap_info;
+        esp_err_t wifi_status = esp_wifi_sta_get_ap_info(&ap_info);
+        if (wifi_status != ESP_OK) {
+            ESP_LOGE(TAG, "[ERROR] WiFi not connected: %s", esp_err_to_name(wifi_status));
+            return -1;
+        }
+
+        ESP_LOGI(TAG, "[WIFI] WiFi connected to: %s (RSSI: %d dBm)", ap_info.ssid, ap_info.rssi);
+
+        // Get and log IP address
+        esp_netif_ip_info_t ip_info;
+        esp_netif_t *netif = esp_netif_get_handle_from_ifkey("WIFI_STA_DEF");
+        if (netif && esp_netif_get_ip_info(netif, &ip_info) == ESP_OK) {
+            ESP_LOGI(TAG, "[WEB] IP Address: " IPSTR, IP2STR(&ip_info.ip));
+            ESP_LOGI(TAG, "[WEB] Gateway: " IPSTR, IP2STR(&ip_info.gw));
+            ESP_LOGI(TAG, "[WEB] Netmask: " IPSTR, IP2STR(&ip_info.netmask));
+        }
+    } else {
+        // SIM mode - check PPP connection
+        if (!a7670c_ppp_is_connected()) {
+            ESP_LOGE(TAG, "[ERROR] PPP not connected");
+            return -1;
+        }
+
+        // Get and log PPP IP address
+        char ip_str[32];
+        if (a7670c_ppp_get_ip_info(ip_str, sizeof(ip_str)) == ESP_OK) {
+            ESP_LOGI(TAG, "[SIM] PPP IP Address: %s", ip_str);
+        }
+
+        // Get stored signal strength
+        signal_strength_t signal;
+        if (a7670c_get_stored_signal_strength(&signal) == ESP_OK) {
+            ESP_LOGI(TAG, "[SIM] Signal: %d dBm (%s), Operator: %s",
+                     signal.rssi_dbm, signal.quality ? signal.quality : "Unknown", signal.operator_name);
+        }
     }
     
     // Test basic internet connectivity
