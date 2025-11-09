@@ -7721,28 +7721,8 @@ static esp_err_t api_rtc_set_handler(httpd_req_t *req) {
 // Start AP mode for normal operation
 esp_err_t web_config_start_ap_mode(void)
 {
-    // Check network mode - only initialize WiFi if using WiFi mode
-    if (g_system_config.network_mode == NETWORK_MODE_SIM) {
-        ESP_LOGI(TAG, "Network mode: SIM Module - Skipping WiFi initialization");
-        ESP_LOGI(TAG, "💡 WiFi will only start if you trigger web config mode (GPIO pin)");
-
-        // Still need to initialize netif and event loop for PPP
-        esp_err_t ret = esp_netif_init();
-        if (ret != ESP_OK && ret != ESP_ERR_INVALID_STATE) {
-            ESP_LOGE(TAG, "Failed to initialize netif: %s", esp_err_to_name(ret));
-            return ret;
-        }
-
-        ret = esp_event_loop_create_default();
-        if (ret != ESP_OK && ret != ESP_ERR_INVALID_STATE) {
-            ESP_LOGE(TAG, "Failed to create event loop: %s", esp_err_to_name(ret));
-            return ret;
-        }
-
-        return ESP_OK;  // Skip WiFi initialization
-    }
-
-    ESP_LOGI(TAG, "Starting WiFi in STA mode for operation");
+    ESP_LOGI(TAG, "Initializing WiFi infrastructure (network mode: %s)",
+             g_system_config.network_mode == NETWORK_MODE_WIFI ? "WiFi" : "SIM Module");
 
     // Initialize WiFi infrastructure - allow ESP_ERR_INVALID_STATE for reinit
     esp_err_t ret = esp_netif_init();
@@ -7806,19 +7786,25 @@ esp_err_t web_config_start_ap_mode(void)
         return ret;
     }
 
-    // Start WiFi - this must succeed for AP mode to work later
-    ret = esp_wifi_start();
-    if (ret != ESP_OK) {
-        ESP_LOGE(TAG, "Failed to start WiFi: %s", esp_err_to_name(ret));
-        return ret;
-    }
+    // Only start WiFi in WiFi mode - in SIM mode, leave it initialized but stopped
+    if (g_system_config.network_mode == NETWORK_MODE_WIFI) {
+        ESP_LOGI(TAG, "Starting WiFi in STA mode...");
+        ret = esp_wifi_start();
+        if (ret != ESP_OK) {
+            ESP_LOGE(TAG, "Failed to start WiFi: %s", esp_err_to_name(ret));
+            return ret;
+        }
 
-    // Log connection status
-    if (strlen(g_system_config.wifi_ssid) == 0) {
-        ESP_LOGW(TAG, "WiFi SSID not configured - WiFi started but not connecting");
-        ESP_LOGI(TAG, "💡 Use GPIO trigger to start web config AP mode");
+        // Log connection status
+        if (strlen(g_system_config.wifi_ssid) == 0) {
+            ESP_LOGW(TAG, "WiFi SSID not configured - WiFi started but not connecting");
+            ESP_LOGI(TAG, "💡 Use GPIO trigger to start web config AP mode");
+        } else {
+            ESP_LOGI(TAG, "Connecting to WiFi SSID: %s", g_system_config.wifi_ssid);
+        }
     } else {
-        ESP_LOGI(TAG, "Connecting to WiFi SSID: %s", g_system_config.wifi_ssid);
+        ESP_LOGI(TAG, "SIM mode: WiFi driver initialized but not started");
+        ESP_LOGI(TAG, "💡 WiFi will start when you trigger web config mode (GPIO pin)");
     }
 
     return ESP_OK;
@@ -8309,8 +8295,21 @@ esp_err_t web_config_start_server_only(void)
         ESP_LOGE(TAG, "Failed to set AP config: %s", esp_err_to_name(ret));
         return ret;
     }
-    
-    // Start WiFi (this will start both STA and AP)
+
+    // Start WiFi if not already started (SIM mode scenario)
+    // In WiFi mode, WiFi is already running in STA mode
+    // We need to stop it first, then start in AP+STA mode
+    wifi_mode_t current_mode;
+    esp_wifi_get_mode(&current_mode);
+
+    if (current_mode == WIFI_MODE_STA) {
+        // WiFi already started in STA mode, need to stop and restart in AP+STA
+        ESP_LOGI(TAG, "Stopping WiFi STA mode to switch to AP+STA");
+        esp_wifi_stop();
+        vTaskDelay(pdMS_TO_TICKS(500));  // Wait for stop to complete
+    }
+
+    // Now start WiFi in AP+STA mode
     ret = esp_wifi_start();
     if (ret != ESP_OK && ret != ESP_ERR_WIFI_NOT_STOPPED) {
         ESP_LOGE(TAG, "Failed to start WiFi: %s", esp_err_to_name(ret));
