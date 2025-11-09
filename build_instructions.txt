@@ -1,0 +1,54 @@
+ESP32 Modbus IoT Gateway - Build Instructions
+=============================================
+
+## IMPORTANT: Build from Correct Directory
+
+The initial CMake error occurred because the build was run from the wrong directory.
+You must build from the project directory, NOT from its parent directory.
+
+## Fixed Build Process
+
+### Option 1: Using ESP-IDF Command Prompt (Recommended)
+1. Open "ESP-IDF 5.5 CMD" from Windows Start Menu
+2. Navigate to project directory:
+   cd "C:\Users\chath\OneDrive\Documents\Python code\modbus_iot_gateway_stable final"
+3. Clean previous build (optional):
+   idf.py fullclean
+4. Build the project:
+   idf.py build
+
+### Option 2: Using PowerShell
+1. Open PowerShell as Administrator
+2. Navigate to project directory:
+   cd "C:\Users\chath\OneDrive\Documents\Python code\modbus_iot_gateway_stable final"
+3. Run the PowerShell build script:
+   .\build_esp32.ps1
+
+### Option 3: Using Command Prompt
+1. Open Command Prompt (cmd.exe)
+2. Navigate to project directory:
+   cd /d "C:\Users\chath\OneDrive\Documents\Python code\modbus_iot_gateway_stable final"
+3. Run the batch build script:
+   build_esp32.bat
+
+## Build Output Files
+After successful build, you will find:
+- Main application binary: build/mqtt_azure_minimal.bin
+- Bootloader: build/bootloader/bootloader.bin
+- Partition table: build/partition_table/partition-table.bin
+
+## Flash to ESP32
+Once build is successful, flash using:
+   idf.py -p COM3 flash monitor
+   (Replace COM3 with your actual ESP32 port)
+
+## Troubleshooting
+- If you see "MSys/Mingw is not supported" error: Use ESP-IDF Command Prompt instead of Git Bash
+- If CMake parse error: Ensure you're in the correct project directory
+- Check that ESP-IDF v5.5.1 is properly installed in C:\Espressif\frameworks\esp-idf-v5.5.1
+
+## Current Build Status
+✓ Build directory exists with previous build from Sep 27
+✓ Project structure is correct
+✓ ESP-IDF v5.5.1 is installed
+→ Recommend fresh rebuild using Option 1 above

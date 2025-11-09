@@ -1,0 +1,36 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(grep:*)",
+      "Bash(rg:*)",
+      "Bash(find:*)",
+      "Bash(ls:*)",
+      "Read(/C:\\Users\\fluxg\\Documents\\Python code\\modbus_iot_gateway_stable_prefinal\\modbus_iot_gateway_stable 13\\modbus_iot_gateway_stable 3\\modbus_iot_gateway_stable\\main/**)",
+      "Read(/C:\\Users\\fluxg\\Documents\\Python code\\modbus_iot_gateway_stable_prefinal\\modbus_iot_gateway_stable 13\\modbus_iot_gateway_stable 3\\modbus_iot_gateway_stable\\main/**)",
+      "Read(/C:\\Users\\fluxg\\Documents\\Python code\\modbus_iot_gateway_stable_prefinal\\modbus_iot_gateway_stable 13\\modbus_iot_gateway_stable 3\\modbus_iot_gateway_stable\\main/**)",
+      "Read(/C:\\Users\\fluxg\\Documents\\Python code\\modbus_iot_gateway_stable_prefinal\\modbus_iot_gateway_stable 13\\modbus_iot_gateway_stable 3\\modbus_iot_gateway_stable\\main/**)",
+      "Read(/C:\\Users\\fluxg\\Documents\\Python code\\modbus_iot_gateway_stable_prefinal\\modbus_iot_gateway_stable 13\\modbus_iot_gateway_stable 3\\modbus_iot_gateway_stable\\main/**)",
+      "Read(/C:\\Users\\fluxg\\Documents\\Python code\\modbus_iot_gateway_stable_prefinal\\modbus_iot_gateway_stable 13\\modbus_iot_gateway_stable 3\\modbus_iot_gateway_stable\\main/**)",
+      "Bash(idf.py build:*)",
+      "Bash(cmd.exe:*)",
+      "Bash(powershell -Command \"Get-PnpDevice -PresentOnly | Where-Object { $_Class -eq ''Ports'' } | Select-Object FriendlyName, InstanceID | Format-List\")",
+      "Read(//c/Users/chath/OneDrive/Documents/Python code/expense tracker/**)",
+      "Bash(dir:*)",
+      "Bash(if not exist skills mkdir skills)",
+      "Bash(mkdir:*)",
+      "Read(//c/Users/chath/OneDrive/Documents/Python code/**)",
+      "Bash(git add:*)",
+      "Bash(git commit:*)",
+      "Bash(git push:*)",
+      "Bash(md5sum:*)",
+      "Bash(cat:*)",
+      "Bash(chmod:*)",
+      "Bash(bash update_energy_quality.sh:*)",
+      "Bash(python3:*)",
+      "Bash(bash:*)",
+      "Bash(awk:*)",
+      "Bash(git init:*)"
+    ],
+    "deny": []
+  }
+}

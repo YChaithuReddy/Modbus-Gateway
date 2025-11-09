@@ -1,0 +1,46 @@
+# ESP-IDF Build artifacts
+build/
+*.bin
+*.elf
+*.map
+
+# Dependencies
+dependencies.lock
+managed_components/
+
+# SDK Configuration
+sdkconfig.old
+sdkconfig.defaults.old
+
+# Python cache
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+
+# Editor/IDE files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# OS files
+Thumbs.db
+desktop.ini
+
+# Logs
+*.log
+
+# Temporary files
+*.tmp
+*.bak
+*.backup
+*_backup.c
+*_backup.h
+*.old
+
+# Keep these important files (override wildcards above)
+!sdkconfig
+!partitions_4mb.csv

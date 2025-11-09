@@ -1,0 +1,37 @@
+SUGGESTED CODE FIX FOR LEVEL SENSOR SCALE FACTOR
+==================================================
+
+In file: main/web_config.c
+
+CHANGE LINE 2896:
+FROM:
+"formData+='&sensor_type=Level&sensor_height='+sensorHeight+'&max_water_level='+maxWaterLevel+'&scale_factor=1.0&meter_type=';"
+
+TO:
+"formData+='&sensor_type=Level&sensor_height='+sensorHeight+'&max_water_level='+maxWaterLevel+'&scale_factor=0.001&meter_type=';"
+
+This will set the default scale_factor to 0.001 for Level sensors when saving from the web interface.
+
+ALSO CHANGE LINE 1823:
+FROM:
+"formHtml += '<label>Scale Factor:</label><input type=\"number\" name=\"sensor_' + sensorId + '_scale_factor\" value=\"1.0\" step=\"any\" style=\"width:100px\" title=\"Multiplier applied to raw sensor value\"> <span style=\"color:#666;font-size:11px\">(e.g., 0.1 for /10, 1.0 for no scaling)</span><br>';"
+
+TO:
+"formHtml += '<label>Scale Factor:</label><input type=\"number\" name=\"sensor_' + sensorId + '_scale_factor\" value=\"0.001\" step=\"any\" style=\"width:100px\" title=\"Multiplier applied to raw sensor value\"> <span style=\"color:#666;font-size:11px\">(0.001 for mm to meters, 1.0 for no scaling)</span><br>';"
+
+This will set the default displayed value to 0.001 for Level sensors in the web form.
+
+After making these changes:
+1. Rebuild the firmware
+2. Flash to ESP32
+3. Re-configure your sensor through the web interface
+
+OR you can simply update the configuration through the web interface without code changes:
+1. Enter config mode (GPIO 34 to ground)
+2. Connect to WiFi AP "ModbusIoT-Config"
+3. Go to http://192.168.4.1
+4. Edit your Level sensor
+5. Set Scale Factor to 0.001
+6. Set Sensor Height to 2.228
+7. Set Max Water Level to 2.228
+8. Save and restart

@@ -1,0 +1,95 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Debug RS485 Test</title>
+</head>
+<body>
+    <h2>Manual RS485 Test</h2>
+    <form id="rs485TestForm">
+        <label>Slave ID:</label>
+        <input type="number" id="slave_id" value="1" min="1" max="247"><br><br>
+        
+        <label>Register Address:</label>
+        <input type="number" id="register_address" value="8" min="0" max="65535"><br><br>
+        
+        <label>Quantity (registers):</label>
+        <input type="number" id="quantity" value="2" min="1" max="4"><br><br>
+        
+        <label>Data Type:</label>
+        <select id="data_type">
+            <option value="32-bit INT, Byte order 4,3,2,1">32-bit INT, Byte order 4,3,2,1</option>
+            <option value="UINT16_BE">UINT16 Big Endian</option>
+            <option value="UINT32_ABCD">UINT32 ABCD</option>
+            <option value="FLOAT32_ABCD">FLOAT32 ABCD</option>
+        </select><br><br>
+        
+        <label>Baud Rate:</label>
+        <select id="baud_rate">
+            <option value="9600">9600 bps</option>
+            <option value="19200">19200 bps</option>
+            <option value="38400">38400 bps</option>
+        </select><br><br>
+        
+        <label>Parity:</label>
+        <select id="parity">
+            <option value="None">None</option>
+            <option value="Even">Even</option>
+            <option value="Odd">Odd</option>
+        </select><br><br>
+        
+        <label>Scale Factor:</label>
+        <input type="number" id="scale_factor" value="1.0" step="0.001"><br><br>
+        
+        <button type="button" onclick="testRS485Direct()">TEST RS485 DIRECT</button>
+    </form>
+    
+    <div id="test_result" style="margin-top: 20px; padding: 10px; border: 1px solid #ccc;">
+        Results will appear here...
+    </div>
+
+    <script>
+    function testRS485Direct() {
+        const resultDiv = document.getElementById('test_result');
+        resultDiv.innerHTML = '<div style="background:#fff3cd;padding:10px;">Testing RS485 communication...</div>';
+        
+        // Get form values
+        const slaveId = document.getElementById('slave_id').value;
+        const regAddr = document.getElementById('register_address').value;
+        const quantity = document.getElementById('quantity').value;
+        const dataType = document.getElementById('data_type').value;
+        const baudRate = document.getElementById('baud_rate').value;
+        const parity = document.getElementById('parity').value;
+        const scaleFactor = document.getElementById('scale_factor').value;
+        
+        // Build request data
+        const data = `slave_id=${slaveId}&register_address=${regAddr}&quantity=${quantity}&data_type=${encodeURIComponent(dataType)}&baud_rate=${baudRate}&parity=${parity}&scale_factor=${scaleFactor}&sensor_type=Flow-Meter`;
+        
+        console.log('Sending test data:', data);
+        
+        // Send to ESP32
+        fetch('/test_rs485', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/x-www-form-urlencoded'
+            },
+            body: data
+        })
+        .then(response => {
+            console.log('Response status:', response.status);
+            if (!response.ok) {
+                throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+            }
+            return response.text();
+        })
+        .then(htmlData => {
+            console.log('Response received');
+            resultDiv.innerHTML = htmlData;
+        })
+        .catch(error => {
+            console.error('Error:', error);
+            resultDiv.innerHTML = `<div style="background:#f8d7da;padding:10px;color:#721c24;"><strong>ERROR:</strong><br>${error.message}</div>`;
+        });
+    }
+    </script>
+</body>
+</html>
