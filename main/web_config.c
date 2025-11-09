@@ -6203,20 +6203,31 @@ static esp_err_t save_water_quality_sensor_handler(httpd_req_t *req)
 }
 
 
+// WiFi reconnection state
+static int s_wifi_retry_count = 0;
+static const int MAX_WIFI_RETRY = 5;
+
 // WiFi event handler
 static void wifi_event_handler(void* arg, esp_event_base_t event_base,
                                int32_t event_id, void* event_data)
 {
     if (event_base == WIFI_EVENT && event_id == WIFI_EVENT_STA_START) {
         esp_wifi_connect();
+        s_wifi_retry_count = 0;
     } else if (event_base == WIFI_EVENT && event_id == WIFI_EVENT_STA_DISCONNECTED) {
-        ESP_LOGI(TAG, "WiFi disconnected, trying to reconnect...");
-        // Add delay to prevent rapid reconnection attempts that can block tasks
-        vTaskDelay(pdMS_TO_TICKS(2000)); // 2-second delay before reconnection
-        esp_wifi_connect();
+        if (s_wifi_retry_count < MAX_WIFI_RETRY) {
+            ESP_LOGI(TAG, "WiFi disconnected, retry %d/%d", s_wifi_retry_count + 1, MAX_WIFI_RETRY);
+            // IMPORTANT: Never use vTaskDelay() in event handlers - it blocks the WiFi task!
+            // The event loop will handle reconnection timing automatically
+            esp_wifi_connect();
+            s_wifi_retry_count++;
+        } else {
+            ESP_LOGW(TAG, "WiFi connection failed after %d attempts", MAX_WIFI_RETRY);
+        }
     } else if (event_base == IP_EVENT && event_id == IP_EVENT_STA_GOT_IP) {
         ip_event_got_ip_t* event = (ip_event_got_ip_t*) event_data;
         ESP_LOGI(TAG, "Got IP: " IPSTR, IP2STR(&event->ip_info.ip));
+        s_wifi_retry_count = 0;  // Reset retry counter on successful connection
     }
 }
 

@@ -192,9 +192,31 @@ static void uart_rx_task(void *pvParameters) {
 
 // Initialize modem for PPP
 static esp_err_t init_modem_for_ppp(void) {
-    // Test communication
-    if (send_at_command("AT", "OK", 1000) != ESP_OK) {
-        ESP_LOGE(TAG, "Modem not responding");
+    // Test communication with retry logic (modem might be in unknown state after reboot)
+    ESP_LOGI(TAG, "🔍 Testing modem communication...");
+
+    int retry_count = 0;
+    esp_err_t ret = ESP_FAIL;
+
+    // Try multiple times with increasing delays - modem might be already on or in PPP mode
+    for (retry_count = 0; retry_count < 3 && ret != ESP_OK; retry_count++) {
+        if (retry_count > 0) {
+            ESP_LOGW(TAG, "   Retry %d/3: Sending attention command...", retry_count);
+            // Send multiple AT commands to break out of any state
+            uart_flush(modem_config.uart_num);
+            vTaskDelay(pdMS_TO_TICKS(100));
+        }
+
+        ret = send_at_command("AT", "OK", 1000);
+
+        if (ret != ESP_OK && retry_count < 2) {
+            vTaskDelay(pdMS_TO_TICKS(500));
+        }
+    }
+
+    if (ret != ESP_OK) {
+        ESP_LOGE(TAG, "Modem not responding after %d attempts", retry_count);
+        ESP_LOGW(TAG, "💡 Modem might need hardware reset or power cycle");
         return ESP_FAIL;
     }
     ESP_LOGI(TAG, "✓ Modem OK");
