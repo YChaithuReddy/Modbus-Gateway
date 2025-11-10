@@ -1355,8 +1355,9 @@ static void mqtt_task(void *pvParameters)
         if (!mqtt_connected) {
             ESP_LOGW(TAG, "[WARN] MQTT disconnected, checking connection...");
         }
-        
-        vTaskDelay(pdMS_TO_TICKS(1000));
+
+        // Check every 10 seconds to reduce power consumption
+        vTaskDelay(pdMS_TO_TICKS(10000));
     }
     
     // Task exiting normally
@@ -1704,6 +1705,20 @@ void app_main(void) {
         esp_err_t rtc_ret = ds3231_init();
         if (rtc_ret == ESP_OK) {
             ESP_LOGI(TAG, "[RTC] ✅ RTC initialized successfully");
+
+            // Sync system time FROM RTC immediately (before network connects)
+            // This ensures timestamps are accurate even if network fails
+            rtc_ret = ds3231_sync_system_time();
+            if (rtc_ret == ESP_OK) {
+                time_t now = time(NULL);
+                struct tm timeinfo;
+                gmtime_r(&now, &timeinfo);
+                char time_str[32];
+                strftime(time_str, sizeof(time_str), "%Y-%m-%d %H:%M:%S", &timeinfo);
+                ESP_LOGI(TAG, "[RTC] ✅ System time synced from RTC: %s UTC", time_str);
+            } else {
+                ESP_LOGW(TAG, "[RTC] ⚠️ Could not sync system time from RTC");
+            }
         } else {
             ESP_LOGW(TAG, "[RTC] ⚠️ RTC initialization failed: %s (optional feature - continuing)",
                      esp_err_to_name(rtc_ret));
