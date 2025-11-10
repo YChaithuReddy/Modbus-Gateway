@@ -297,28 +297,32 @@ esp_err_t sensor_test_live(const sensor_config_t *sensor, sensor_test_result_t *
     }
     strncpy(result->raw_hex, hex_buf, sizeof(result->raw_hex) - 1);
 
-    // Special handling for ZEST sensors
+    // Special handling for ZEST sensors (AquaGen Flow Meter format)
     if (strcmp(sensor->sensor_type, "ZEST") == 0 && reg_count >= 4) {
-        // ZEST reads 4 registers:
-        // Registers [0,1]: 007B 95C7 → INT32 Big Endian (ABCD)
-        // Registers [2,3]: 007A 0000 → INT32 Little Endian Byte Swap (DCBA)
-        // Final value = sum of both converted values
-        
-        // First 2 registers as UINT32 Big Endian (ABCD)
-        uint32_t uint32_be = ((uint32_t)registers[0] << 16) | registers[1];
-        double value1 = (double)uint32_be * sensor->scale_factor;
-        
-        // Next 2 registers as UINT32 Little Endian Byte Swap (DCBA) 
-        uint32_t uint32_le_swap = ((uint32_t)registers[3] << 16) | registers[2];
-        double value2 = (double)uint32_le_swap * 0.001 * sensor->scale_factor;
-        
-        // Sum the two values
-        result->scaled_value = value1 + value2;
-        result->raw_value = uint32_be; // Store first part as raw value
-        
-        ESP_LOGI(TAG, "ZEST Calculation: UINT32_BE=0x%08lX(%lu) + UINT32_LE_SWAP=0x%08lX(%lu×0.001=%.3f) = %.6f", 
-                 (unsigned long)uint32_be, (unsigned long)uint32_be, 
-                 (unsigned long)uint32_le_swap, (unsigned long)uint32_le_swap, (double)uint32_le_swap * 0.001, result->scaled_value);
+        // ZEST reads 4 registers (per AquaGen Modbus documentation):
+        // Register [0] @ 0x1019: Cumulative Flow Integer part (16-bit UINT)
+        // Register [1]: Unused (0x0000)
+        // Registers [2,3] @ 0x101B-101C: Cumulative Flow Decimal part (FLOAT32, IEEE 754 Big Endian)
+        // Example: 43.675 m³ = 43 (register[0]) + 0.675 (float in registers[2-3])
+
+        // First register contains the integer part (16-bit value)
+        uint32_t integer_part_raw = (uint32_t)registers[0];
+        double integer_part = (double)integer_part_raw;
+
+        // Registers 2-3 contain decimal part as 32-bit FLOAT Big Endian (ABCD)
+        // Convert to IEEE 754 float: registers[2] is HIGH word, registers[3] is LOW word
+        uint32_t float_bits = ((uint32_t)registers[2] << 16) | registers[3];
+        float decimal_part_float;
+        memcpy(&decimal_part_float, &float_bits, sizeof(float));
+        double decimal_part = (double)decimal_part_float;
+
+        // Sum integer and decimal parts, then apply scale factor
+        result->scaled_value = (integer_part + decimal_part) * sensor->scale_factor;
+        result->raw_value = integer_part_raw; // Store integer part as raw value
+
+        ESP_LOGI(TAG, "ZEST Calculation: Integer=0x%04X(%lu) + Decimal(FLOAT)=0x%08lX(%.6f) = %.6f",
+                 (unsigned int)integer_part_raw, (unsigned long)integer_part_raw,
+                 (unsigned long)float_bits, decimal_part, result->scaled_value);
     } else {
         // Convert the data using standard conversion
         esp_err_t conv_result = convert_modbus_data(registers, reg_count,
