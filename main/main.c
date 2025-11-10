@@ -1424,7 +1424,8 @@ static void telemetry_task(void *pvParameters)
             }
         }
         
-        if (should_send_telemetry && mqtt_connected) {
+        if (should_send_telemetry) {
+            // Always call send_telemetry() - it will handle SD caching if MQTT is disconnected
             bool telemetry_success = send_telemetry();
             // Update last_send_time AFTER successful telemetry call
             if (telemetry_success && first_telemetry_sent) {
@@ -1434,9 +1435,6 @@ static void telemetry_task(void *pvParameters)
             } else if (!telemetry_success) {
                 ESP_LOGW(TAG, "[WARN] Telemetry failed - timestamp not updated, will retry on next interval");
             }
-        } else if (should_send_telemetry && !mqtt_connected) {
-            ESP_LOGW(TAG, "[WARN] Skipping telemetry - MQTT not connected");
-            // Don't update last_send_time for failed attempts
         }
         
         vTaskDelay(pdMS_TO_TICKS(5000)); // Increased to 5 seconds to prevent timing edge cases
