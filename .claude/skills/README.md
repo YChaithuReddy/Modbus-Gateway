@@ -1,10 +1,99 @@
-# Web Design & UI Skills Documentation
+# Skills Documentation - ESP32 Modbus IoT Gateway
 
-Complete reference guide for modern web design, UI/UX patterns, and frontend development for the ESP32 Modbus IoT Gateway project.
+Complete reference guide for web design, UI/UX patterns, hardware, firmware, and system architecture for the ESP32 Modbus IoT Gateway project.
 
 ## 📚 Skills Library
 
-### 1. [UI Design](./ui-design.md) ⭐
+---
+
+## 🔧 Hardware & Firmware Skills
+
+### 0. [ESP32 Modbus Gateway - Complete Technical Reference](./esp32-modbus-gateway.md) 🌟🌟🌟
+**Master the entire ESP32 Modbus IoT Gateway system**
+
+Learn:
+- Hardware architecture (ESP32, RS485, SD card, RTC, SIM module)
+- GPIO pin assignments and peripheral connections
+- Modbus RTU protocol implementation (16 data formats)
+- Azure IoT Hub integration with MQTT/TLS
+- Sensor types and configuration (Level, Rain Gauge, Water Quality, Energy)
+- SD card caching system for offline operation
+- RTC timekeeping with DS3231
+- FreeRTOS task architecture and priorities
+- Web configuration interface (8,360 lines)
+- Build, deployment, and troubleshooting
+- Security best practices
+- Performance optimization
+- Production deployment checklist
+
+**Use this when**:
+- Developing or modifying firmware
+- Adding new sensor types or protocols
+- Troubleshooting hardware or communication issues
+- Integrating with Azure IoT Hub
+- Understanding system architecture
+- Deploying to production
+- Training new team members
+
+---
+
+### 1. [Modbus RTU Protocol - Complete Implementation Guide](./modbus-protocol-guide.md) ⭐⭐
+**Deep dive into Modbus RTU for industrial communication**
+
+Learn:
+- Modbus RTU frame structure and timing
+- Function codes (0x03, 0x04, 0x06, 0x10)
+- CRC16 calculation and validation
+- 16 data format conversions (UINT16, INT32, FLOAT32, byte orders)
+- RS485 hardware control (RTS direction switching)
+- UART configuration for Modbus
+- Complete implementation examples in C
+- Error handling and exception codes
+- Performance optimization techniques
+- Troubleshooting communication issues
+- Best practices for industrial networks
+
+**Use this when**:
+- Implementing Modbus communication
+- Adding support for new Modbus devices
+- Debugging protocol errors (CRC, timeouts, exceptions)
+- Understanding data format conversions
+- Optimizing Modbus performance
+- Working with multi-drop RS485 networks
+
+---
+
+### 2. [Azure IoT Hub Integration - Complete Guide](./azure-iot-hub-integration.md) ⭐⭐
+**Master Azure IoT Hub connectivity for ESP32**
+
+Learn:
+- Azure IoT Hub architecture and concepts
+- Device registration and credential management
+- MQTT protocol for Azure (topics, QoS, TLS)
+- SAS token generation and refresh
+- ESP-IDF MQTT client implementation
+- Telemetry publishing (JSON format)
+- Cloud-to-device message handling
+- Connection management and reconnection strategies
+- Monitoring and diagnostics
+- Troubleshooting connection issues
+- Security best practices
+- Advanced features (Device Twins, Direct Methods)
+
+**Use this when**:
+- Connecting ESP32 to Azure IoT Hub
+- Implementing device-to-cloud telemetry
+- Handling cloud-to-device commands
+- Troubleshooting Azure connectivity
+- Understanding SAS authentication
+- Optimizing cloud communication
+- Implementing offline caching
+
+---
+
+## 🎨 Web Design & UI Skills
+
+### 3. [UI Design](./ui-design.md) ⭐
 **Master modern web interface design principles**
 
 Learn:
@@ -20,7 +109,7 @@ Learn:
 
 ---
 
-### 2. [CSS Layout & Alignment](./css-layout-alignment.md) ⭐
+### 4. [CSS Layout & Alignment](./css-layout-alignment.md) ⭐
 **Master Flexbox, Grid, and positioning**
 
 Learn:
@@ -36,7 +125,7 @@ Learn:
 
 ---
 
-### 3. [Modern Web Patterns](./modern-web-patterns.md) ⭐
+### 5. [Modern Web Patterns](./modern-web-patterns.md) ⭐
 **Reusable component patterns for common UI challenges**
 
 Learn:
@@ -55,7 +144,7 @@ Learn:
 
 ---
 
-### 4. [Color Theory & Typography](./color-typography.md) ⭐
+### 6. [Color Theory & Typography](./color-typography.md) ⭐
 **Create beautiful, readable, accessible designs**
 
 Learn:
@@ -74,7 +163,7 @@ Learn:
 
 ---
 
-### 5. [Responsive Design](./responsive-design.md) ⭐
+### 7. [Responsive Design](./responsive-design.md) ⭐
 **Build interfaces that work on all devices**
 
 Learn:
