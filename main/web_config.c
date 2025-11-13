@@ -4535,8 +4535,8 @@ static esp_err_t test_sensor_handler(httpd_req_t *req)
             
             // Build the comprehensive data format table
             snprintf(format_table, 6000,
-                     "<div style='background:#e8f5e8;padding:8px;border-radius:5px;margin:5px 0'>"
-                     "<h4 style='color:green;margin:0 0 8px 0'>✓ RS485 Success - %d Registers Read</h4>", reg_count);
+                     "<div style='background:#d4edda;padding:15px;border-radius:8px;margin:10px 0;border:1px solid #c3e6cb;box-shadow:0 2px 4px rgba(0,0,0,0.1)'>"
+                     "<h4 style='color:#155724;margin:0 0 10px 0;font-weight:bold'>✓ RS485 Success - %d Registers Read</h4>", reg_count);
             
             // Add primary configured value first
             double primary_value = 0.0;
@@ -4681,9 +4681,10 @@ static esp_err_t test_sensor_handler(httpd_req_t *req)
             strcat(format_table, "<br>");
             
             // Add comprehensive format interpretations table
-            strcat(format_table, 
-                   "<table style='width:100%;font-size:9px;border-collapse:collapse'>"
-                   "<tr style='background:#ddd'><th colspan='4'><b>All ScadaCore Data Format Interpretations</b></th></tr>");
+            strcat(format_table,
+                   "<div style='overflow-x:auto;margin-top:15px'>"
+                   "<table style='width:100%;font-size:11px;border-collapse:collapse;min-width:320px'>"
+                   "<tr style='background:#495057;color:white'><th colspan='4' style='padding:10px;font-weight:bold;text-align:center'>ALL SCADACORE DATA FORMAT INTERPRETATIONS</th></tr>");
             
             // 16-bit formats (if 1+ registers)
             if (reg_count >= 1) {
@@ -4715,25 +4716,25 @@ static esp_err_t test_sensor_handler(httpd_req_t *req)
                 
                 // FLOAT32 comprehensive variations - ScadaCore compatible
                 snprintf(temp_str, sizeof(temp_str),
-                         "<tr style='background:#e8f4fd'><th colspan='4'>FLOAT32 Format Interpretations</th></tr>"
-                         "<tr><td><strong>FLOAT32_1234 (ABCD):</strong></td><td>%.6f</td><td><strong>FLOAT32_4321 (DCBA):</strong></td><td>%.6f</td></tr>"
-                         "<tr style='background:#f8f8f8'><td><strong>FLOAT32_2143 (BADC):</strong></td><td>%.6f</td><td><strong>FLOAT32_3412 (CDAB):</strong></td><td>%.6f</td></tr>",
+                         "<tr style='background:#0d6efd;color:white'><th colspan='4' style='padding:8px;font-weight:bold'>FLOAT32 FORMAT INTERPRETATIONS</th></tr>"
+                         "<tr><td style='padding:6px;word-break:break-word'><strong>FLOAT32_1234 (ABCD):</strong></td><td style='padding:6px'>%.6f</td><td style='padding:6px;word-break:break-word'><strong>FLOAT32_4321 (DCBA):</strong></td><td style='padding:6px'>%.6f</td></tr>"
+                         "<tr style='background:#f8f8f8'><td style='padding:6px;word-break:break-word'><strong>FLOAT32_2143 (BADC):</strong></td><td style='padding:6px'>%.6f</td><td style='padding:6px;word-break:break-word'><strong>FLOAT32_3412 (CDAB):</strong></td><td style='padding:6px'>%.6f</td></tr>",
                          float_1234_abcd, float_4321_dcba, float_2143_badc, float_3412_cdab);
                 strcat(format_table, temp_str);
-                
+
                 // INT32 comprehensive variations - ScadaCore compatible
                 snprintf(temp_str, sizeof(temp_str),
-                         "<tr style='background:#e8f4e8'><th colspan='4'>INT32 Format Interpretations</th></tr>"
-                         "<tr><td><strong>INT32_1234 (ABCD):</strong></td><td>%ld</td><td><strong>INT32_4321 (DCBA):</strong></td><td>%ld</td></tr>"
-                         "<tr style='background:#f8f8f8'><td><strong>INT32_2143 (BADC):</strong></td><td>%ld</td><td><strong>INT32_3412 (CDAB):</strong></td><td>%ld</td></tr>",
+                         "<tr style='background:#28a745;color:white'><th colspan='4' style='padding:8px;font-weight:bold'>INT32 FORMAT INTERPRETATIONS</th></tr>"
+                         "<tr><td style='padding:6px;word-break:break-word'><strong>INT32_1234 (ABCD):</strong></td><td style='padding:6px'>%ld</td><td style='padding:6px;word-break:break-word'><strong>INT32_4321 (DCBA):</strong></td><td style='padding:6px'>%ld</td></tr>"
+                         "<tr style='background:#f8f8f8'><td style='padding:6px;word-break:break-word'><strong>INT32_2143 (BADC):</strong></td><td style='padding:6px'>%ld</td><td style='padding:6px;word-break:break-word'><strong>INT32_3412 (CDAB):</strong></td><td style='padding:6px'>%ld</td></tr>",
                          (int32_t)val_1234_abcd, (int32_t)val_4321_dcba, (int32_t)val_2143_badc, (int32_t)val_3412_cdab);
                 strcat(format_table, temp_str);
-                
+
                 // UINT32 comprehensive variations - ScadaCore compatible
                 snprintf(temp_str, sizeof(temp_str),
-                         "<tr style='background:#fff4e8'><th colspan='4'>UINT32 Format Interpretations</th></tr>"
-                         "<tr><td><strong>UINT32_1234 (ABCD):</strong></td><td>%lu</td><td><strong>UINT32_4321 (DCBA):</strong></td><td>%lu</td></tr>"
-                         "<tr style='background:#f8f8f8'><td><strong>UINT32_2143 (BADC):</strong></td><td>%lu</td><td><strong>UINT32_3412 (CDAB):</strong></td><td>%lu</td></tr>",
+                         "<tr style='background:#fd7e14;color:white'><th colspan='4' style='padding:8px;font-weight:bold'>UINT32 FORMAT INTERPRETATIONS</th></tr>"
+                         "<tr><td style='padding:6px;word-break:break-word'><strong>UINT32_1234 (ABCD):</strong></td><td style='padding:6px'>%lu</td><td style='padding:6px;word-break:break-word'><strong>UINT32_4321 (DCBA):</strong></td><td style='padding:6px'>%lu</td></tr>"
+                         "<tr style='background:#f8f8f8'><td style='padding:6px;word-break:break-word'><strong>UINT32_2143 (BADC):</strong></td><td style='padding:6px'>%lu</td><td style='padding:6px;word-break:break-word'><strong>UINT32_3412 (CDAB):</strong></td><td style='padding:6px'>%lu</td></tr>",
                          val_1234_abcd, val_4321_dcba, val_2143_badc, val_3412_cdab);
                 strcat(format_table, temp_str);
             }
@@ -4764,25 +4765,25 @@ static esp_err_t test_sensor_handler(httpd_req_t *req)
                 
                 // FLOAT64 comprehensive variations - ScadaCore compatible
                 snprintf(temp_str, sizeof(temp_str),
-                         "<tr style='background:#e8f4fd'><th colspan='4'>FLOAT64 Format Interpretations</th></tr>"
-                         "<tr><td><strong>FLOAT64_12345678 (ABCDEFGH):</strong></td><td>%.3f</td><td><strong>FLOAT64_87654321 (HGFEDCBA):</strong></td><td>%.3f</td></tr>"
-                         "<tr style='background:#f8f8f8'><td><strong>FLOAT64_21436587 (BADCFEHG):</strong></td><td>%.3f</td><td><strong>FLOAT64_78563412 (GHEFCDAB):</strong></td><td>%.3f</td></tr>",
+                         "<tr style='background:#6610f2;color:white'><th colspan='4' style='padding:8px;font-weight:bold'>FLOAT64 FORMAT INTERPRETATIONS</th></tr>"
+                         "<tr><td style='padding:6px;word-break:break-word'><strong>FLOAT64_12345678 (ABCDEFGH):</strong></td><td style='padding:6px;word-break:break-all'>%.3f</td><td style='padding:6px;word-break:break-word'><strong>FLOAT64_87654321 (HGFEDCBA):</strong></td><td style='padding:6px;word-break:break-all'>%.3f</td></tr>"
+                         "<tr style='background:#f8f8f8'><td style='padding:6px;word-break:break-word'><strong>FLOAT64_21436587 (BADCFEHG):</strong></td><td style='padding:6px;word-break:break-all'>%.3f</td><td style='padding:6px;word-break:break-word'><strong>FLOAT64_78563412 (GHEFCDAB):</strong></td><td style='padding:6px;word-break:break-all'>%.3f</td></tr>",
                          float64_12345678, float64_87654321, float64_21436587, float64_78563412);
                 strcat(format_table, temp_str);
-                
+
                 // INT64 comprehensive variations - ScadaCore compatible
                 snprintf(temp_str, sizeof(temp_str),
-                         "<tr style='background:#e8f4e8'><th colspan='4'>INT64 Format Interpretations</th></tr>"
-                         "<tr><td><strong>INT64_12345678 (ABCDEFGH):</strong></td><td>%lld</td><td><strong>INT64_87654321 (HGFEDCBA):</strong></td><td>%lld</td></tr>"
-                         "<tr style='background:#f8f8f8'><td><strong>INT64_21436587 (BADCFEHG):</strong></td><td>%lld</td><td><strong>INT64_78563412 (GHEFCDAB):</strong></td><td>%lld</td></tr>",
+                         "<tr style='background:#20c997;color:white'><th colspan='4' style='padding:8px;font-weight:bold'>INT64 FORMAT INTERPRETATIONS</th></tr>"
+                         "<tr><td style='padding:6px;word-break:break-word'><strong>INT64_12345678 (ABCDEFGH):</strong></td><td style='padding:6px;word-break:break-all'>%lld</td><td style='padding:6px;word-break:break-word'><strong>INT64_87654321 (HGFEDCBA):</strong></td><td style='padding:6px;word-break:break-all'>%lld</td></tr>"
+                         "<tr style='background:#f8f8f8'><td style='padding:6px;word-break:break-word'><strong>INT64_21436587 (BADCFEHG):</strong></td><td style='padding:6px;word-break:break-all'>%lld</td><td style='padding:6px;word-break:break-word'><strong>INT64_78563412 (GHEFCDAB):</strong></td><td style='padding:6px;word-break:break-all'>%lld</td></tr>",
                          (int64_t)val64_12345678, (int64_t)val64_87654321, (int64_t)val64_21436587, (int64_t)val64_78563412);
                 strcat(format_table, temp_str);
-                
+
                 // UINT64 comprehensive variations - ScadaCore compatible
                 snprintf(temp_str, sizeof(temp_str),
-                         "<tr style='background:#fff4e8'><th colspan='4'>UINT64 Format Interpretations</th></tr>"
-                         "<tr><td><strong>UINT64_12345678 (ABCDEFGH):</strong></td><td>%llu</td><td><strong>UINT64_87654321 (HGFEDCBA):</strong></td><td>%llu</td></tr>"
-                         "<tr style='background:#f8f8f8'><td><strong>UINT64_21436587 (BADCFEHG):</strong></td><td>%llu</td><td><strong>UINT64_78563412 (GHEFCDAB):</strong></td><td>%llu</td></tr>",
+                         "<tr style='background:#dc3545;color:white'><th colspan='4' style='padding:8px;font-weight:bold'>UINT64 FORMAT INTERPRETATIONS</th></tr>"
+                         "<tr><td style='padding:6px;word-break:break-word'><strong>UINT64_12345678 (ABCDEFGH):</strong></td><td style='padding:6px;word-break:break-all;max-width:150px'>%llu</td><td style='padding:6px;word-break:break-word'><strong>UINT64_87654321 (HGFEDCBA):</strong></td><td style='padding:6px;word-break:break-all;max-width:150px'>%llu</td></tr>"
+                         "<tr style='background:#f8f8f8'><td style='padding:6px;word-break:break-word'><strong>UINT64_21436587 (BADCFEHG):</strong></td><td style='padding:6px;word-break:break-all;max-width:150px'>%llu</td><td style='padding:6px;word-break:break-word'><strong>UINT64_78563412 (GHEFCDAB):</strong></td><td style='padding:6px;word-break:break-all;max-width:150px'>%llu</td></tr>",
                          val64_12345678, val64_87654321, val64_21436587, val64_78563412);
                 strcat(format_table, temp_str);
                 
@@ -4793,7 +4794,7 @@ static esp_err_t test_sensor_handler(httpd_req_t *req)
                 strcat(format_table, temp_str);
             }
             
-            strcat(format_table, "</table></div>");
+            strcat(format_table, "</table></div></div>");
             
             // Send HTML response directly (avoids JSON escaping issues) 
             httpd_resp_set_type(req, "text/html");
@@ -5512,8 +5513,8 @@ static esp_err_t test_rs485_handler(httpd_req_t *req)
         
         // Build the comprehensive data format table
         snprintf(format_table, 6000,
-                 "<div style='background:#e8f5e8;padding:8px;border-radius:5px;margin:5px 0'>"
-                 "<h4 style='color:green;margin:0 0 8px 0'>✓ RS485 Success - %d Registers Read</h4>", reg_count);
+                 "<div style='background:#d4edda;padding:15px;border-radius:8px;margin:10px 0;border:1px solid #c3e6cb;box-shadow:0 2px 4px rgba(0,0,0,0.1)'>"
+                 "<h4 style='color:#155724;margin:0 0 10px 0;font-weight:bold'>✓ RS485 Success - %d Registers Read</h4>", reg_count);
         
         // Add primary configured value first
         double primary_value = 0.0;
@@ -5594,9 +5595,10 @@ static esp_err_t test_rs485_handler(httpd_req_t *req)
         strcat(format_table, "<br>");
         
         // Add comprehensive format interpretations table
-        strcat(format_table, 
-               "<table style='width:100%;font-size:9px;border-collapse:collapse'>"
-               "<tr style='background:#ddd'><th colspan='4'><b>All ScadaCore Data Format Interpretations</b></th></tr>");
+        strcat(format_table,
+               "<div style='overflow-x:auto;margin-top:15px'>"
+               "<table style='width:100%;font-size:11px;border-collapse:collapse;min-width:320px'>"
+               "<tr style='background:#495057;color:white'><th colspan='4' style='padding:10px;font-weight:bold;text-align:center'>ALL SCADACORE DATA FORMAT INTERPRETATIONS</th></tr>");
         
         // 16-bit formats (if 1+ registers)
         if (reg_count >= 1) {
@@ -5628,25 +5630,25 @@ static esp_err_t test_rs485_handler(httpd_req_t *req)
             
             // FLOAT32 comprehensive variations - ScadaCore compatible
             snprintf(temp_str, sizeof(temp_str),
-                     "<tr style='background:#e8f4fd'><th colspan='4'>FLOAT32 Format Interpretations</th></tr>"
-                     "<tr><td><strong>FLOAT32_1234 (ABCD):</strong></td><td>%.6f</td><td><strong>FLOAT32_4321 (DCBA):</strong></td><td>%.6f</td></tr>"
-                     "<tr style='background:#f8f8f8'><td><strong>FLOAT32_2143 (BADC):</strong></td><td>%.6f</td><td><strong>FLOAT32_3412 (CDAB):</strong></td><td>%.6f</td></tr>",
+                     "<tr style='background:#0d6efd;color:white'><th colspan='4' style='padding:8px;font-weight:bold'>FLOAT32 FORMAT INTERPRETATIONS</th></tr>"
+                     "<tr><td style='padding:6px;word-break:break-word'><strong>FLOAT32_1234 (ABCD):</strong></td><td style='padding:6px'>%.6f</td><td style='padding:6px;word-break:break-word'><strong>FLOAT32_4321 (DCBA):</strong></td><td style='padding:6px'>%.6f</td></tr>"
+                     "<tr style='background:#f8f8f8'><td style='padding:6px;word-break:break-word'><strong>FLOAT32_2143 (BADC):</strong></td><td style='padding:6px'>%.6f</td><td style='padding:6px;word-break:break-word'><strong>FLOAT32_3412 (CDAB):</strong></td><td style='padding:6px'>%.6f</td></tr>",
                      float_1234_abcd, float_4321_dcba, float_2143_badc, float_3412_cdab);
             strcat(format_table, temp_str);
-            
+
             // INT32 comprehensive variations - ScadaCore compatible
             snprintf(temp_str, sizeof(temp_str),
-                     "<tr style='background:#e8f4e8'><th colspan='4'>INT32 Format Interpretations</th></tr>"
-                     "<tr><td><strong>INT32_1234 (ABCD):</strong></td><td>%ld</td><td><strong>INT32_4321 (DCBA):</strong></td><td>%ld</td></tr>"
-                     "<tr style='background:#f8f8f8'><td><strong>INT32_2143 (BADC):</strong></td><td>%ld</td><td><strong>INT32_3412 (CDAB):</strong></td><td>%ld</td></tr>",
+                     "<tr style='background:#28a745;color:white'><th colspan='4' style='padding:8px;font-weight:bold'>INT32 FORMAT INTERPRETATIONS</th></tr>"
+                     "<tr><td style='padding:6px;word-break:break-word'><strong>INT32_1234 (ABCD):</strong></td><td style='padding:6px'>%ld</td><td style='padding:6px;word-break:break-word'><strong>INT32_4321 (DCBA):</strong></td><td style='padding:6px'>%ld</td></tr>"
+                     "<tr style='background:#f8f8f8'><td style='padding:6px;word-break:break-word'><strong>INT32_2143 (BADC):</strong></td><td style='padding:6px'>%ld</td><td style='padding:6px;word-break:break-word'><strong>INT32_3412 (CDAB):</strong></td><td style='padding:6px'>%ld</td></tr>",
                      (int32_t)val_1234_abcd, (int32_t)val_4321_dcba, (int32_t)val_2143_badc, (int32_t)val_3412_cdab);
             strcat(format_table, temp_str);
-            
+
             // UINT32 comprehensive variations - ScadaCore compatible
             snprintf(temp_str, sizeof(temp_str),
-                     "<tr style='background:#fff4e8'><th colspan='4'>UINT32 Format Interpretations</th></tr>"
-                     "<tr><td><strong>UINT32_1234 (ABCD):</strong></td><td>%lu</td><td><strong>UINT32_4321 (DCBA):</strong></td><td>%lu</td></tr>"
-                     "<tr style='background:#f8f8f8'><td><strong>UINT32_2143 (BADC):</strong></td><td>%lu</td><td><strong>UINT32_3412 (CDAB):</strong></td><td>%lu</td></tr>",
+                     "<tr style='background:#fd7e14;color:white'><th colspan='4' style='padding:8px;font-weight:bold'>UINT32 FORMAT INTERPRETATIONS</th></tr>"
+                     "<tr><td style='padding:6px;word-break:break-word'><strong>UINT32_1234 (ABCD):</strong></td><td style='padding:6px'>%lu</td><td style='padding:6px;word-break:break-word'><strong>UINT32_4321 (DCBA):</strong></td><td style='padding:6px'>%lu</td></tr>"
+                     "<tr style='background:#f8f8f8'><td style='padding:6px;word-break:break-word'><strong>UINT32_2143 (BADC):</strong></td><td style='padding:6px'>%lu</td><td style='padding:6px;word-break:break-word'><strong>UINT32_3412 (CDAB):</strong></td><td style='padding:6px'>%lu</td></tr>",
                      val_1234_abcd, val_4321_dcba, val_2143_badc, val_3412_cdab);
             strcat(format_table, temp_str);
         }
@@ -5677,25 +5679,25 @@ static esp_err_t test_rs485_handler(httpd_req_t *req)
             
             // FLOAT64 comprehensive variations - ScadaCore compatible
             snprintf(temp_str, sizeof(temp_str),
-                     "<tr style='background:#e8f4fd'><th colspan='4'>FLOAT64 Format Interpretations</th></tr>"
-                     "<tr><td><strong>FLOAT64_12345678 (ABCDEFGH):</strong></td><td>%.3f</td><td><strong>FLOAT64_87654321 (HGFEDCBA):</strong></td><td>%.3f</td></tr>"
-                     "<tr style='background:#f8f8f8'><td><strong>FLOAT64_21436587 (BADCFEHG):</strong></td><td>%.3f</td><td><strong>FLOAT64_78563412 (GHEFCDAB):</strong></td><td>%.3f</td></tr>",
+                     "<tr style='background:#6610f2;color:white'><th colspan='4' style='padding:8px;font-weight:bold'>FLOAT64 FORMAT INTERPRETATIONS</th></tr>"
+                     "<tr><td style='padding:6px;word-break:break-word'><strong>FLOAT64_12345678 (ABCDEFGH):</strong></td><td style='padding:6px;word-break:break-all'>%.3f</td><td style='padding:6px;word-break:break-word'><strong>FLOAT64_87654321 (HGFEDCBA):</strong></td><td style='padding:6px;word-break:break-all'>%.3f</td></tr>"
+                     "<tr style='background:#f8f8f8'><td style='padding:6px;word-break:break-word'><strong>FLOAT64_21436587 (BADCFEHG):</strong></td><td style='padding:6px;word-break:break-all'>%.3f</td><td style='padding:6px;word-break:break-word'><strong>FLOAT64_78563412 (GHEFCDAB):</strong></td><td style='padding:6px;word-break:break-all'>%.3f</td></tr>",
                      float64_12345678, float64_87654321, float64_21436587, float64_78563412);
             strcat(format_table, temp_str);
-            
+
             // INT64 comprehensive variations - ScadaCore compatible
             snprintf(temp_str, sizeof(temp_str),
-                     "<tr style='background:#e8f4e8'><th colspan='4'>INT64 Format Interpretations</th></tr>"
-                     "<tr><td><strong>INT64_12345678 (ABCDEFGH):</strong></td><td>%lld</td><td><strong>INT64_87654321 (HGFEDCBA):</strong></td><td>%lld</td></tr>"
-                     "<tr style='background:#f8f8f8'><td><strong>INT64_21436587 (BADCFEHG):</strong></td><td>%lld</td><td><strong>INT64_78563412 (GHEFCDAB):</strong></td><td>%lld</td></tr>",
+                     "<tr style='background:#20c997;color:white'><th colspan='4' style='padding:8px;font-weight:bold'>INT64 FORMAT INTERPRETATIONS</th></tr>"
+                     "<tr><td style='padding:6px;word-break:break-word'><strong>INT64_12345678 (ABCDEFGH):</strong></td><td style='padding:6px;word-break:break-all'>%lld</td><td style='padding:6px;word-break:break-word'><strong>INT64_87654321 (HGFEDCBA):</strong></td><td style='padding:6px;word-break:break-all'>%lld</td></tr>"
+                     "<tr style='background:#f8f8f8'><td style='padding:6px;word-break:break-word'><strong>INT64_21436587 (BADCFEHG):</strong></td><td style='padding:6px;word-break:break-all'>%lld</td><td style='padding:6px;word-break:break-word'><strong>INT64_78563412 (GHEFCDAB):</strong></td><td style='padding:6px;word-break:break-all'>%lld</td></tr>",
                      (int64_t)val64_12345678, (int64_t)val64_87654321, (int64_t)val64_21436587, (int64_t)val64_78563412);
             strcat(format_table, temp_str);
-            
+
             // UINT64 comprehensive variations - ScadaCore compatible
             snprintf(temp_str, sizeof(temp_str),
-                     "<tr style='background:#fff4e8'><th colspan='4'>UINT64 Format Interpretations</th></tr>"
-                     "<tr><td><strong>UINT64_12345678 (ABCDEFGH):</strong></td><td>%llu</td><td><strong>UINT64_87654321 (HGFEDCBA):</strong></td><td>%llu</td></tr>"
-                     "<tr style='background:#f8f8f8'><td><strong>UINT64_21436587 (BADCFEHG):</strong></td><td>%llu</td><td><strong>UINT64_78563412 (GHEFCDAB):</strong></td><td>%llu</td></tr>",
+                     "<tr style='background:#dc3545;color:white'><th colspan='4' style='padding:8px;font-weight:bold'>UINT64 FORMAT INTERPRETATIONS</th></tr>"
+                     "<tr><td style='padding:6px;word-break:break-word'><strong>UINT64_12345678 (ABCDEFGH):</strong></td><td style='padding:6px;word-break:break-all;max-width:150px'>%llu</td><td style='padding:6px;word-break:break-word'><strong>UINT64_87654321 (HGFEDCBA):</strong></td><td style='padding:6px;word-break:break-all;max-width:150px'>%llu</td></tr>"
+                     "<tr style='background:#f8f8f8'><td style='padding:6px;word-break:break-word'><strong>UINT64_21436587 (BADCFEHG):</strong></td><td style='padding:6px;word-break:break-all;max-width:150px'>%llu</td><td style='padding:6px;word-break:break-word'><strong>UINT64_78563412 (GHEFCDAB):</strong></td><td style='padding:6px;word-break:break-all;max-width:150px'>%llu</td></tr>",
                      val64_12345678, val64_87654321, val64_21436587, val64_78563412);
             strcat(format_table, temp_str);
             
@@ -5728,7 +5730,7 @@ static esp_err_t test_rs485_handler(httpd_req_t *req)
             strcat(format_table, temp_str);
         }
         
-        strcat(format_table, "</table></div>");
+        strcat(format_table, "</table></div></div>");
         
         // Send HTML response directly (avoids JSON escaping issues)
         httpd_resp_set_type(req, "text/html");
