@@ -233,9 +233,12 @@ esp_err_t sensor_test_live(const sensor_config_t *sensor, sensor_test_result_t *
         reg_type = "HOLDING";
     }
     
-    // For ZEST sensors, read 4 registers
+    // For Flow-Meter and ZEST sensors, read 4 registers
     int quantity_to_read = sensor->quantity;
-    if (strcmp(sensor->sensor_type, "ZEST") == 0) {
+    if (strcmp(sensor->sensor_type, "Flow-Meter") == 0) {
+        quantity_to_read = 4;
+        ESP_LOGI(TAG, "Flow-Meter sensor detected, reading 4 registers for UINT32_BADC + FLOAT32_BADC interpretation");
+    } else if (strcmp(sensor->sensor_type, "ZEST") == 0) {
         quantity_to_read = 4;
         ESP_LOGI(TAG, "ZEST sensor detected, reading 4 registers for UINT32_CDAB + FLOAT32_ABCD interpretation");
     }
@@ -297,8 +300,33 @@ esp_err_t sensor_test_live(const sensor_config_t *sensor, sensor_test_result_t *
     }
     strncpy(result->raw_hex, hex_buf, sizeof(result->raw_hex) - 1);
 
+    // Special handling for Flow-Meter sensors (4 registers: UINT32_BADC + FLOAT32_BADC)
+    if (strcmp(sensor->sensor_type, "Flow-Meter") == 0 && reg_count >= 4) {
+        // Flow-Meter reads 4 registers:
+        // Registers [0-1]: Cumulative Flow Integer part (32-bit UINT, BADC word-swapped)
+        // Registers [2-3]: Cumulative Flow Decimal part (32-bit FLOAT, BADC word-swapped)
+        // Example: 33073.865 m³ = 33073 (registers[0-1]) + 0.865 (float in registers[2-3])
+
+        // Integer part: BADC format (word-swapped) = (reg[1] << 16) | reg[0]
+        uint32_t integer_part_raw = ((uint32_t)registers[1] << 16) | registers[0];
+        double integer_part = (double)integer_part_raw;
+
+        // Decimal part: BADC format (word-swapped) = (reg[3] << 16) | reg[2]
+        uint32_t float_bits = ((uint32_t)registers[3] << 16) | registers[2];
+        float decimal_part_float;
+        memcpy(&decimal_part_float, &float_bits, sizeof(float));
+        double decimal_part = (double)decimal_part_float;
+
+        // Sum integer and decimal parts, then apply scale factor
+        result->scaled_value = (integer_part + decimal_part) * sensor->scale_factor;
+        result->raw_value = integer_part_raw; // Store integer part as raw value
+
+        ESP_LOGI(TAG, "Flow-Meter Calculation: Integer=0x%08lX(%lu) + Decimal(FLOAT)=0x%08lX(%.6f) = %.6f",
+                 (unsigned long)integer_part_raw, (unsigned long)integer_part_raw,
+                 (unsigned long)float_bits, decimal_part, result->scaled_value);
+    }
     // Special handling for ZEST sensors (AquaGen Flow Meter format)
-    if (strcmp(sensor->sensor_type, "ZEST") == 0 && reg_count >= 4) {
+    else if (strcmp(sensor->sensor_type, "ZEST") == 0 && reg_count >= 4) {
         // ZEST reads 4 registers (per AquaGen Modbus documentation):
         // Register [0] @ 0x1019: Cumulative Flow Integer part (16-bit UINT)
         // Register [1]: Unused (0x0000)
