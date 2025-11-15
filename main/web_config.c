@@ -172,11 +172,29 @@ static const char* html_header =
 ".badge-error::before{background:var(--color-error)}"
 ".badge-info::before{background:var(--color-primary)}"
 "/* ===== ALERT/RESULT BOXES ===== */"
-".test-result,.alert{padding:var(--space-lg);margin:var(--space-lg) 0;border-radius:var(--radius-lg);border-left:4px solid;box-shadow:var(--shadow-sm);animation:slideIn 0.3s}"
-".test-result{background:var(--color-bg-primary);border-color:var(--color-accent)}"
+".test-result,.alert{padding:var(--space-lg);margin:var(--space-lg) 0;border-radius:var(--radius-lg);border:1px solid;box-shadow:var(--shadow-md);animation:slideIn 0.3s;background:white}"
+".test-result{border-color:var(--color-success);background:linear-gradient(135deg,rgba(16,185,129,0.05),rgba(16,185,129,0.02))}"
+".test-result h4{color:var(--color-success);margin:0 0 var(--space-md) 0;font-family:Orbitron,monospace;font-size:var(--text-lg);display:flex;align-items:center;gap:var(--space-sm)}"
 ".alert-success{background:rgba(16,185,129,0.05);border-color:var(--color-success);color:var(--success-600)}"
 ".alert-warning{background:rgba(245,158,11,0.05);border-color:var(--color-warning);color:var(--warning-600)}"
 ".alert-error{background:rgba(239,68,68,0.05);border-color:var(--color-error);color:var(--error-600)}"
+"/* ===== SCADACORE FORMAT TABLE ===== */"
+".scada-table{width:100%;border-collapse:collapse;margin-top:var(--space-md);font-size:var(--text-sm);box-shadow:var(--shadow-sm);border-radius:var(--radius-md);overflow:hidden}"
+".scada-table th{padding:var(--space-md);font-weight:var(--weight-bold);text-align:center;color:white;font-family:Orbitron,monospace}"
+".scada-table td{padding:var(--space-sm) var(--space-md);border-bottom:1px solid var(--color-border-light);text-align:left}"
+".scada-table tr:last-child td{border-bottom:none}"
+".scada-table tr:nth-child(even){background:var(--color-bg-secondary)}"
+".scada-table strong{color:var(--color-primary);font-weight:var(--weight-semibold)}"
+".scada-header-main{background:linear-gradient(135deg,var(--gray-700),var(--gray-900))}"
+".scada-header-float{background:linear-gradient(135deg,var(--primary-600),var(--primary-700))}"
+".scada-header-int{background:linear-gradient(135deg,var(--success-600),var(--success-700))}"
+".scada-header-uint{background:linear-gradient(135deg,var(--warning-600),var(--warning-700))}"
+".scada-header-float64{background:linear-gradient(135deg,#6610f2,#520dc2)}"
+".scada-header-int64{background:linear-gradient(135deg,#20c997,#17a579)}"
+".scada-header-uint64{background:linear-gradient(135deg,#dc3545,#b02a37)}"
+".value-box{background:var(--color-bg-tertiary);padding:var(--space-sm);border-radius:var(--radius-sm);font-family:monospace;margin:var(--space-xs) 0}"
+".hex-display{font-family:monospace;color:var(--color-accent);font-weight:var(--weight-semibold);letter-spacing:1px}"
+".scada-breakdown{background:linear-gradient(135deg,rgba(59,130,246,0.08),rgba(59,130,246,0.03));padding:var(--space-md);border-radius:var(--radius-md);margin:var(--space-md) 0;border-left:4px solid var(--color-primary)}"
 ".alert-info{background:rgba(59,130,246,0.05);border-color:var(--color-primary);color:var(--primary-700)}"
 "@keyframes slideIn{from{opacity:0;transform:translateX(-20px)}to{opacity:1;transform:translateX(0)}}"
 "/* ===== HEADER ===== */"
@@ -295,6 +313,11 @@ static const char* html_header =
 ".heap-bar{height:20px}"
 ".heap-bar-fill{font-size:11px;padding-right:var(--space-xs)}"
 ".section-title{font-size:16px;padding:var(--space-sm) 0;margin-bottom:var(--space-md)}"
+".scada-table{font-size:10px;overflow-x:auto;display:block}"
+".scada-table th{padding:var(--space-xs) var(--space-sm);font-size:9px}"
+".scada-table td{padding:4px var(--space-xs);font-size:10px}"
+".scada-breakdown{padding:var(--space-sm);font-size:11px}"
+".value-box{padding:4px;font-size:11px}"
 "h1{font-size:20px}h2{font-size:16px}h3{font-size:14px}"
 "p{font-size:12px}"
 "input,select,textarea,button,.btn{font-size:14px;padding:var(--space-sm)}"
@@ -365,6 +388,10 @@ static const char* html_header =
 ".heap-bar{height:22px}"
 ".heap-bar-fill{font-size:12px}"
 ".section-title{font-size:18px;padding:var(--space-md) 0}"
+".scada-table{font-size:11px;overflow-x:auto}"
+".scada-table th{padding:var(--space-sm);font-size:11px}"
+".scada-table td{padding:var(--space-xs) var(--space-sm);font-size:11px}"
+".scada-breakdown{padding:var(--space-md);font-size:12px}"
 "div[style*='grid-template-columns']{display:block!important}"
 "div[style*='grid-template-columns']>*{width:100%!important;margin-bottom:var(--space-sm)}"
 "}"
@@ -612,22 +639,22 @@ static const char* html_header =
 "<img src='data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iMjAwIiBoZWlnaHQ9IjYwIiB2aWV3Qm94PSIwIDAgMjAwIDYwIiB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciPjxkZWZzPjxsaW5lYXJHcmFkaWVudCBpZD0iYmciIHgxPSIwJSIgeTE9IjAlIiB4Mj0iMTAwJSIgeTI9IjAlIj48c3RvcCBvZmZzZXQ9IjAlIiBzdHlsZT0ic3RvcC1jb2xvcjojMDA5OWZmO3N0b3Atb3BhY2l0eToxIi8+PHN0b3Agb2Zmc2V0PSIxMDAlIiBzdHlsZT0ic3RvcC1jb2xvcjojMDA2NmNjO3N0b3Atb3BhY2l0eToxIi8+PC9saW5lYXJHcmFkaWVudD48L2RlZnM+PGVsbGlwc2UgY3g9IjI1IiBjeT0iMjIiIHJ4PSIxMiIgcnk9IjE0IiBmaWxsPSJ1cmwoI2JnKSIvPjxwYXRoIGQ9Ik0gMTUgMzIgUSAxOCAzOCwgMjUgNDAgUSAzMiAzOCwgMzUgMzIiIGZpbGw9InVybCgjYmcpIi8+PGVsbGlwc2UgY3g9IjI1IiBjeT0iMTkiIHJ4PSI3IiByeT0iOSIgZmlsbD0iI2ZmZmZmZiIgb3BhY2l0eT0iMC4zIi8+PHRleHQgeD0iNTAiIHk9IjM1IiBmb250LWZhbWlseT0iJ1NlZ29lIFVJJyxBcmlhbCxzYW5zLXNlcmlmIiBmb250LXNpemU9IjI4IiBmb250LXdlaWdodD0iNzAwIiBmaWxsPSIjMDA2NmNjIj5GbHV4Z2VuPC90ZXh0Pjx0ZXh0IHg9IjUwIiB5PSI0OCIgZm9udC1mYW1pbHk9IidTZWdvZSBVSScsQXJpYWwsc2Fucy1zZXJpZiIgZm9udC1zaXplPSI4IiBmaWxsPSIjNjY2Ij5CdWlsZGluZyBhIFdhdGVyIFBvc2l0aXZlIEZ1dHVyZTwvdGV4dD48L3N2Zz4=' class='logo' alt='Fluxgen'>"
 "</div>"
 "<button class='menu-item' onclick='showSection(\"overview\")'>"
-"<i class='menu-icon'>📊</i>Overview"
+"<i class='menu-icon'>📈</i>OVERVIEW"
 "</button>"
 "<button class='menu-item' onclick='showSection(\"wifi\")'>"
-"<i class='menu-icon'>🌐</i>Network Config"
+"<i class='menu-icon'>🌐</i>NETWORK CONFIG"
 "</button>"
 "<button class='menu-item' onclick='showAzureSection()'>"
-"<i class='menu-icon'>☁️</i>Azure IoT Hub"
+"<i class='menu-icon'>☁</i>AZURE IOT HUB"
 "</button>"
 "<button class='menu-item' onclick='showSection(\"sensors\")'>"
-"<i class='menu-icon'>🔌</i>Modbus Sensors"
+"<i class='menu-icon'>💾</i>MODBUS SENSORS"
 "</button>"
 "<button class='menu-item' onclick='showSection(\"write_ops\")'>"
-"<i class='menu-icon'>✏️</i>Write Operations"
+"<i class='menu-icon'>✎</i>WRITE OPERATIONS"
 "</button>"
 "<button class='menu-item' onclick='showSection(\"monitoring\")'>"
-"<i class='menu-icon'>🖥️</i>System Monitor"
+"<i class='menu-icon'>💻</i>SYSTEM MONITOR"
 "</button>"
 "</div>"
 "<div class='main-content'>";
@@ -1309,30 +1336,23 @@ static esp_err_t live_data_handler(httpd_req_t *req)
 }
 
 
-// Fluxgen logo handler - SVG recreation of the actual logo
+// Company logo handler - Simple classic design
 static esp_err_t logo_handler(httpd_req_t *req)
 {
-    // Build Fluxgen SVG logo to match the actual PNG design
-    const char* logo_svg = 
+    // Simple classic logo with clean typography
+    const char* logo_svg =
         "<svg width='200' height='60' xmlns='http://www.w3.org/2000/svg'>"
         "<defs>"
         "<linearGradient id='blueGrad' x1='0%' y1='0%' x2='100%' y2='0%'>"
-        "<stop offset='0%' style='stop-color:#1e3a8a;stop-opacity:1' />"
-        "<stop offset='100%' style='stop-color:#2563eb;stop-opacity:1' />"
+        "<stop offset='0%' style='stop-color:#0066cc;stop-opacity:1' />"
+        "<stop offset='100%' style='stop-color:#00aaff;stop-opacity:1' />"
         "</linearGradient>"
         "</defs>"
-        // Background
         "<rect width='200' height='60' fill='#ffffff' />"
-        // Flux text in dark blue
-        "<text x='10' y='38' font-family='Arial,sans-serif' font-size='28' font-weight='bold' fill='#1e3a8a'>Flux</text>"
-        // 6 symbol in light blue with curve
-        "<path d='M 95 20 Q 110 15 120 25 Q 125 30 125 35 Q 125 40 120 45 Q 110 50 100 45 Q 95 40 95 35 Q 95 30 100 25 Q 105 20 110 20 Q 115 20 120 25' fill='#3b82f6' stroke='#3b82f6' stroke-width='2'/>"
-        // 'en' text in dark blue  
-        "<text x='130' y='38' font-family='Arial,sans-serif' font-size='28' font-weight='bold' fill='#1e3a8a'>en</text>"
-        // Tagline
-        "<text x='10' y='52' font-family='Arial,sans-serif' font-size='8' fill='#64748b'>Industrial IoT Solutions</text>"
+        "<text x='10' y='35' font-family='Arial,sans-serif' font-size='26' font-weight='bold' fill='url(#blueGrad)'>FLUXGEN</text>"
+        "<text x='10' y='50' font-family='Arial,sans-serif' font-size='9' fill='#666'>Building a Water Positive Future</text>"
         "</svg>";
-    
+
     httpd_resp_set_type(req, "image/svg+xml");
     httpd_resp_set_hdr(req, "Cache-Control", "public, max-age=86400");
     httpd_resp_send(req, logo_svg, strlen(logo_svg));
@@ -1374,19 +1394,19 @@ static esp_err_t config_page_handler(httpd_req_t *req)
     char chunk[5120];  // Increased buffer size to accommodate larger HTML content
     
     // Overview Section with Real-time System Resources
-    httpd_resp_sendstr_chunk(req, 
+    httpd_resp_sendstr_chunk(req,
         "<div id='overview' class='section active'>"
         "<h2 class='section-title'><i>📊</i>System Overview</h2>"
-        
+
         "<div class='sensor-card'>"
         "<h3>System Status</h3>"
-        "<p><strong>Firmware:</strong> v1.1.0-final</p>"
+        "<p><strong>Firmware:</strong> <span>v1.1.0-final</span></p>"
         "<p><strong>MAC Address:</strong> <span id='mac_address'>Loading...</span></p>"
         "<p><strong>Uptime:</strong> <span id='uptime'>Loading...</span></p>"
         "<p><strong>Flash Memory:</strong> <span id='flash_total'>Loading...</span></p>"
         "<p><strong>Active Tasks:</strong> <span id='tasks'>Loading...</span></p>"
         "</div>"
-        
+
         "<div class='sensor-card'>"
         "<h3>Memory Usage</h3>"
         "<p><strong>Heap Usage:</strong> <span id='heap_usage'>Loading...</span></p>"
@@ -1395,23 +1415,37 @@ static esp_err_t config_page_handler(httpd_req_t *req)
         "<p><strong>SPIRAM:</strong> <span id='spiram_heap'>Loading...</span></p>"
         "<p><strong>Largest Block:</strong> <span id='largest_block'>Loading...</span></p>"
         "</div>"
-        
+
         "<div class='sensor-card'>"
         "<h3>Storage Partitions</h3>"
         "<p><strong>App Partition:</strong> <span id='app_partition'>Loading...</span></p>"
         "<p><strong>NVS Partition:</strong> <span id='nvs_partition'>Loading...</span></p>"
-        "</div>"
-        
-        "<div class='sensor-card'>"
-        "<h3>Network Status</h3>"
+        "</div>");
+
+    // Network Status - show WiFi or SIM based on network mode
+    snprintf(chunk, sizeof(chunk),
+        "<div class='sensor-card' id='wifi-network-status' style='display:%s'>"
+        "<h3>WiFi Network Status</h3>"
         "<p><strong>WiFi Status:</strong> <span id='wifi_status'>Loading...</span></p>"
         "<p><strong>WiFi RSSI:</strong> <span id='rssi'>Loading...</span></p>"
         "<p><strong>SSID:</strong> <span id='ssid'>Loading...</span></p>"
         "</div>"
-        
+
+        "<div class='sensor-card' id='sim-network-status' style='display:%s'>"
+        "<h3>SIM Network Status</h3>"
+        "<p><strong>SIM Status:</strong> <span id='sim_status'>Loading...</span></p>"
+        "<p><strong>Signal Quality:</strong> <span id='sim_signal'>Loading...</span></p>"
+        "<p><strong>Network:</strong> <span id='sim_network'>Loading...</span></p>"
+        "<p><strong>IP Address:</strong> <span id='sim_ip'>Loading...</span></p>"
+        "</div>",
+        g_system_config.network_mode == 0 ? "block" : "none",
+        g_system_config.network_mode == 1 ? "block" : "none");
+    httpd_resp_sendstr_chunk(req, chunk);
+
+    httpd_resp_sendstr_chunk(req,
         "<div class='sensor-card'>"
         "<h3>Industrial Configuration</h3>");
-    
+
     snprintf(chunk, sizeof(chunk),
         "<p><strong>Sensors Configured:</strong> %d</p>"
         "<p><strong>RS485 Interface:</strong> GPIO16(RX), GPIO17(TX), GPIO4(RTS)</p>"
@@ -1457,26 +1491,24 @@ static esp_err_t config_page_handler(httpd_req_t *req)
         "<div>"
         "<h2 class='section-title'><i>📡</i>WiFi Settings</h2>"
         "<form method='POST' action='/save_config'>"
-        "<div class='sensor-card' style='padding:var(--space-lg)'>"
-        "<h3 style='margin-top:0;margin-bottom:15px;color:var(--color-primary)'>WiFi Network Configuration</h3>"
-        "<div style='display:flex;gap:12px;align-items:center;margin-bottom:15px'>"
-        "<button type='button' onclick='scanWiFi()' class='scan-button' style='font-weight:600'>📡 Scan Networks</button>"
-        "<div id='scan-status' style='color:#666;font-size:13px;font-weight:500'></div>"
-        "</div>"
-        "<div id='networks' style='display:none;border:1px solid #ddd;border-radius:8px;margin-bottom:15px;background:#f8f9fa;max-height:200px;overflow-y:auto'></div>"
+        "<div class='sensor-card'>"
+        "<h3>WiFi Network Configuration</h3>"
+        "<button type='button' onclick='scanWiFi()' class='scan-button' style='margin-bottom:var(--space-md)'>📡 Scan WiFi Networks</button>"
+        "<div id='scan-status' style='color:#666;font-size:13px;margin-bottom:var(--space-sm)'></div>"
+        "<div id='networks' style='display:none;border:1px solid #ddd;border-radius:8px;margin-bottom:var(--space-md);background:#f8f9fa;max-height:200px;overflow-y:auto'></div>"
         "<div class='wifi-grid'>"
-        "<label style='font-weight:600;color:#2c3e50'>Network:</label>"
-        "<input type='text' id='wifi_ssid' name='wifi_ssid' value='%s' required style='padding:10px;border:1px solid #ddd;border-radius:6px;font-size:14px'>"
-        "<label style='font-weight:600;color:#2c3e50'>Password:</label>"
+        "<label>Network:</label>"
+        "<input type='text' id='wifi_ssid' name='wifi_ssid' value='%s' required>"
+        "<label>Password:</label>"
         "<div class='wifi-input-group'>"
-        "<input type='password' id='wifi_password' name='wifi_password' value='%s' style='padding:10px;border:1px solid #ddd;border-radius:6px;width:100%%;padding-right:60px;font-size:14px'>"
+        "<input type='password' id='wifi_password' name='wifi_password' value='%s' style='width:100%%;padding-right:60px'>"
         "<span onclick='togglePassword()' style='position:absolute;right:12px;cursor:pointer;color:#007bff;font-size:12px;font-weight:600;user-select:none;padding:4px 8px;background:#f8f9fa;border-radius:4px'>SHOW</span>"
         "</div>"
         "</div>"
-        "<div style='background:#e8f4f8;padding:10px;border-radius:6px;margin-top:12px;border-left:4px solid #17a2b8'>"
+        "<div style='background:#e8f4f8;padding:var(--space-sm);border-radius:var(--radius-sm);margin-top:var(--space-md);border-left:4px solid #17a2b8'>"
         "<small style='color:#0c5460'><strong>💡 Tip:</strong> Click on any scanned network to auto-fill the SSID field.</small>"
         "</div>"
-        "<div style='background:#d4edda;padding:12px;margin-top:15px;border-radius:5px;border:1px solid #c3e6cb'>"
+        "<div style='background:#d4edda;padding:var(--space-md);margin-top:var(--space-md);border-radius:var(--radius-sm);border:1px solid #c3e6cb'>"
         "<button type='submit' style='background:#28a745;color:white;padding:10px 15px;border:none;border-radius:4px;font-weight:bold'>Save WiFi Settings</button>"
         "<p style='color:#155724;font-size:11px;margin:8px 0 0 0'>This saves WiFi settings only. Azure and sensors are configured separately.</p>"
         "</div>"
@@ -1501,32 +1533,32 @@ static esp_err_t config_page_handler(httpd_req_t *req)
         "<div class='sensor-card' style='padding:var(--space-lg)'>"
         "<h3 style='margin-top:0;margin-bottom:12px;color:var(--color-primary)'>Cellular Network Settings</h3>"
         "<p style='color:#666;margin-bottom:15px;font-size:14px'>Configure 4G cellular connectivity</p>"
-        "<div style='display:grid;grid-template-columns:200px 1fr;gap:12px;align-items:start;margin-bottom:15px'>"
+        "<div style='display:grid;grid-template-columns:200px 1fr;gap:8px;align-items:start;margin-bottom:8px'>"
         "<label style='font-weight:600;padding-top:8px'>APN (Access Point Name):</label>"
         "<div>"
         "<input type='text' id='sim_apn' name='sim_apn' value='%s' placeholder='airteliot' maxlength='63' style='width:100%%;max-width:400px;padding:8px;border:1px solid #ddd;border-radius:4px'>"
-        "<small style='color:#666;display:block;margin-top:4px'>Default: airteliot (Airtel) | Use jionet for Jio SIM</small>"
+        "<small style='color:#666;display:block;margin-top:2px'>Default: airteliot (Airtel) | Use jionet for Jio SIM</small>"
         "</div>"
         "<label style='font-weight:600;padding-top:8px'>APN Username (optional):</label>"
         "<div>"
         "<input type='text' id='sim_apn_user' name='sim_apn_user' value='%s' placeholder='username' maxlength='63' style='width:100%%;max-width:400px;padding:8px;border:1px solid #ddd;border-radius:4px'>"
-        "<small style='color:#666;display:block;margin-top:4px'>Leave blank if not required by carrier</small>"
+        "<small style='color:#666;display:block;margin-top:2px'>Leave blank if not required by carrier</small>"
         "</div>"
         "<label style='font-weight:600;padding-top:8px'>APN Password (optional):</label>"
         "<div>"
         "<input type='password' id='sim_apn_pass' name='sim_apn_pass' value='%s' maxlength='63' style='width:100%%;max-width:400px;padding:8px;border:1px solid #ddd;border-radius:4px'>"
-        "<small style='color:#666;display:block;margin-top:4px'>Leave blank if not required by carrier</small>"
+        "<small style='color:#666;display:block;margin-top:2px'>Leave blank if not required by carrier</small>"
         "</div>"
         "</div>"
         "</div>"
         "<div class='sensor-card'>"
         "<h3>Hardware Configuration</h3>"
         "<label>UART Port:</label>"
-        "<select id='sim_uart' name='sim_uart' style='padding:8px;border:1px solid #ddd;border-radius:6px'>"
+        "<select id='sim_uart' name='sim_uart' style='padding:8px;border:1px solid #ddd;border-radius:6px;margin-bottom:8px'>"
         "<option value='1' %s>UART1</option>"
         "<option value='2' %s>UART2</option>"
         "</select><br>"
-        "<div style='display:grid;grid-template-columns:1fr 1fr;gap:15px'>"
+        "<div style='display:grid;grid-template-columns:1fr 1fr;gap:15px;margin-bottom:8px'>"
         "<div>"
         "<label>TX Pin:</label>"
         "<input type='number' id='sim_tx_pin' name='sim_tx_pin' value='%d' min='0' max='39' style='width:100%%;padding:8px'><br>"
@@ -1537,8 +1569,8 @@ static esp_err_t config_page_handler(httpd_req_t *req)
         "<input type='number' id='sim_rx_pin' name='sim_rx_pin' value='%d' min='0' max='39' style='width:100%%;padding:8px'><br>"
         "<small style='color:#666'>GPIO for UART RX</small>"
         "</div>"
-        "</div><br>"
-        "<div style='display:grid;grid-template-columns:1fr 1fr;gap:15px'>"
+        "</div>"
+        "<div style='display:grid;grid-template-columns:1fr 1fr;gap:15px;margin-bottom:8px'>"
         "<div>"
         "<label>Power Pin:</label>"
         "<input type='number' id='sim_pwr_pin' name='sim_pwr_pin' value='%d' min='0' max='39' style='width:100%%;padding:8px'><br>"
@@ -1549,20 +1581,21 @@ static esp_err_t config_page_handler(httpd_req_t *req)
         "<input type='number' id='sim_reset_pin' name='sim_reset_pin' value='%d' min='-1' max='39' style='width:100%%;padding:8px'><br>"
         "<small style='color:#666'>-1 to disable</small>"
         "</div>"
-        "</div><br>"
+        "</div>"
         "<label>Baud Rate:</label>"
-        "<select id='sim_baud' name='sim_baud' style='padding:8px;border:1px solid #ddd;border-radius:6px'>"
+        "<select id='sim_baud' name='sim_baud' style='padding:8px;border:1px solid #ddd;border-radius:6px;margin-bottom:8px'>"
         "<option value='9600' %s>9600</option>"
         "<option value='19200' %s>19200</option>"
         "<option value='38400' %s>38400</option>"
         "<option value='57600' %s>57600</option>"
         "<option value='115200' %s>115200</option>"
         "</select><br>"
-        "<button type='button' onclick='testSIMConnection()' style='background:#17a2b8;color:white;padding:10px 15px;border:none;border-radius:4px;font-weight:bold;margin-right:10px'>Test SIM Connection</button>"
+        "<button type='button' onclick='testSIMConnection()' style='background:#17a2b8;color:white;padding:10px 15px;border:none;border-radius:4px;font-weight:bold;margin-top:8px'>Test SIM Connection</button>"
         "<div id='sim_test_result' style='margin-top:10px;padding:10px;border-radius:4px;display:none'></div>"
-        "</div>"
-        "<div style='background:#d4edda;padding:12px;margin:15px 0;border-radius:5px;border:1px solid #c3e6cb'>"
+        "<div style='background:#d4edda;padding:var(--space-md);margin-top:var(--space-md);border-radius:var(--radius-sm);border:1px solid #c3e6cb'>"
         "<button type='submit' style='background:#28a745;color:white;padding:10px 15px;border:none;border-radius:4px;font-weight:bold'>Save SIM Configuration</button>"
+        "<p style='color:#155724;font-size:11px;margin:8px 0 0 0'>This saves SIM module settings.</p>"
+        "</div>"
         "<div id='sim_save_result' style='margin-top:10px;padding:10px;border-radius:4px;display:none;border:1px solid'></div>"
         "</div>"
         "</form>"
@@ -1607,7 +1640,7 @@ static esp_err_t config_page_handler(httpd_req_t *req)
         "<div id='sd_hw_options' style='display:%s'>"
         "<div class='sensor-card'>"
         "<h3>SPI Pin Configuration</h3>"
-        "<div style='display:grid;grid-template-columns:1fr 1fr;gap:15px;margin-bottom:15px'>"
+        "<div style='display:grid;grid-template-columns:1fr 1fr;gap:15px;margin-bottom:8px'>"
         "<div>"
         "<label>MOSI Pin:</label>"
         "<input type='number' id='sd_mosi' name='sd_mosi' value='%d' min='0' max='39' style='width:100%%;padding:8px'><br>"
@@ -1619,7 +1652,7 @@ static esp_err_t config_page_handler(httpd_req_t *req)
         "<small style='color:#666'>SPI Master In Slave Out</small>"
         "</div>"
         "</div>"
-        "<div style='display:grid;grid-template-columns:1fr 1fr;gap:15px'>"
+        "<div style='display:grid;grid-template-columns:1fr 1fr;gap:15px;margin-bottom:8px'>"
         "<div>"
         "<label>CLK Pin:</label>"
         "<input type='number' id='sd_clk' name='sd_clk' value='%d' min='0' max='39' style='width:100%%;padding:8px'><br>"
@@ -1630,16 +1663,16 @@ static esp_err_t config_page_handler(httpd_req_t *req)
         "<input type='number' id='sd_cs' name='sd_cs' value='%d' min='0' max='39' style='width:100%%;padding:8px'><br>"
         "<small style='color:#666'>Chip Select</small>"
         "</div>"
-        "</div><br>"
+        "</div>"
         "<label>SPI Host:</label>"
-        "<select id='sd_spi_host' name='sd_spi_host' style='padding:8px;border:1px solid #ddd;border-radius:6px'>"
+        "<select id='sd_spi_host' name='sd_spi_host' style='padding:8px;border:1px solid #ddd;border-radius:6px;margin-bottom:8px'>"
         "<option value='1' %s>HSPI (SPI2)</option>"
         "<option value='2' %s>VSPI (SPI3)</option>"
         "</select><br>"
-        "<button type='button' onclick='checkSDStatus()' style='background:#17a2b8;color:white;padding:10px 15px;border:none;border-radius:4px;font-weight:bold;margin-right:10px'>Check SD Card Status</button>"
-        "<div id='sd_status_result' style='margin-top:10px;padding:10px;border-radius:4px;display:none'></div><br>"
-        "<button type='button' onclick='replayCachedMessages()' style='background:#ffc107;color:#333;padding:10px 15px;border:none;border-radius:4px;font-weight:bold;margin-right:10px'>Replay Cached Messages</button>"
-        "<button type='button' onclick='clearCachedMessages()' style='background:#dc3545;color:white;padding:10px 15px;border:none;border-radius:4px;font-weight:bold'>Clear All Cached Messages</button>"
+        "<button type='button' onclick='checkSDStatus()' style='background:#17a2b8;color:white;padding:10px 15px;border:none;border-radius:4px;font-weight:bold;margin-top:8px'>Check SD Card Status</button>"
+        "<div id='sd_status_result' style='margin-top:8px;padding:10px;border-radius:4px;display:none'></div>"
+        "<button type='button' onclick='replayCachedMessages()' style='background:#ffc107;color:#333;padding:10px 15px;border:none;border-radius:4px;font-weight:bold;margin:8px 10px 8px 0'>Replay Cached Messages</button>"
+        "<button type='button' onclick='clearCachedMessages()' style='background:#dc3545;color:white;padding:10px 15px;border:none;border-radius:4px;font-weight:bold;margin:8px 0'>Clear All Cached Messages</button>"
         "<div style='background:#d4edda;padding:12px;margin:15px 0;border-radius:5px;border:1px solid #c3e6cb'>"
         "<button type='submit' style='background:#28a745;color:white;padding:10px 15px;border:none;border-radius:4px;font-weight:bold'>Save SD Card Configuration</button>"
         "<div id='sd_save_result' style='margin-top:10px;padding:10px;border-radius:4px;display:none;border:1px solid'></div>"
@@ -1686,7 +1719,7 @@ static esp_err_t config_page_handler(httpd_req_t *req)
         "<div id='rtc_hw_options' style='display:%s'>"
         "<div class='sensor-card'>"
         "<h3>I2C Pin Configuration</h3>"
-        "<div style='display:grid;grid-template-columns:1fr 1fr;gap:15px;margin-bottom:15px'>"
+        "<div style='display:grid;grid-template-columns:1fr 1fr;gap:15px;margin-bottom:8px'>"
         "<div>"
         "<label>SDA Pin:</label>"
         "<input type='number' id='rtc_sda' name='rtc_sda' value='%d' min='0' max='39' style='width:100%%;padding:8px'><br>"
@@ -1699,14 +1732,14 @@ static esp_err_t config_page_handler(httpd_req_t *req)
         "</div>"
         "</div>"
         "<label>I2C Port:</label>"
-        "<select id='rtc_i2c_num' name='rtc_i2c_num' style='padding:8px;border:1px solid #ddd;border-radius:6px'>"
+        "<select id='rtc_i2c_num' name='rtc_i2c_num' style='padding:8px;border:1px solid #ddd;border-radius:6px;margin-bottom:8px'>"
         "<option value='0' %s>I2C_NUM_0</option>"
         "<option value='1' %s>I2C_NUM_1</option>"
         "</select><br>"
-        "<button type='button' onclick='getRTCTime()' style='background:#17a2b8;color:white;padding:10px 15px;border:none;border-radius:4px;font-weight:bold;margin-right:10px'>Get RTC Time</button>"
-        "<div id='rtc_time_result' style='margin-top:10px;padding:10px;border-radius:4px;display:none'></div><br>"
-        "<button type='button' onclick='syncRTCFromNTP()' style='background:#ffc107;color:#333;padding:10px 15px;border:none;border-radius:4px;font-weight:bold;margin-right:10px'>Sync RTC from NTP Now</button>"
-        "<button type='button' onclick='syncSystemFromRTC()' style='background:#6c757d;color:white;padding:10px 15px;border:none;border-radius:4px;font-weight:bold'>Sync System Time from RTC</button>"
+        "<button type='button' onclick='getRTCTime()' style='background:#17a2b8;color:white;padding:10px 15px;border:none;border-radius:4px;font-weight:bold;margin-top:8px'>Get RTC Time</button>"
+        "<div id='rtc_time_result' style='margin-top:8px;padding:10px;border-radius:4px;display:none'></div>"
+        "<button type='button' onclick='syncRTCFromNTP()' style='background:#ffc107;color:#333;padding:10px 15px;border:none;border-radius:4px;font-weight:bold;margin:8px 10px 8px 0'>Sync RTC from NTP Now</button>"
+        "<button type='button' onclick='syncSystemFromRTC()' style='background:#6c757d;color:white;padding:10px 15px;border:none;border-radius:4px;font-weight:bold;margin:8px 0'>Sync System Time from RTC</button>"
         "<div style='background:#d4edda;padding:12px;margin:15px 0;border-radius:5px;border:1px solid #c3e6cb'>"
         "<button type='submit' style='background:#28a745;color:white;padding:10px 15px;border:none;border-radius:4px;font-weight:bold'>Save RTC Configuration</button>"
         "<div id='rtc_save_result' style='margin-top:10px;padding:10px;border-radius:4px;display:none;border:1px solid'></div>"
@@ -1866,12 +1899,17 @@ static esp_err_t config_page_handler(httpd_req_t *req)
             // Show different parameters based on sensor type
             if (strcmp(g_system_config.sensors[i].sensor_type, "Level") == 0) {
                 snprintf(chunk, sizeof(chunk),
-                    "<div class='sensor-card' id='sensor-card-%d'>" 
+                    "<div class='sensor-card' id='sensor-card-%d'>"
                     "<h3>%s (Sensor %d) - <span style='color:#007bff;font-weight:bold;'>%s</span></h3>"
-                    "<p><strong>Unit ID:</strong> %s | <strong>Slave ID:</strong> %d | <strong>Register:</strong> %d | <strong>Quantity:</strong> %d</p>"
-                    "<p><strong>Register Type:</strong> %s | <strong>Data Type:</strong> %s</p>"
-                    "<p><strong>Sensor Height:</strong> %.2f | <strong>Max Water Level:</strong> %.2f</p>"
-                    "<p style='color:#666;font-size:12px;margin:5px 0'>RS485 Modbus Communication - Level calculation: (Height - Raw) / MaxLevel * 100</p>"
+                    "<p><strong>Unit ID:</strong> %s</p>"
+                    "<p><strong>Slave ID:</strong> %d</p>"
+                    "<p><strong>Register:</strong> %d</p>"
+                    "<p><strong>Quantity:</strong> %d</p>"
+                    "<p><strong>Register Type:</strong> %s</p>"
+                    "<p><strong>Data Type:</strong> %s</p>"
+                    "<p><strong>Sensor Height:</strong> %.2f</p>"
+                    "<p><strong>Max Water Level:</strong> %.2f</p>"
+                    "<p style='color:#666;font-size:12px;margin:5px 0;grid-column:1/-1'>RS485 Modbus - Level calc: (Height - Raw) / MaxLevel * 100</p>"
                     "<button type='button' onclick='editSensor(%d)' style='background:#17a2b8;color:white;margin:2px;padding:6px 12px'>Edit</button> "
                     "<button type='button' onclick='testSensor(%d)' style='background:#007bff;color:white;margin:2px;padding:6px 12px'>Test RS485</button> "
                     "<button type='button' onclick='deleteSensor(%d)' style='background:#dc3545;color:white;margin:2px;padding:6px 12px'>Delete</button>"
@@ -1886,11 +1924,16 @@ static esp_err_t config_page_handler(httpd_req_t *req)
                     i, i, i, i);
             } else if (strcmp(g_system_config.sensors[i].sensor_type, "RAINGAUGE") == 0) {
                 snprintf(chunk, sizeof(chunk),
-                    "<div class='sensor-card' id='sensor-card-%d'>" 
+                    "<div class='sensor-card' id='sensor-card-%d'>"
                     "<h3>%s (Sensor %d) - <span style='color:#28a745;font-weight:bold;'>Rain Gauge</span></h3>"
-                    "<p><strong>Unit ID:</strong> %s | <strong>Slave ID:</strong> %d | <strong>Register:</strong> %d | <strong>Quantity:</strong> %d</p>"
-                    "<p><strong>Register Type:</strong> %s | <strong>Data Type:</strong> %s | <strong>Scale:</strong> %.3f</p>"
-                    "<p style='color:#666;font-size:12px;margin:5px 0'>RS485 Modbus Communication - Rain gauge measurement in mm or inches</p>"
+                    "<p><strong>Unit ID:</strong> %s</p>"
+                    "<p><strong>Slave ID:</strong> %d</p>"
+                    "<p><strong>Register:</strong> %d</p>"
+                    "<p><strong>Quantity:</strong> %d</p>"
+                    "<p><strong>Register Type:</strong> %s</p>"
+                    "<p><strong>Data Type:</strong> %s</p>"
+                    "<p><strong>Scale:</strong> %.3f</p>"
+                    "<p style='color:#666;font-size:12px;margin:5px 0;grid-column:1/-1'>RS485 Modbus - Rain gauge measurement in mm or inches</p>"
                     "<button type='button' onclick='editSensor(%d)' style='background:#17a2b8;color:white;margin:2px;padding:6px 12px'>Edit</button> "
                     "<button type='button' onclick='testSensor(%d)' style='background:#007bff;color:white;margin:2px;padding:6px 12px'>Test RS485</button> "
                     "<button type='button' onclick='deleteSensor(%d)' style='background:#dc3545;color:white;margin:2px;padding:6px 12px'>Delete</button>"
@@ -1904,11 +1947,16 @@ static esp_err_t config_page_handler(httpd_req_t *req)
                     i, i, i, i);
             } else if (strcmp(g_system_config.sensors[i].sensor_type, "BOREWELL") == 0) {
                 snprintf(chunk, sizeof(chunk),
-                    "<div class='sensor-card' id='sensor-card-%d'>" 
+                    "<div class='sensor-card' id='sensor-card-%d'>"
                     "<h3>%s (Sensor %d) - <span style='color:#6f42c1;font-weight:bold;'>Borewell</span></h3>"
-                    "<p><strong>Unit ID:</strong> %s | <strong>Slave ID:</strong> %d | <strong>Register:</strong> %d | <strong>Quantity:</strong> %d</p>"
-                    "<p><strong>Register Type:</strong> %s | <strong>Data Type:</strong> %s | <strong>Scale:</strong> %.3f</p>"
-                    "<p style='color:#666;font-size:12px;margin:5px 0'>RS485 Modbus Communication - Borewell water level and flow monitoring</p>"
+                    "<p><strong>Unit ID:</strong> %s</p>"
+                    "<p><strong>Slave ID:</strong> %d</p>"
+                    "<p><strong>Register:</strong> %d</p>"
+                    "<p><strong>Quantity:</strong> %d</p>"
+                    "<p><strong>Register Type:</strong> %s</p>"
+                    "<p><strong>Data Type:</strong> %s</p>"
+                    "<p><strong>Scale:</strong> %.3f</p>"
+                    "<p style='color:#666;font-size:12px;margin:5px 0;grid-column:1/-1'>RS485 Modbus - Borewell water level and flow monitoring</p>"
                     "<button type='button' onclick='editSensor(%d)' style='background:#17a2b8;color:white;margin:2px;padding:6px 12px'>Edit</button> "
                     "<button type='button' onclick='testSensor(%d)' style='background:#007bff;color:white;margin:2px;padding:6px 12px'>Test RS485</button> "
                     "<button type='button' onclick='deleteSensor(%d)' style='background:#dc3545;color:white;margin:2px;padding:6px 12px'>Delete</button>"
@@ -1922,11 +1970,16 @@ static esp_err_t config_page_handler(httpd_req_t *req)
                     i, i, i, i);
             } else if (strcmp(g_system_config.sensors[i].sensor_type, "ENERGY") == 0) {
                 snprintf(chunk, sizeof(chunk),
-                    "<div class='sensor-card' id='sensor-card-%d'>" 
+                    "<div class='sensor-card' id='sensor-card-%d'>"
                     "<h3>%s (Sensor %d) - <span style='color:#fd7e14;font-weight:bold;'>Energy Meter</span></h3>"
-                    "<p><strong>Unit ID:</strong> %s | <strong>Slave ID:</strong> %d | <strong>Register:</strong> %d | <strong>Quantity:</strong> %d</p>"
-                    "<p><strong>Register Type:</strong> %s | <strong>Data Type:</strong> %s | <strong>Scale:</strong> %.3f</p>"
-                    "<p style='color:#666;font-size:12px;margin:5px 0'>RS485 Modbus Communication - Energy meter monitoring with power consumption data</p>"
+                    "<p><strong>Unit ID:</strong> %s</p>"
+                    "<p><strong>Slave ID:</strong> %d</p>"
+                    "<p><strong>Register:</strong> %d</p>"
+                    "<p><strong>Quantity:</strong> %d</p>"
+                    "<p><strong>Register Type:</strong> %s</p>"
+                    "<p><strong>Data Type:</strong> %s</p>"
+                    "<p><strong>Scale:</strong> %.3f</p>"
+                    "<p style='color:#666;font-size:12px;margin:5px 0;grid-column:1/-1'>RS485 Modbus - Energy meter monitoring with power consumption data</p>"
                     "<button type='button' onclick='editSensor(%d)' style='background:#17a2b8;color:white;margin:2px;padding:6px 12px'>Edit</button> "
                     "<button type='button' onclick='testSensor(%d)' style='background:#007bff;color:white;margin:2px;padding:6px 12px'>Test RS485</button> "
                     "<button type='button' onclick='deleteSensor(%d)' style='background:#dc3545;color:white;margin:2px;padding:6px 12px'>Delete</button>"
@@ -1940,11 +1993,16 @@ static esp_err_t config_page_handler(httpd_req_t *req)
                     i, i, i, i);
             } else {
                 snprintf(chunk, sizeof(chunk),
-                    "<div class='sensor-card' id='sensor-card-%d'>" 
+                    "<div class='sensor-card' id='sensor-card-%d'>"
                     "<h3>%s (Sensor %d) - <span style='color:#007bff;font-weight:bold;'>%s</span></h3>"
-                    "<p><strong>Unit ID:</strong> %s | <strong>Slave ID:</strong> %d | <strong>Register:</strong> %d | <strong>Quantity:</strong> %d</p>"
-                    "<p><strong>Register Type:</strong> %s | <strong>Data Type:</strong> %s | <strong>Scale:</strong> %.3f</p>"
-                    "<p style='color:#666;font-size:12px;margin:5px 0'>RS485 Modbus Communication - Real-time data with ScadaCore format interpretations</p>"
+                    "<p><strong>Unit ID:</strong> %s</p>"
+                    "<p><strong>Slave ID:</strong> %d</p>"
+                    "<p><strong>Register:</strong> %d</p>"
+                    "<p><strong>Quantity:</strong> %d</p>"
+                    "<p><strong>Register Type:</strong> %s</p>"
+                    "<p><strong>Data Type:</strong> %s</p>"
+                    "<p><strong>Scale:</strong> %.3f</p>"
+                    "<p style='color:#666;font-size:12px;margin:5px 0;grid-column:1/-1'>RS485 Modbus - Real-time data with ScadaCore format interpretations</p>"
                     "<button type='button' onclick='editSensor(%d)' style='background:#17a2b8;color:white;margin:2px;padding:6px 12px'>Edit</button> "
                     "<button type='button' onclick='testSensor(%d)' style='background:#007bff;color:white;margin:2px;padding:6px 12px'>Test RS485</button> "
                     "<button type='button' onclick='deleteSensor(%d)' style='background:#dc3545;color:white;margin:2px;padding:6px 12px'>Delete</button>"
@@ -2604,6 +2662,8 @@ static esp_err_t config_page_handler(httpd_req_t *req)
         "const simMode=document.getElementById('mode_sim').checked;"
         "document.getElementById('wifi_panel').style.display=wifiMode?'block':'none';"
         "document.getElementById('sim_panel').style.display=simMode?'block':'none';"
+        "document.getElementById('wifi-network-status').style.display=wifiMode?'block':'none';"
+        "document.getElementById('sim-network-status').style.display=simMode?'block':'none';"
         "}"
         "function toggleSDOptions(){"
         "const enabled=document.getElementById('sd_enabled').checked;"
@@ -3212,23 +3272,24 @@ static esp_err_t config_page_handler(httpd_req_t *req)
         "if(confirm('Edit Sensor '+(sensorId+1)+'? This will show an edit form.')){"
         "const sensor=sensorData[sensorId];"
         "if(!sensor){alert('Sensor data not found');return;}"
-        "var editForm='<div class=\"sensor-card\" style=\"border:2px solid #007bff;background:#f0f8ff;padding:15px\">';"
+        "var editForm='<div class=\"sensor-card\" style=\"border:2px solid #007bff;background:#f0f8ff\">';"
         "editForm+='<h3 style=\"color:#007bff\">Editing Sensor '+(sensorId+1)+' - <span style=\"color:#28a745;font-weight:bold;\">'+(sensor.sensor_type||'Flow-Meter')+'</span></h3>';"
-        "editForm+='<label>Name:</label><input id=\"edit_name_'+sensorId+'\" value=\"'+sensor.name+'\" style=\"width:200px;margin:5px\"><br>';"
-        "editForm+='<label>Unit ID:</label><input id=\"edit_unit_'+sensorId+'\" value=\"'+sensor.unit_id+'\" style=\"width:100px;margin:5px\"><br>';"
+        "editForm+='<div class=\"form-grid\">';"
+        "editForm+='<label>Name:</label><input id=\"edit_name_'+sensorId+'\" value=\"'+sensor.name+'\">';"
+        "editForm+='<label>Unit ID:</label><input id=\"edit_unit_'+sensorId+'\" value=\"'+sensor.unit_id+'\">';"
         "if (sensor.sensor_type !== 'QUALITY') {"
-        "editForm+='<label>Slave ID:</label><input type=\"number\" id=\"edit_slave_'+sensorId+'\" value=\"'+sensor.slave_id+'\" min=\"1\" max=\"247\" style=\"width:80px;margin:5px\"><br>';"
-        "editForm+='<label>Register:</label><input type=\"number\" id=\"edit_register_'+sensorId+'\" value=\"'+sensor.register_address+'\" style=\"width:100px;margin:5px\"><br>';"
-        "editForm+='<label>Quantity:</label><input type=\"number\" id=\"edit_quantity_'+sensorId+'\" value=\"'+sensor.quantity+'\" min=\"1\" max=\"125\" style=\"width:80px;margin:5px\"><br>';"
-        "editForm+='<label>Register Type:</label><select id=\"edit_register_type_'+sensorId+'\" style=\"width:250px\">';"
+        "editForm+='<label>Slave ID:</label><input type=\"number\" id=\"edit_slave_'+sensorId+'\" value=\"'+sensor.slave_id+'\" min=\"1\" max=\"247\">';"
+        "editForm+='<label>Register:</label><input type=\"number\" id=\"edit_register_'+sensorId+'\" value=\"'+sensor.register_address+'\">';"
+        "editForm+='<label>Quantity:</label><input type=\"number\" id=\"edit_quantity_'+sensorId+'\" value=\"'+sensor.quantity+'\" min=\"1\" max=\"125\">';"
+        "editForm+='<label>Register Type:</label><select id=\"edit_register_type_'+sensorId+'\">';"
         "editForm+='<option value=\"HOLDING\" '+(sensor.register_type==='HOLDING'?'selected':'')+'>Holding Registers (03) - Read/Write</option>';"
         "editForm+='<option value=\"INPUT\" '+(sensor.register_type==='INPUT'?'selected':'')+'>Input Registers (04) - Read Only</option>';"
         "editForm+='<option value=\"COILS\" '+(sensor.register_type==='COILS'?'selected':'')+'>Coils (01) - Single Bit Read/Write</option>';"
         "editForm+='<option value=\"DISCRETE\" '+(sensor.register_type==='DISCRETE'?'selected':'')+'>Discrete Inputs (02) - Single Bit Read Only</option>';"
-        "editForm+='</select><br>';"
+        "editForm+='</select>';"
         "}"
         "if (sensor.sensor_type === 'ZEST') {"
-        "editForm+='<label>Data Type:</label><div style=\"padding:8px;background:#e8f5e8;border-radius:4px;display:inline-block;margin:5px;color:#4caf50;font-weight:bold\">Fixed - INT32_BE + INT32_LE_SWAP</div><input type=\"hidden\" id=\"edit_datatype_'+sensorId+'\" value=\"ZEST_FIXED\"><br>';"
+        "editForm+='<label>Data Type:</label><div style=\"padding:8px;background:#e8f5e8;border-radius:4px;color:#4caf50;font-weight:bold\">Fixed - INT32_BE + INT32_LE_SWAP</div><input type=\"hidden\" id=\"edit_datatype_'+sensorId+'\" value=\"ZEST_FIXED\">';"
         "} else {"
         "var mappedDataType = sensor.data_type || '';"
         "console.log('Edit form - Original data_type:', sensor.data_type, 'length:', sensor.data_type ? sensor.data_type.length : 0);"
@@ -3422,18 +3483,19 @@ static esp_err_t config_page_handler(httpd_req_t *req)
         "editForm+='</div>';"
         "} else if (sensor.sensor_type === 'RAINGAUGE') {"
         "console.log('Edit form: Creating RAINGAUGE sensor edit form for sensor', sensorId, 'with scale_factor:', sensor.scale_factor);"
-        "editForm+='<label>Scale Factor:</label><input type=\"number\" id=\"edit_scale_factor_'+sensorId+'\" value=\"'+(sensor.scale_factor||1.0)+'\" step=\"any\" style=\"width:100px;margin:5px\"> <span style=\"color:#666;font-size:11px\">(Rain gauge scaling - e.g., 0.1 for mm/tips, 1.0 for direct reading)</span><br>';"
+        "editForm+='<label>Scale Factor:</label><div><input type=\"number\" id=\"edit_scale_factor_'+sensorId+'\" value=\"'+(sensor.scale_factor||1.0)+'\" step=\"any\" style=\"width:100px\"><small style=\"color:#666;margin-left:8px\">(Rain gauge scaling - e.g., 0.1 for mm/tips)</small></div>';"
         "} else if (sensor.sensor_type === 'BOREWELL') {"
         "console.log('Edit form: Creating BOREWELL sensor edit form for sensor', sensorId, 'with scale_factor:', sensor.scale_factor);"
-        "editForm+='<label>Scale Factor:</label><input type=\"number\" id=\"edit_scale_factor_'+sensorId+'\" value=\"'+(sensor.scale_factor||1.0)+'\" step=\"any\" style=\"width:100px;margin:5px\"> <span style=\"color:#666;font-size:11px\">(Borewell sensor scaling)</span><br>';"
+        "editForm+='<label>Scale Factor:</label><div><input type=\"number\" id=\"edit_scale_factor_'+sensorId+'\" value=\"'+(sensor.scale_factor||1.0)+'\" step=\"any\" style=\"width:100px\"><small style=\"color:#666;margin-left:8px\">(Borewell sensor scaling)</small></div>';"
         "} else {"
         "console.log('Edit form: Creating generic sensor edit form for sensor', sensorId, 'type:', sensor.sensor_type, 'scale_factor:', sensor.scale_factor);"
-        "editForm+='<label>Scale Factor:</label><input type=\"number\" id=\"edit_scale_factor_'+sensorId+'\" value=\"'+(sensor.scale_factor||1.0)+'\" step=\"any\" style=\"width:100px;margin:5px\"><br>';"
+        "editForm+='<label>Scale Factor:</label><input type=\"number\" id=\"edit_scale_factor_'+sensorId+'\" value=\"'+(sensor.scale_factor||1.0)+'\" step=\"any\">';"
         "}"
-        "editForm+='<div id=\"test-result-edit-'+sensorId+'\" style=\"margin:10px 0;display:none\"></div><br>';"
-        "editForm+='<button type=\"button\" onclick=\"saveSensorEdit('+sensorId+')\" style=\"background:#28a745;color:white;margin:5px;padding:8px\">Save Changes</button> ';"
-        "editForm+='<button type=\"button\" onclick=\"testEditSensorRS485('+sensorId+')\" style=\"background:#007bff;color:white;margin:5px;padding:8px\">Test RS485</button> ';"
-        "editForm+='<button type=\"button\" onclick=\"cancelSensorEdit('+sensorId+')\" style=\"background:#6c757d;color:white;margin:5px;padding:8px\">Cancel</button>';"
+        "editForm+='</div>';"
+        "editForm+='<div id=\"test-result-edit-'+sensorId+'\" style=\"margin:10px 0;display:none\"></div>';"
+        "editForm+='<button type=\"button\" onclick=\"saveSensorEdit('+sensorId+')\" style=\"background:#28a745;color:white;padding:10px 15px;border:none;border-radius:4px;font-weight:bold\">Save Changes</button> ';"
+        "editForm+='<button type=\"button\" onclick=\"testEditSensorRS485('+sensorId+')\" style=\"background:#007bff;color:white;padding:10px 15px;border:none;border-radius:4px;font-weight:bold\">Test RS485</button> ';"
+        "editForm+='<button type=\"button\" onclick=\"cancelSensorEdit('+sensorId+')\" style=\"background:#6c757d;color:white;padding:10px 15px;border:none;border-radius:4px;font-weight:bold\">Cancel</button>';"
         "editForm+='</div>';"
         "document.getElementById('sensor-card-'+sensorId).outerHTML=editForm;"
         "setTimeout(() => {"
@@ -4606,8 +4668,8 @@ static esp_err_t test_sensor_handler(httpd_req_t *req)
             
             // Build the comprehensive data format table
             snprintf(format_table, 6000,
-                     "<div style='background:#d4edda;padding:15px;border-radius:8px;margin:10px 0;border:1px solid #c3e6cb;box-shadow:0 2px 4px rgba(0,0,0,0.1)'>"
-                     "<h4 style='color:#155724;margin:0 0 10px 0;font-weight:bold'>✓ RS485 Success - %d Registers Read</h4>", reg_count);
+                     "<div class='test-result'>"
+                     "<h4>✓ RS485 Success - %d Registers Read</h4>", reg_count);
             
             // Add primary configured value first
             double primary_value = 0.0;
@@ -4685,33 +4747,33 @@ static esp_err_t test_sensor_handler(httpd_req_t *req)
                 // ZEST sensor special handling - 4-register format
                 // Registers [0,1]: INT32 Big Endian (ABCD)
                 // Registers [2,3]: INT32 Little Endian Byte Swap (DCBA)
-                
+
                 // First 2 registers as INT32 Big Endian
                 uint32_t int32_be = ((uint32_t)registers[0] << 16) | registers[1];
                 int32_t signed_value1 = (int32_t)int32_be;
                 double value1 = (double)signed_value1 * sensor->scale_factor;
-                
+
                 // Next 2 registers as INT32 Little Endian Byte Swap
                 uint32_t int32_le_swap = ((uint32_t)registers[3] << 16) | registers[2];
                 int32_t signed_value2 = (int32_t)int32_le_swap;
                 double value2 = (double)signed_value2 * sensor->scale_factor;
-                
+
                 display_value = value1 + value2;
-                snprintf(value_desc, sizeof(value_desc), "ZEST: INT32_BE(%ld) + INT32_LE_SWAP(%ld) = %.6f", 
+                snprintf(value_desc, sizeof(value_desc), "ZEST: INT32_BE(%ld) + INT32_LE_SWAP(%ld) = %.6f",
                          (long)signed_value1, (long)signed_value2, display_value);
             } else {
                 snprintf(value_desc, sizeof(value_desc), "%s×%.3f", sensor->data_type, sensor->scale_factor);
             }
             
-            snprintf(temp_str, sizeof(temp_str), 
-                     "<b>Configured Value:</b> %.6f (%s)<br>"
-                     "<b>Raw Hex:</b> ", display_value, value_desc);
+            snprintf(temp_str, sizeof(temp_str),
+                     "<div class='value-box'><b>Configured Value:</b> %.6f (%s)</div>"
+                     "<div><b>Raw Hex:</b> <span class='hex-display'>", display_value, value_desc);
             
             // Add operation team comparison display for Level/Radar Level sensors
             if ((strcmp(sensor->sensor_type, "Radar Level") == 0 || strcmp(sensor->sensor_type, "Level") == 0) && sensor->max_water_level > 0) {
                 char comparison_str[200];
-                snprintf(comparison_str, sizeof(comparison_str), 
-                         "<br><b>Operation Comparison:</b> %.0f → %.1f%% ✅<br>", 
+                snprintf(comparison_str, sizeof(comparison_str),
+                         "<br><b>Operation Comparison:</b> %.0f → %.1f%% ✅<br>",
                          primary_value, display_value);
                 strcat(format_table, temp_str);
                 strcat(format_table, comparison_str);
@@ -4730,13 +4792,13 @@ static esp_err_t test_sensor_handler(httpd_req_t *req)
                 double zest_total = value1 + value2;
                 
                 char zest_breakdown[700];
-                snprintf(zest_breakdown, sizeof(zest_breakdown), 
-                         "<br><div style='background:#e6f3ff;padding:8px;border-radius:4px;margin:5px 0'>"
+                snprintf(zest_breakdown, sizeof(zest_breakdown),
+                         "<br><div class='scada-breakdown'>"
                          "<b>ZEST Calculation Breakdown:</b><br>"
                          "• Registers [0-1] as UINT32_BE: 0x%04X%04X = %lu × %.3f = <b>%.6f</b><br>"
                          "• Registers [2-3] as UINT32_LE_SWAP: 0x%04X%04X = %lu × 0.001 × %.3f = <b>%.6f</b><br>"
                          "• <b>Total Sum = %.6f</b> ✅"
-                         "</div>", 
+                         "</div>",
                          registers[0], registers[1], (unsigned long)uint32_be, sensor->scale_factor, value1,
                          registers[2], registers[3], (unsigned long)uint32_le_swap, sensor->scale_factor, value2,
                          zest_total);
@@ -4749,13 +4811,13 @@ static esp_err_t test_sensor_handler(httpd_req_t *req)
                 snprintf(temp_str, sizeof(temp_str), "%04X ", registers[i]);
                 strcat(format_table, temp_str);
             }
-            strcat(format_table, "<br>");
+            strcat(format_table, "</span></div>");
             
             // Add comprehensive format interpretations table
             strcat(format_table,
-                   "<div style='overflow-x:auto;margin-top:15px'>"
-                   "<table style='width:100%;font-size:11px;border-collapse:collapse;min-width:320px'>"
-                   "<tr style='background:#495057;color:white'><th colspan='4' style='padding:10px;font-weight:bold;text-align:center'>ALL SCADACORE DATA FORMAT INTERPRETATIONS</th></tr>");
+                   "<div style='overflow-x:auto;margin-top:var(--space-md)'>"
+                   "<table class='scada-table'>"
+                   "<tr class='scada-header-main'><th colspan='4'>ALL SCADACORE DATA FORMAT INTERPRETATIONS</th></tr>");
             
             // 16-bit formats (if 1+ registers)
             if (reg_count >= 1) {
@@ -4787,25 +4849,25 @@ static esp_err_t test_sensor_handler(httpd_req_t *req)
                 
                 // FLOAT32 comprehensive variations - ScadaCore compatible
                 snprintf(temp_str, sizeof(temp_str),
-                         "<tr style='background:#0d6efd;color:white'><th colspan='4' style='padding:8px;font-weight:bold'>FLOAT32 FORMAT INTERPRETATIONS</th></tr>"
-                         "<tr><td style='padding:6px;word-break:break-word'><strong>FLOAT32_1234 (ABCD):</strong></td><td style='padding:6px'>%.6f</td><td style='padding:6px;word-break:break-word'><strong>FLOAT32_4321 (DCBA):</strong></td><td style='padding:6px'>%.6f</td></tr>"
-                         "<tr style='background:#f8f8f8'><td style='padding:6px;word-break:break-word'><strong>FLOAT32_2143 (BADC):</strong></td><td style='padding:6px'>%.6f</td><td style='padding:6px;word-break:break-word'><strong>FLOAT32_3412 (CDAB):</strong></td><td style='padding:6px'>%.6f</td></tr>",
+                         "<tr class='scada-header-float'><th colspan='4'>FLOAT32 FORMAT INTERPRETATIONS</th></tr>"
+                         "<tr><td><strong>FLOAT32_1234 (ABCD):</strong></td><td>%.6f</td><td><strong>FLOAT32_4321 (DCBA):</strong></td><td>%.6f</td></tr>"
+                         "<tr><td><strong>FLOAT32_2143 (BADC):</strong></td><td>%.6f</td><td><strong>FLOAT32_3412 (CDAB):</strong></td><td>%.6f</td></tr>",
                          float_1234_abcd, float_4321_dcba, float_2143_badc, float_3412_cdab);
                 strcat(format_table, temp_str);
 
                 // INT32 comprehensive variations - ScadaCore compatible
                 snprintf(temp_str, sizeof(temp_str),
-                         "<tr style='background:#28a745;color:white'><th colspan='4' style='padding:8px;font-weight:bold'>INT32 FORMAT INTERPRETATIONS</th></tr>"
-                         "<tr><td style='padding:6px;word-break:break-word'><strong>INT32_1234 (ABCD):</strong></td><td style='padding:6px'>%ld</td><td style='padding:6px;word-break:break-word'><strong>INT32_4321 (DCBA):</strong></td><td style='padding:6px'>%ld</td></tr>"
-                         "<tr style='background:#f8f8f8'><td style='padding:6px;word-break:break-word'><strong>INT32_2143 (BADC):</strong></td><td style='padding:6px'>%ld</td><td style='padding:6px;word-break:break-word'><strong>INT32_3412 (CDAB):</strong></td><td style='padding:6px'>%ld</td></tr>",
+                         "<tr class='scada-header-int'><th colspan='4'>INT32 FORMAT INTERPRETATIONS</th></tr>"
+                         "<tr><td><strong>INT32_1234 (ABCD):</strong></td><td>%ld</td><td><strong>INT32_4321 (DCBA):</strong></td><td>%ld</td></tr>"
+                         "<tr><td><strong>INT32_2143 (BADC):</strong></td><td>%ld</td><td><strong>INT32_3412 (CDAB):</strong></td><td>%ld</td></tr>",
                          (int32_t)val_1234_abcd, (int32_t)val_4321_dcba, (int32_t)val_2143_badc, (int32_t)val_3412_cdab);
                 strcat(format_table, temp_str);
 
                 // UINT32 comprehensive variations - ScadaCore compatible
                 snprintf(temp_str, sizeof(temp_str),
-                         "<tr style='background:#fd7e14;color:white'><th colspan='4' style='padding:8px;font-weight:bold'>UINT32 FORMAT INTERPRETATIONS</th></tr>"
-                         "<tr><td style='padding:6px;word-break:break-word'><strong>UINT32_1234 (ABCD):</strong></td><td style='padding:6px'>%lu</td><td style='padding:6px;word-break:break-word'><strong>UINT32_4321 (DCBA):</strong></td><td style='padding:6px'>%lu</td></tr>"
-                         "<tr style='background:#f8f8f8'><td style='padding:6px;word-break:break-word'><strong>UINT32_2143 (BADC):</strong></td><td style='padding:6px'>%lu</td><td style='padding:6px;word-break:break-word'><strong>UINT32_3412 (CDAB):</strong></td><td style='padding:6px'>%lu</td></tr>",
+                         "<tr class='scada-header-uint'><th colspan='4'>UINT32 FORMAT INTERPRETATIONS</th></tr>"
+                         "<tr><td><strong>UINT32_1234 (ABCD):</strong></td><td>%lu</td><td><strong>UINT32_4321 (DCBA):</strong></td><td>%lu</td></tr>"
+                         "<tr><td><strong>UINT32_2143 (BADC):</strong></td><td>%lu</td><td><strong>UINT32_3412 (CDAB):</strong></td><td>%lu</td></tr>",
                          val_1234_abcd, val_4321_dcba, val_2143_badc, val_3412_cdab);
                 strcat(format_table, temp_str);
             }
@@ -4836,25 +4898,25 @@ static esp_err_t test_sensor_handler(httpd_req_t *req)
                 
                 // FLOAT64 comprehensive variations - ScadaCore compatible
                 snprintf(temp_str, sizeof(temp_str),
-                         "<tr style='background:#6610f2;color:white'><th colspan='4' style='padding:8px;font-weight:bold'>FLOAT64 FORMAT INTERPRETATIONS</th></tr>"
-                         "<tr><td style='padding:6px;word-break:break-word'><strong>FLOAT64_12345678 (ABCDEFGH):</strong></td><td style='padding:6px;word-break:break-all'>%.3f</td><td style='padding:6px;word-break:break-word'><strong>FLOAT64_87654321 (HGFEDCBA):</strong></td><td style='padding:6px;word-break:break-all'>%.3f</td></tr>"
-                         "<tr style='background:#f8f8f8'><td style='padding:6px;word-break:break-word'><strong>FLOAT64_21436587 (BADCFEHG):</strong></td><td style='padding:6px;word-break:break-all'>%.3f</td><td style='padding:6px;word-break:break-word'><strong>FLOAT64_78563412 (GHEFCDAB):</strong></td><td style='padding:6px;word-break:break-all'>%.3f</td></tr>",
+                         "<tr class='scada-header-float64'><th colspan='4'>FLOAT64 FORMAT INTERPRETATIONS</th></tr>"
+                         "<tr><td><strong>FLOAT64_12345678 (ABCDEFGH):</strong></td><td>%.3f</td><td><strong>FLOAT64_87654321 (HGFEDCBA):</strong></td><td>%.3f</td></tr>"
+                         "<tr><td><strong>FLOAT64_21436587 (BADCFEHG):</strong></td><td>%.3f</td><td><strong>FLOAT64_78563412 (GHEFCDAB):</strong></td><td>%.3f</td></tr>",
                          float64_12345678, float64_87654321, float64_21436587, float64_78563412);
                 strcat(format_table, temp_str);
 
                 // INT64 comprehensive variations - ScadaCore compatible
                 snprintf(temp_str, sizeof(temp_str),
-                         "<tr style='background:#20c997;color:white'><th colspan='4' style='padding:8px;font-weight:bold'>INT64 FORMAT INTERPRETATIONS</th></tr>"
-                         "<tr><td style='padding:6px;word-break:break-word'><strong>INT64_12345678 (ABCDEFGH):</strong></td><td style='padding:6px;word-break:break-all'>%lld</td><td style='padding:6px;word-break:break-word'><strong>INT64_87654321 (HGFEDCBA):</strong></td><td style='padding:6px;word-break:break-all'>%lld</td></tr>"
-                         "<tr style='background:#f8f8f8'><td style='padding:6px;word-break:break-word'><strong>INT64_21436587 (BADCFEHG):</strong></td><td style='padding:6px;word-break:break-all'>%lld</td><td style='padding:6px;word-break:break-word'><strong>INT64_78563412 (GHEFCDAB):</strong></td><td style='padding:6px;word-break:break-all'>%lld</td></tr>",
+                         "<tr class='scada-header-int64'><th colspan='4'>INT64 FORMAT INTERPRETATIONS</th></tr>"
+                         "<tr><td><strong>INT64_12345678 (ABCDEFGH):</strong></td><td>%lld</td><td><strong>INT64_87654321 (HGFEDCBA):</strong></td><td>%lld</td></tr>"
+                         "<tr><td><strong>INT64_21436587 (BADCFEHG):</strong></td><td>%lld</td><td><strong>INT64_78563412 (GHEFCDAB):</strong></td><td>%lld</td></tr>",
                          (int64_t)val64_12345678, (int64_t)val64_87654321, (int64_t)val64_21436587, (int64_t)val64_78563412);
                 strcat(format_table, temp_str);
 
                 // UINT64 comprehensive variations - ScadaCore compatible
                 snprintf(temp_str, sizeof(temp_str),
-                         "<tr style='background:#dc3545;color:white'><th colspan='4' style='padding:8px;font-weight:bold'>UINT64 FORMAT INTERPRETATIONS</th></tr>"
-                         "<tr><td style='padding:6px;word-break:break-word'><strong>UINT64_12345678 (ABCDEFGH):</strong></td><td style='padding:6px;word-break:break-all;max-width:150px'>%llu</td><td style='padding:6px;word-break:break-word'><strong>UINT64_87654321 (HGFEDCBA):</strong></td><td style='padding:6px;word-break:break-all;max-width:150px'>%llu</td></tr>"
-                         "<tr style='background:#f8f8f8'><td style='padding:6px;word-break:break-word'><strong>UINT64_21436587 (BADCFEHG):</strong></td><td style='padding:6px;word-break:break-all;max-width:150px'>%llu</td><td style='padding:6px;word-break:break-word'><strong>UINT64_78563412 (GHEFCDAB):</strong></td><td style='padding:6px;word-break:break-all;max-width:150px'>%llu</td></tr>",
+                         "<tr class='scada-header-uint64'><th colspan='4'>UINT64 FORMAT INTERPRETATIONS</th></tr>"
+                         "<tr><td><strong>UINT64_12345678 (ABCDEFGH):</strong></td><td>%llu</td><td><strong>UINT64_87654321 (HGFEDCBA):</strong></td><td>%llu</td></tr>"
+                         "<tr><td><strong>UINT64_21436587 (BADCFEHG):</strong></td><td>%llu</td><td><strong>UINT64_78563412 (GHEFCDAB):</strong></td><td>%llu</td></tr>",
                          val64_12345678, val64_87654321, val64_21436587, val64_78563412);
                 strcat(format_table, temp_str);
                 
