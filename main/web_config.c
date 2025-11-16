@@ -220,9 +220,9 @@ static const char* html_header =
 ".status-item strong{display:block;font-size:var(--text-sm);color:var(--color-text-primary);margin-bottom:var(--space-xs);font-weight:var(--weight-semibold)}"
 ".status-item span{font-size:var(--text-base);color:var(--color-text-secondary)}"
 "/* ===== FORM LAYOUTS ===== */"
-".form-grid{display:grid;grid-template-columns:180px 1fr;gap:var(--space-md);align-items:center;margin:var(--space-md) 0}"
+".form-grid{display:grid;grid-template-columns:180px 1fr;gap:var(--space-md);align-items:center;margin:var(--space-md) 0;width:100%}"
 ".form-grid label{font-weight:var(--weight-semibold);color:var(--color-text-primary);text-align:left}"
-".form-grid input,.form-grid select,.form-grid textarea{width:100%;max-width:400px;padding:var(--space-sm);border:1px solid var(--color-border-medium);border-radius:var(--radius-sm);font-size:var(--text-base)}"
+".form-grid input,.form-grid select,.form-grid textarea{width:100%;max-width:100%;padding:var(--space-sm);border:1px solid var(--color-border-medium);border-radius:var(--radius-sm);font-size:var(--text-base)}"
 ".form-grid textarea{font-family:monospace;resize:vertical}"
 "/* ===== HEAP USAGE BAR ===== */"
 ".heap-bar{width:100%;height:24px;background:var(--color-bg-tertiary);border-radius:var(--radius-sm);position:relative;overflow:hidden;margin-top:var(--space-xs)}"
@@ -243,7 +243,7 @@ static const char* html_header =
 ".sidebar::-webkit-scrollbar-track{background:transparent}"
 ".sidebar::-webkit-scrollbar-thumb{background:var(--color-border-medium);border-radius:var(--radius-full)}"
 ".sidebar::-webkit-scrollbar-thumb:hover{background:var(--color-border-dark)}"
-".main-content{margin-left:320px;padding:var(--space-2xl);flex:1;max-width:1400px}"
+".main-content{margin-left:320px;padding:var(--space-2xl);flex:1}"
 "/* ===== NAVIGATION MENU ===== */"
 ".menu-item{display:flex;align-items:center;gap:var(--space-md);width:100%;padding:var(--space-lg) var(--space-xl);color:var(--color-text-primary);text-decoration:none;border:none;background:transparent;cursor:pointer;text-align:left;font-size:var(--text-sm);font-family:Orbitron,monospace;font-weight:var(--weight-semibold);text-transform:uppercase;letter-spacing:0.05em;border-bottom:1px solid rgba(255,255,255,0.1);transition:background-color var(--transition-fast),color var(--transition-fast);position:relative;overflow:hidden}"
 ".menu-item::before{content:'';position:absolute;left:0;top:0;bottom:0;width:0;background:linear-gradient(180deg,var(--color-primary),var(--color-accent));transition:width var(--transition-fast)}"
@@ -4174,9 +4174,13 @@ static esp_err_t config_page_handler(httpd_req_t *req)
     
     // Close sensors section
     httpd_resp_sendstr_chunk(req,
-        "</div>" // Close sensors section
+        "</div>"); // Close sensors section
+
+    // Write Operations section
+    httpd_resp_sendstr_chunk(req,
         "<div id='write_ops' class='section'>"
         "<h2 class='section-title'><i>✏️</i>Write Operations</h2>"
+        ""
         "<div class='sensor-card'>"
         "<h3>Write Single Register (Function Code 06)</h3>"
         "<p>Write a single value to a Modbus holding register for device control and configuration.</p>"
@@ -4199,6 +4203,7 @@ static esp_err_t config_page_handler(httpd_req_t *req)
     
     // Write multiple registers section
     httpd_resp_sendstr_chunk(req,
+        ""
         "<div class='sensor-card'>"
         "<h3>Write Multiple Registers (Function Code 16)</h3>"
         "<p>Write multiple consecutive values to Modbus holding registers for bulk configuration.</p>"
@@ -4217,6 +4222,7 @@ static esp_err_t config_page_handler(httpd_req_t *req)
     
     // Write operations notes and monitoring section
     httpd_resp_sendstr_chunk(req,
+        ""
         "<div class='sensor-card'>"
         "<h3>Write Operation Notes</h3>"
         "<ul style='margin:10px 0;padding-left:20px'>"
@@ -4235,6 +4241,7 @@ static esp_err_t config_page_handler(httpd_req_t *req)
     snprintf(chunk, sizeof(chunk),
         "<div id='monitoring' class='section'>"
         "<h2 class='section-title'><i>🖥️</i>System Monitor</h2>"
+        ""
         "<div class='sensor-card'>"
         "<h3>RS485 Configuration</h3>"
         "<p><strong>RX Pin:</strong> <span>GPIO16</span></p>"
@@ -4243,13 +4250,42 @@ static esp_err_t config_page_handler(httpd_req_t *req)
         "<p><strong>Baud Rate:</strong> <span>9600</span></p>"
         "<p><strong>Parity:</strong> <span>None</span></p>"
         "</div>"
+        ""
         "<div class='sensor-card'>"
         "<h3>System Status</h3>"
         "<p><strong>Firmware:</strong> <span>v1.1.0-final</span></p>"
-        "<p><strong>Free Heap:</strong> <span id='heap'>Loading...</span></p>"
-        "<p><strong>WiFi RSSI:</strong> <span id='rssi'>Loading...</span></p>"
+        "<p><strong>MAC Address:</strong> <span id='mac_address'>Loading...</span></p>"
+        "<p><strong>Uptime:</strong> <span id='uptime'>Loading...</span></p>"
+        "<p><strong>Flash Memory:</strong> <span id='flash_total'>Loading...</span></p>"
+        "<p><strong>Active Tasks:</strong> <span id='tasks'>Loading...</span></p>"
         "</div>"
-        "</div>");
+        ""
+        "<div class='sensor-card'>"
+        "<h3>Memory Usage</h3>"
+        "<p><strong>Heap Usage:</strong> <span id='heap_usage'>Loading...</span></p>"
+        "<p><strong>Free Heap:</strong> <span id='heap'>Loading...</span></p>"
+        "<p><strong>Internal RAM:</strong> <span id='internal_heap'>Loading...</span></p>"
+        "<p><strong>SPIRAM:</strong> <span id='spiram_heap'>Loading...</span></p>"
+        "<p><strong>Largest Block:</strong> <span id='largest_block'>Loading...</span></p>"
+        "</div>"
+        ""
+        "<div class='sensor-card' id='wifi-network-status' style='display:%s'>"
+        "<h3>WiFi Network Status</h3>"
+        "<p><strong>WiFi Status:</strong> <span id='wifi_status'>Loading...</span></p>"
+        "<p><strong>WiFi RSSI:</strong> <span id='rssi'>Loading...</span></p>"
+        "<p><strong>SSID:</strong> <span id='ssid'>Loading...</span></p>"
+        "</div>"
+        ""
+        "<div class='sensor-card' id='sim-network-status' style='display:%s'>"
+        "<h3>SIM Network Status</h3>"
+        "<p><strong>SIM Status:</strong> <span id='sim_status'>Loading...</span></p>"
+        "<p><strong>Signal Quality:</strong> <span id='sim_signal'>Loading...</span></p>"
+        "<p><strong>Network:</strong> <span id='sim_network'>Loading...</span></p>"
+        "<p><strong>IP Address:</strong> <span id='sim_ip'>Loading...</span></p>"
+        "</div>"
+        "</div>",
+        g_system_config.network_mode == 0 ? "block" : "none",
+        g_system_config.network_mode == 1 ? "block" : "none");
     httpd_resp_sendstr_chunk(req, chunk);
     
     // Send HTML footer and end chunked transfer
