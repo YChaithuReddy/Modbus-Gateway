@@ -1188,6 +1188,7 @@ static void start_web_server(void)
         esp_err_t ret = web_config_start_server_only();
         if (ret == ESP_OK) {
             web_server_running = true;
+            update_led_status();  // Update LED to show web server is running
             ESP_LOGI(TAG, "[WEB] Web server started successfully with SoftAP");
             ESP_LOGI(TAG, "[ACCESS] Connect to WiFi: 'ModbusIoT-Config' (password: config123)");
             ESP_LOGI(TAG, "[ACCESS] Then visit: http://192.168.4.1 to configure");
@@ -1206,6 +1207,7 @@ static void stop_web_server(void)
         ESP_LOGI(TAG, "[WEB] GPIO trigger detected - stopping web server");
         web_config_stop();
         web_server_running = false;
+        update_led_status();  // Update LED to show web server is stopped
         ESP_LOGI(TAG, "[WEB] Web server stopped - returning to operation mode");
     } else {
         ESP_LOGI(TAG, "[WEB] Web server not running - ignoring trigger");
@@ -1687,6 +1689,9 @@ void app_main(void) {
     // Get system configuration
     system_config_t* config = get_system_config();
 
+    // Initialize status LEDs early so they can be used in both SETUP and OPERATION modes
+    init_status_leds();
+
     // Check if configuration is complete, otherwise start in setup mode
     if (config->config_complete) {
         ESP_LOGI(TAG, "[SYS] Configuration complete - Starting in OPERATION mode");
@@ -1714,6 +1719,8 @@ void app_main(void) {
         ESP_LOGI(TAG, "[WEB] Starting web server with SoftAP...");
         ret = web_config_start_server_only();
         if (ret == ESP_OK) {
+            web_server_running = true;
+            update_led_status();  // Turn on LED to indicate config mode is active
             ESP_LOGI(TAG, "[WEB] ✅ Web server started successfully");
             ESP_LOGI(TAG, "[ACCESS] Connect to WiFi: 'ModbusIoT-Config' (password: config123)");
             ESP_LOGI(TAG, "[ACCESS] Then visit: http://192.168.4.1 to configure");
@@ -1795,9 +1802,6 @@ void app_main(void) {
     
     // Initialize GPIO for modem reset
     init_modem_reset_gpio();
-    
-    // Initialize status LEDs
-    init_status_leds();
     
     // Initialize Modbus RS485 communication
     ESP_LOGI(TAG, "[CONFIG] Initializing Modbus RS485 communication...");
