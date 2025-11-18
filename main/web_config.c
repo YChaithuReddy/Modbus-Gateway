@@ -4666,7 +4666,6 @@ static esp_err_t config_page_handler(httpd_req_t *req)
         "btnWaterQuality.style.background = '#17a2b8';"
         "modbusExplorer.style.display = 'none';"
         "btnModbusExplorer.style.background = '#6c757d';"
-        "}"
         "} else if (menuType === 'explorer') {"
         "regularSensors.style.display = 'none';"
         "waterQualitySensors.style.display = 'none';"
