@@ -1929,7 +1929,7 @@ static esp_err_t config_page_handler(httpd_req_t *req)
         "<div class='sensor-card' style='padding:25px'>"
         "<h3 style='text-align:center;margin-top:0;margin-bottom:20px;color:#007bff;font-size:20px'>WiFi Network Configuration</h3>"
         "<div style='text-align:center;margin-bottom:20px'>"
-        "<button type='button' onclick='scanWiFi()' style='background:linear-gradient(135deg,#38b2ac,#48bb78);color:white;padding:12px 25px;border:none;border-radius:6px;font-weight:bold;cursor:pointer;font-size:15px;box-shadow:0 2px 8px rgba(56,178,172,0.3)'>📡 Scan WiFi Networks</button>"
+        "<button type='button' class='scan-button' onclick='scanWiFi()' style='background:linear-gradient(135deg,#38b2ac,#48bb78);color:white;padding:12px 25px;border:none;border-radius:6px;font-weight:bold;cursor:pointer;font-size:15px;box-shadow:0 2px 8px rgba(56,178,172,0.3)'>📡 Scan WiFi Networks</button>"
         "</div>"
         "<div id='scan-status' style='color:#666;font-size:13px;margin-bottom:10px;text-align:center'></div>"
         "<div id='networks' style='display:none;border:1px solid #e0e0e0;border-radius:8px;margin-bottom:20px;background:#f8f9fa;max-height:200px;overflow-y:auto'></div>"
@@ -1945,9 +1945,9 @@ static esp_err_t config_page_handler(httpd_req_t *req)
         "<div style='background:#e8f4f8;padding:var(--space-sm);border-radius:var(--radius-sm);margin-top:var(--space-md);border-left:4px solid #17a2b8'>"
         "<small style='color:#0c5460'><strong>💡 Tip:</strong> Click on any scanned network to auto-fill the SSID field.</small>"
         "</div>"
-        "<div style='background:#d4edda;padding:var(--space-md);margin-top:var(--space-md);border-radius:var(--radius-sm);border:1px solid #c3e6cb'>"
-        "<button type='submit' style='background:#28a745;color:white;padding:12px 25px;border:none;border-radius:6px;font-weight:bold;cursor:pointer;font-size:15px'>Save WiFi Settings</button>"
-        "<p style='color:#155724;font-size:11px;margin:8px 0 0 0'>This saves WiFi settings only. Azure and sensors are configured separately.</p>"
+        "<div style='margin-top:25px;padding-top:20px;border-top:1px solid #e0e0e0;text-align:center'>"
+        "<button type='submit' style='background:#28a745;color:white;padding:12px 30px;border:none;border-radius:6px;font-weight:600;cursor:pointer;font-size:16px;box-shadow:0 2px 4px rgba(0,0,0,0.1)'>Save WiFi Settings</button>"
+        "<p style='color:#666;font-size:12px;margin-top:10px'>This saves WiFi settings only. Azure and sensors are configured separately.</p>"
         "</div>"
         "</div>",
         g_system_config.network_mode == 0 ? "block" : "none",
@@ -2507,7 +2507,7 @@ static esp_err_t config_page_handler(httpd_req_t *req)
     // Add New Regular Sensor button
     httpd_resp_sendstr_chunk(req, 
         "<div style='background:#f8f9fa;padding:15px;margin:15px 0;border-radius:8px;border:1px solid #dee2e6'>"
-        "<button type='button' onclick='addRegularSensor()' style='background:#28a745;color:white;padding:12px 20px;margin:5px;border:none;border-radius:5px;font-size:16px;cursor:pointer;box-shadow:0 2px 4px rgba(0,0,0,0.2)' onmouseover='this.style.background=\"#218838\"' onmouseout='this.style.background=\"#28a745\"'>Add New Regular Sensor</button>"
+        "<button type='button' onclick='addRegularSensor()' style='background:linear-gradient(135deg,#28a745,#20c997);color:white;padding:14px 35px;margin:10px;border:none;border-radius:8px;font-size:16px;font-weight:600;cursor:pointer;box-shadow:0 4px 12px rgba(40,167,69,0.3);transition:all 0.3s ease' onmouseover='this.style.transform=\"translateY(-2px)\";this.style.boxShadow=\"0 6px 16px rgba(40,167,69,0.4)\"' onmouseout='this.style.transform=\"translateY(0)\";this.style.boxShadow=\"0 4px 12px rgba(40,167,69,0.3)\"'>➕ Add New Regular Sensor</button>"
         "<p style='color:#666;font-size:12px;margin:10px 0 5px 0'>Add Level, Flow-Meter, Energy, or other regular Modbus sensors</p>"
         "</div>");
     
@@ -2579,7 +2579,7 @@ static esp_err_t config_page_handler(httpd_req_t *req)
     // Add New Water Quality Sensor button
     httpd_resp_sendstr_chunk(req, 
         "<div style='background:#f8f9fa;padding:15px;margin:15px 0;border-radius:8px;border:1px solid #dee2e6'>"
-        "<button type='button' onclick='addWaterQualitySensor()' style='background:#17a2b8;color:white;padding:12px 20px;margin:5px;border:none;border-radius:5px;font-size:16px;cursor:pointer;box-shadow:0 2px 4px rgba(0,0,0,0.2)' onmouseover='this.style.background=\"#138496\"' onmouseout='this.style.background=\"#17a2b8\"'>Add Water Quality Sensor</button>"
+        "<button type='button' onclick='addWaterQualitySensor()' style='background:linear-gradient(135deg,#17a2b8,#20c997);color:white;padding:14px 35px;margin:10px;border:none;border-radius:8px;font-size:16px;font-weight:600;cursor:pointer;box-shadow:0 4px 12px rgba(23,162,184,0.3);transition:all 0.3s ease' onmouseover='this.style.transform=\"translateY(-2px)\";this.style.boxShadow=\"0 6px 16px rgba(23,162,184,0.4)\"' onmouseout='this.style.transform=\"translateY(0)\";this.style.boxShadow=\"0 4px 12px rgba(23,162,184,0.3)\"'>💧 Add Water Quality Sensor</button>"
         "<p style='color:#666;font-size:12px;margin:10px 0 5px 0'>Create individual water quality sensors with unique Unit IDs and custom Modbus configurations</p>"
         "</div>");
     
@@ -2696,10 +2696,10 @@ static esp_err_t config_page_handler(httpd_req_t *req)
 
     // Add buttons and closing for the sensor form container
     httpd_resp_sendstr_chunk(req,
-        "  h += '<div style=\"margin-top:15px;padding:10px;background:#f8f9fa;border-radius:4px\">';"
-        "  h += '<button type=\"button\" onclick=\"testNewSensorRS485(' + sensorCount + ')\" style=\"background:#17a2b8;color:white;margin:5px;padding:12px 20px;border:none;border-radius:6px;font-weight:bold;cursor:pointer\">Test RS485</button>';"
-        "  h += '<button type=\"button\" onclick=\"saveSingleSensor(' + sensorCount + ')\" style=\"background:#28a745;color:white;margin:5px;padding:12px 20px;border:none;border-radius:6px;font-weight:bold;cursor:pointer\">Save This Sensor</button>';"
-        "  h += '<button type=\"button\" onclick=\"removeSensorForm(' + sensorCount + ')\" style=\"background:#dc3545;color:white;margin:5px;padding:12px 20px;border:none;border-radius:6px;font-weight:bold;cursor:pointer\">Cancel</button>';"
+        "  h += '<div style=\"margin-top:25px;padding-top:20px;border-top:1px solid #e0e0e0;text-align:center\">';"
+        "  h += '<button type=\"button\" onclick=\"testNewSensorRS485(' + sensorCount + ')\" style=\"background:linear-gradient(135deg,#17a2b8,#138496);color:white;padding:12px 28px;margin:5px;border:none;border-radius:6px;font-weight:600;cursor:pointer;box-shadow:0 3px 8px rgba(23,162,184,0.3);transition:all 0.3s ease;font-size:15px\" onmouseover=\"this.style.transform=\\'translateY(-2px)\\';this.style.boxShadow=\\'0 5px 12px rgba(23,162,184,0.4)\\'\" onmouseout=\"this.style.transform=\\'translateY(0)\\';this.style.boxShadow=\\'0 3px 8px rgba(23,162,184,0.3)\\'\">🔍 Test RS485</button>';"
+        "  h += '<button type=\"button\" onclick=\"saveSingleSensor(' + sensorCount + ')\" style=\"background:linear-gradient(135deg,#28a745,#218838);color:white;padding:12px 28px;margin:5px;border:none;border-radius:6px;font-weight:600;cursor:pointer;box-shadow:0 3px 8px rgba(40,167,69,0.3);transition:all 0.3s ease;font-size:15px\" onmouseover=\"this.style.transform=\\'translateY(-2px)\\';this.style.boxShadow=\\'0 5px 12px rgba(40,167,69,0.4)\\'\" onmouseout=\"this.style.transform=\\'translateY(0)\\';this.style.boxShadow=\\'0 3px 8px rgba(40,167,69,0.3)\\'\">💾 Save This Sensor</button>';"
+        "  h += '<button type=\"button\" onclick=\"removeSensorForm(' + sensorCount + ')\" style=\"background:linear-gradient(135deg,#dc3545,#c82333);color:white;padding:12px 28px;margin:5px;border:none;border-radius:6px;font-weight:600;cursor:pointer;box-shadow:0 3px 8px rgba(220,53,69,0.3);transition:all 0.3s ease;font-size:15px\" onmouseover=\"this.style.transform=\\'translateY(-2px)\\';this.style.boxShadow=\\'0 5px 12px rgba(220,53,69,0.4)\\'\" onmouseout=\"this.style.transform=\\'translateY(0)\\';this.style.boxShadow=\\'0 3px 8px rgba(220,53,69,0.3)\\'\">❌ Cancel</button>';"
         "  h += '<div id=\"test-result-new-' + sensorCount + '\" style=\"margin-top:10px;display:none\"></div>';"
         "  h += '</div></div>';");
 
@@ -2745,10 +2745,10 @@ static esp_err_t config_page_handler(httpd_req_t *req)
         "  h += '</div></div>';"
         "  h += '<div id=\"sensor-form-' + sensorCount + '\" style=\"display:none\">';"
         "  h += '</div>';"
-        "  h += '<div style=\"margin-top:25px;padding-top:20px;border-top:1px solid #e0e0e0\">';"
-        "  h += '<button type=\"button\" onclick=\"testNewSensorRS485(' + sensorCount + ')\" style=\"background:#17a2b8;color:white;padding:12px 25px;border:none;border-radius:6px;font-weight:600;cursor:pointer;margin-right:10px;box-shadow:0 2px 4px rgba(0,0,0,0.1)\">Test RS485</button>';"
-        "  h += '<button type=\"button\" onclick=\"saveSingleSensor(' + sensorCount + ')\" style=\"background:#28a745;color:white;padding:12px 25px;border:none;border-radius:6px;font-weight:600;cursor:pointer;margin-right:10px;box-shadow:0 2px 4px rgba(0,0,0,0.1)\">Save This Sensor</button>';"
-        "  h += '<button type=\"button\" onclick=\"removeSensorForm(' + sensorCount + ')\" style=\"background:#dc3545;color:white;padding:12px 25px;border:none;border-radius:6px;font-weight:600;cursor:pointer;box-shadow:0 2px 4px rgba(0,0,0,0.1)\">Cancel</button>';"
+        "  h += '<div style=\"margin-top:25px;padding-top:20px;border-top:1px solid #e0e0e0;text-align:center\">';"
+        "  h += '<button type=\"button\" onclick=\"testNewSensorRS485(' + sensorCount + ')\" style=\"background:linear-gradient(135deg,#17a2b8,#138496);color:white;padding:12px 28px;border:none;border-radius:6px;font-weight:600;cursor:pointer;margin-right:10px;box-shadow:0 3px 8px rgba(23,162,184,0.3);transition:all 0.3s ease;font-size:15px\" onmouseover=\"this.style.transform=\\'translateY(-2px)\\';this.style.boxShadow=\\'0 5px 12px rgba(23,162,184,0.4)\\'\" onmouseout=\"this.style.transform=\\'translateY(0)\\';this.style.boxShadow=\\'0 3px 8px rgba(23,162,184,0.3)\\'\">🔍 Test RS485</button>';"
+        "  h += '<button type=\"button\" onclick=\"saveSingleSensor(' + sensorCount + ')\" style=\"background:linear-gradient(135deg,#28a745,#218838);color:white;padding:12px 28px;border:none;border-radius:6px;font-weight:600;cursor:pointer;margin-right:10px;box-shadow:0 3px 8px rgba(40,167,69,0.3);transition:all 0.3s ease;font-size:15px\" onmouseover=\"this.style.transform=\\'translateY(-2px)\\';this.style.boxShadow=\\'0 5px 12px rgba(40,167,69,0.4)\\'\" onmouseout=\"this.style.transform=\\'translateY(0)\\';this.style.boxShadow=\\'0 3px 8px rgba(40,167,69,0.3)\\'\">💾 Save This Sensor</button>';"
+        "  h += '<button type=\"button\" onclick=\"removeSensorForm(' + sensorCount + ')\" style=\"background:linear-gradient(135deg,#dc3545,#c82333);color:white;padding:12px 28px;border:none;border-radius:6px;font-weight:600;cursor:pointer;box-shadow:0 3px 8px rgba(220,53,69,0.3);transition:all 0.3s ease;font-size:15px\" onmouseover=\"this.style.transform=\\'translateY(-2px)\\';this.style.boxShadow=\\'0 5px 12px rgba(220,53,69,0.4)\\'\" onmouseout=\"this.style.transform=\\'translateY(0)\\';this.style.boxShadow=\\'0 3px 8px rgba(220,53,69,0.3)\\'\">❌ Cancel</button>';"
         "  h += '<div id=\"test-result-new-' + sensorCount + '\" style=\"margin-top:15px;display:none\"></div>';"
         "  h += '</div></div>';"
         "  console.log('Adding HTML to regular sensors div...');"
@@ -2807,10 +2807,10 @@ static esp_err_t config_page_handler(httpd_req_t *req)
         "  h += '<div id=\"sub-sensors-' + sensorCount + '\" style=\"margin:10px 0\"></div>';"
         "  h += '<button type=\"button\" onclick=\"addSubSensorToQualitySensor(' + sensorCount + ')\" style=\"background:#28a745;color:white;padding:8px 16px;border:none;border-radius:4px;font-size:14px;cursor:pointer\">➕ Add Sub-Sensor</button>';"
         "  h += '</div>';"
-        "  h += '<div style=\"margin-top:25px;padding-top:20px;border-top:1px solid #e0e0e0\">';"
-        "  h += '<button type=\"button\" onclick=\"testNewSensorRS485(' + sensorCount + ')\" style=\"background:#17a2b8;color:white;padding:12px 25px;border:none;border-radius:6px;font-weight:600;cursor:pointer;margin-right:10px;box-shadow:0 2px 4px rgba(0,0,0,0.1)\">Test RS485</button>';"
-        "  h += '<button type=\"button\" onclick=\"saveSingleSensor(' + sensorCount + ')\" style=\"background:#28a745;color:white;padding:12px 25px;border:none;border-radius:6px;font-weight:600;cursor:pointer;margin-right:10px;box-shadow:0 2px 4px rgba(0,0,0,0.1)\">Save Water Quality Sensor</button>';"
-        "  h += '<button type=\"button\" onclick=\"removeSensorForm(' + sensorCount + ')\" style=\"background:#dc3545;color:white;padding:12px 25px;border:none;border-radius:6px;font-weight:600;cursor:pointer;box-shadow:0 2px 4px rgba(0,0,0,0.1)\">Cancel</button>';"
+        "  h += '<div style=\"margin-top:25px;padding-top:20px;border-top:1px solid #e0e0e0;text-align:center\">';"
+        "  h += '<button type=\"button\" onclick=\"testNewSensorRS485(' + sensorCount + ')\" style=\"background:linear-gradient(135deg,#17a2b8,#138496);color:white;padding:12px 28px;border:none;border-radius:6px;font-weight:600;cursor:pointer;margin-right:10px;box-shadow:0 3px 8px rgba(23,162,184,0.3);transition:all 0.3s ease;font-size:15px\" onmouseover=\"this.style.transform=\\'translateY(-2px)\\';this.style.boxShadow=\\'0 5px 12px rgba(23,162,184,0.4)\\'\" onmouseout=\"this.style.transform=\\'translateY(0)\\';this.style.boxShadow=\\'0 3px 8px rgba(23,162,184,0.3)\\'\">🔍 Test RS485</button>';"
+        "  h += '<button type=\"button\" onclick=\"saveSingleSensor(' + sensorCount + ')\" style=\"background:linear-gradient(135deg,#28a745,#218838);color:white;padding:12px 28px;border:none;border-radius:6px;font-weight:600;cursor:pointer;margin-right:10px;box-shadow:0 3px 8px rgba(40,167,69,0.3);transition:all 0.3s ease;font-size:15px\" onmouseover=\"this.style.transform=\\'translateY(-2px)\\';this.style.boxShadow=\\'0 5px 12px rgba(40,167,69,0.4)\\'\" onmouseout=\"this.style.transform=\\'translateY(0)\\';this.style.boxShadow=\\'0 3px 8px rgba(40,167,69,0.3)\\'\">💾 Save Water Quality Sensor</button>';"
+        "  h += '<button type=\"button\" onclick=\"removeSensorForm(' + sensorCount + ')\" style=\"background:linear-gradient(135deg,#dc3545,#c82333);color:white;padding:12px 28px;border:none;border-radius:6px;font-weight:600;cursor:pointer;box-shadow:0 3px 8px rgba(220,53,69,0.3);transition:all 0.3s ease;font-size:15px\" onmouseover=\"this.style.transform=\\'translateY(-2px)\\';this.style.boxShadow=\\'0 5px 12px rgba(220,53,69,0.4)\\'\" onmouseout=\"this.style.transform=\\'translateY(0)\\';this.style.boxShadow=\\'0 3px 8px rgba(220,53,69,0.3)\\'\">❌ Cancel</button>';"
         "  h += '<div id=\"test-result-new-' + sensorCount + '\" style=\"margin-top:15px;display:none\"></div>';"
         "  h += '</div></div>';"
         "  console.log('Adding HTML to water quality sensors div...');"
@@ -3740,13 +3740,19 @@ static esp_err_t config_page_handler(httpd_req_t *req)
         "const statusDiv=document.getElementById('scan-status');"
         "const networksDiv=document.getElementById('networks');"
         "const scanBtn=document.querySelector('.scan-button');"
+        "if (!statusDiv || !networksDiv) {"
+        "console.error('Required elements not found for WiFi scan');"
+        "return;"
+        "}"
         "if (scanInProgress) {"
         "statusDiv.innerHTML='<span style=\"color:#ffc107\">Scan already in progress. Please wait...</span>';"
         "return;"
         "}"
         "scanInProgress = true;"
+        "if (scanBtn) {"
         "scanBtn.style.opacity='0.6';"
         "scanBtn.style.pointerEvents='none';"
+        "}"
         "statusDiv.innerHTML='<span style=\"color:#17a2b8\">Scanning for networks...</span>';"
         "networksDiv.style.display='none';"
         "console.log('Starting WiFi scan...');"
@@ -3805,8 +3811,10 @@ static esp_err_t config_page_handler(httpd_req_t *req)
         "statusDiv.innerHTML='<span style=\"color:#dc3545\">Scan failed: '+e.message+'</span>';"
         "}).finally(()=>{"
         "scanInProgress = false;"
+        "if (scanBtn) {"
         "scanBtn.style.opacity='1';"
         "scanBtn.style.pointerEvents='auto';"
+        "}"
         "console.log('Scan completed');"
         "});"
         "}");
