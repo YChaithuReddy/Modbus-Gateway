@@ -1698,49 +1698,9 @@ void app_main(void) {
     // Initialize status LEDs early so they can be used in both SETUP and OPERATION modes
     init_status_leds();
 
-    // Check if configuration is complete, otherwise start in setup mode
-    if (config->config_complete) {
-        ESP_LOGI(TAG, "[SYS] Configuration complete - Starting in OPERATION mode");
-        set_config_state(CONFIG_STATE_OPERATION);
-    } else {
-        ESP_LOGI(TAG, "[SYS] No configuration found - Starting in SETUP mode with web server");
-        set_config_state(CONFIG_STATE_SETUP);
-
-        // Initialize WiFi infrastructure first
-        ESP_LOGI(TAG, "[WEB] Initializing WiFi for web server...");
-        ret = web_config_start_ap_mode();
-        if (ret != ESP_OK && ret != ESP_ERR_INVALID_STATE) {
-            ESP_LOGE(TAG, "[ERROR] Failed to initialize WiFi: %s", esp_err_to_name(ret));
-            return;
-        }
-
-        // Initialize Modbus for sensor testing
-        ESP_LOGI(TAG, "[WEB] Initializing Modbus for sensor testing...");
-        ret = modbus_init();
-        if (ret != ESP_OK) {
-            ESP_LOGW(TAG, "[WARN] Modbus initialization failed - sensor testing will not work");
-        }
-
-        // Now start the web server with SoftAP
-        ESP_LOGI(TAG, "[WEB] Starting web server with SoftAP...");
-        ret = web_config_start_server_only();
-        if (ret == ESP_OK) {
-            web_server_running = true;
-            update_led_status();  // Turn on LED to indicate config mode is active
-            ESP_LOGI(TAG, "[WEB] ✅ Web server started successfully");
-            ESP_LOGI(TAG, "[ACCESS] Connect to WiFi: 'ModbusIoT-Config' (password: config123)");
-            ESP_LOGI(TAG, "[ACCESS] Then visit: http://192.168.4.1 to configure");
-
-            // Keep the system running by not returning - web server is active
-            // The main task will complete but FreeRTOS keeps the system alive
-        } else {
-            ESP_LOGE(TAG, "[ERROR] Failed to start web server: %s", esp_err_to_name(ret));
-            return;
-        }
-
-        // Don't continue to normal operation - stay in setup mode
-        return;
-    }
+    // Force operation mode for unified operation (web server + operation mode together)
+    ESP_LOGI(TAG, "[SYS] Starting in UNIFIED OPERATION mode");
+    set_config_state(CONFIG_STATE_OPERATION);
 
     // Log Azure configuration loaded from NVS
     ESP_LOGI(TAG, "[AZURE CONFIG] Loaded from NVS:");
