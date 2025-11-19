@@ -5505,12 +5505,13 @@ static esp_err_t test_sensor_handler(httpd_req_t *req)
         
         // Perform real Modbus communication
         // Allocate format_table buffer before modbus operation (needed for both success/error paths)
-        char *format_table = (char*)malloc(6000);  // Larger buffer for comprehensive formats
+        char *format_table = (char*)malloc(10000);  // Increased buffer for 4-register sensors like ZEST
         if (format_table == NULL) {
             ESP_LOGE(TAG, "Failed to allocate format_table buffer");
             httpd_resp_send_500(req);
             return ESP_FAIL;
         }
+        memset(format_table, 0, 10000);  // Initialize buffer to prevent undefined behavior
 
         // Perform Modbus read based on register type
         modbus_result_t result;
@@ -5545,7 +5546,7 @@ static esp_err_t test_sensor_handler(httpd_req_t *req)
             // Use heap allocation for large content to prevent stack overflow
             
             // Build the comprehensive data format table
-            snprintf(format_table, 6000,
+            snprintf(format_table, 10000,
                      "<div class='test-result'>"
                      "<h4>✓ RS485 Success - %d Registers Read</h4>", reg_count);
             
@@ -5844,7 +5845,7 @@ static esp_err_t test_sensor_handler(httpd_req_t *req)
             }
             
             // Create HTML error response to match success format
-            snprintf(format_table, 6000,
+            snprintf(format_table, 10000,
                 "<div style='background:#f8d7da;padding:15px;border-radius:5px;margin:5px 0;border-left:4px solid #dc3545'>"
                 "<h4 style='color:#721c24;margin:0 0 10px 0'>❌ RS485 Communication Failed</h4>"
                 "<div style='color:#721c24;font-weight:bold'>Error: %s</div>"
@@ -6524,15 +6525,17 @@ static esp_err_t test_rs485_handler(httpd_req_t *req)
         }
         
         // Create comprehensive ScadaCore format interpretation table (heap allocated for large content)
-        char *format_table = (char*)malloc(6000);  // Larger buffer for comprehensive formats
+        // Increased buffer size to handle ZEST sensors with 4 registers and extensive format interpretations
+        char *format_table = (char*)malloc(10000);  // Increased buffer for 4-register ZEST sensors
         if (format_table == NULL) {
             ESP_LOGE(TAG, "Failed to allocate format_table buffer");
             httpd_resp_send_500(req);
             return ESP_FAIL;
         }
-        
+        memset(format_table, 0, 10000);  // Initialize buffer to prevent undefined behavior
+
         // Build the comprehensive data format table
-        snprintf(format_table, 6000,
+        snprintf(format_table, 10000,
                  "<div style='background:#d4edda;padding:15px;border-radius:8px;margin:10px 0;border:1px solid #c3e6cb;box-shadow:0 2px 4px rgba(0,0,0,0.1)'>"
                  "<h4 style='color:#155724;margin:0 0 10px 0;font-weight:bold'>✓ RS485 Success - %d Registers Read</h4>", reg_count);
         
