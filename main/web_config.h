@@ -153,6 +153,7 @@ esp_err_t delete_sub_sensor_from_quality_sensor(int sensor_index, int sub_sensor
 system_config_t* get_system_config(void);
 config_state_t get_config_state(void);
 void set_config_state(config_state_t state);
+bool web_config_needs_auto_start(void);
 
 // Modem GPIO control
 esp_err_t update_modem_gpio_pin(int new_gpio_pin);

@@ -1700,9 +1700,33 @@ void app_main(void) {
     // Initialize status LEDs early so they can be used in both SETUP and OPERATION modes
     init_status_leds();
 
-    // Force operation mode for unified operation (web server + operation mode together)
-    ESP_LOGI(TAG, "[SYS] Starting in UNIFIED OPERATION mode");
-    set_config_state(CONFIG_STATE_OPERATION);
+    // Check if we need to auto-start web server for initial configuration
+    if (web_config_needs_auto_start()) {
+        ESP_LOGI(TAG, "[SETUP] No configuration found - starting web server for initial setup");
+        // Start WiFi in AP mode for configuration
+        ret = web_config_start_ap_mode();
+        if (ret == ESP_OK) {
+            ret = web_config_start_server_only();
+            if (ret == ESP_OK) {
+                ESP_LOGI(TAG, "[WEB] Web server started automatically for initial configuration");
+                ESP_LOGI(TAG, "[ACCESS] Connect to WiFi: 'ModbusIoT-Config' (password: config123)");
+                ESP_LOGI(TAG, "[ACCESS] Then visit: http://192.168.4.1 to configure");
+                ESP_LOGI(TAG, "[ACCESS] Please configure network mode (WiFi/SIM), sensors, and Azure settings");
+                // Keep the system running in setup mode
+                set_config_state(CONFIG_STATE_SETUP);
+            } else {
+                ESP_LOGE(TAG, "[ERROR] Failed to start web server: %s", esp_err_to_name(ret));
+                set_config_state(CONFIG_STATE_OPERATION);  // Fall back to operation mode
+            }
+        } else {
+            ESP_LOGE(TAG, "[ERROR] Failed to start AP mode: %s", esp_err_to_name(ret));
+            set_config_state(CONFIG_STATE_OPERATION);  // Fall back to operation mode
+        }
+    } else {
+        // Force operation mode for unified operation (web server + operation mode together)
+        ESP_LOGI(TAG, "[SYS] Starting in UNIFIED OPERATION mode");
+        set_config_state(CONFIG_STATE_OPERATION);
+    }
 
     // Log Azure configuration loaded from NVS
     ESP_LOGI(TAG, "[AZURE CONFIG] Loaded from NVS:");
@@ -1806,21 +1830,21 @@ void app_main(void) {
     }
 
     // Network initialization based on configured mode (WiFi or SIM)
-    ESP_LOGI(TAG, "[NET] ═══════════════════════════════════════════════════════");
-    ESP_LOGI(TAG, "[NET] 🌐 Initializing Network Connection");
-    ESP_LOGI(TAG, "[NET] ═══════════════════════════════════════════════════════");
+    ESP_LOGI(TAG, "[NET] ========================================================");
+    ESP_LOGI(TAG, "[NET] Initializing Network Connection");
+    ESP_LOGI(TAG, "[NET] ========================================================");
 
     if (config->network_mode == NETWORK_MODE_WIFI) {
         // WiFi Mode - Check if WiFi was initialized successfully
         if (strlen(config->wifi_ssid) == 0) {
-            ESP_LOGW(TAG, "[WIFI] ⚠️ WiFi SSID not configured");
-            ESP_LOGI(TAG, "[WIFI] 💡 To use WiFi:");
+            ESP_LOGW(TAG, "[WIFI] WARNING: WiFi SSID not configured");
+            ESP_LOGI(TAG, "[WIFI] TIP: To use WiFi:");
             ESP_LOGI(TAG, "[WIFI]    1. Configure WiFi via web interface");
             ESP_LOGI(TAG, "[WIFI]    2. Or switch to SIM module mode");
             ESP_LOGI(TAG, "[WIFI] System will operate in offline mode (Modbus only)");
         } else {
-            ESP_LOGI(TAG, "[WIFI] ✅ WiFi STA mode already configured by web_config");
-            ESP_LOGI(TAG, "[WIFI] ⏳ Waiting for WiFi connection to %s...", config->wifi_ssid);
+            ESP_LOGI(TAG, "[WIFI] OK: WiFi STA mode already configured by web_config");
+            ESP_LOGI(TAG, "[WIFI] Waiting for WiFi connection to %s...", config->wifi_ssid);
 
             // Just wait for connection to complete
             int retry = 0;

@@ -8470,9 +8470,7 @@ esp_err_t web_config_init(void)
     } else {
         g_config_state = CONFIG_STATE_SETUP;
         ESP_LOGI(TAG, "No configuration found, starting in setup mode");
-        // Automatically start web server for initial configuration
-        ESP_LOGI(TAG, "Starting web server for initial configuration...");
-        // Set flag to start web server after WiFi initialization
+        // Set flag for auto-start
         g_web_server_auto_start = true;
     }
 
@@ -9428,27 +9426,6 @@ esp_err_t web_config_start_ap_mode(void)
         if (strlen(g_system_config.wifi_ssid) == 0) {
             ESP_LOGW(TAG, "WiFi SSID not configured - WiFi started but not connecting");
             ESP_LOGI(TAG, "[TIP] Use GPIO trigger to start web config AP mode");
-
-            // Check if we should auto-start web server for initial configuration
-            if (g_web_server_auto_start && g_config_state == CONFIG_STATE_SETUP) {
-                ESP_LOGI(TAG, "Auto-starting web server for initial configuration...");
-                // Start AP mode first
-                esp_err_t ap_ret = web_config_start_ap_mode();
-                if (ap_ret == ESP_OK) {
-                    // Then start the web server
-                    esp_err_t web_ret = web_config_start_server_only();
-                    if (web_ret == ESP_OK) {
-                        ESP_LOGI(TAG, "[OK] Web server started automatically for initial setup");
-                        ESP_LOGI(TAG, "[WIFI] Connect to WiFi: 'ModbusIoT-Config' (password: config123)");
-                        ESP_LOGI(TAG, "[WEB] Then visit: http://192.168.4.1 to configure");
-                    } else {
-                        ESP_LOGE(TAG, "Failed to start web server: %s", esp_err_to_name(web_ret));
-                    }
-                } else {
-                    ESP_LOGE(TAG, "Failed to start AP mode: %s", esp_err_to_name(ap_ret));
-                }
-                g_web_server_auto_start = false; // Reset flag after attempt
-            }
         } else {
             ESP_LOGI(TAG, "Connecting to WiFi SSID: %s", g_system_config.wifi_ssid);
         }
@@ -9752,6 +9729,15 @@ config_state_t get_config_state(void)
 void set_config_state(config_state_t state)
 {
     g_config_state = state;
+}
+
+bool web_config_needs_auto_start(void)
+{
+    bool needs_start = g_web_server_auto_start && g_config_state == CONFIG_STATE_SETUP;
+    if (needs_start) {
+        g_web_server_auto_start = false;  // Reset flag after checking
+    }
+    return needs_start;
 }
 
 // Connect to the configured WiFi network while maintaining SoftAP access
