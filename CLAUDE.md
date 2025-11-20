@@ -3,222 +3,189 @@
 ## Project Overview
 **ESP32 Modbus IoT Gateway v1.0.0** - A production-ready industrial IoT gateway for RS485 Modbus communication with Azure IoT Hub integration.
 
-## Project Type
-- **ESP-IDF Project** (ESP-IDF v5.4.1)
-- **Industrial IoT Gateway** with web configuration interface
-- **Production-ready** system for manufacturing/process control
+## ⚠️ CRITICAL WARNINGS - MUST READ
 
-## Core Architecture
+### 1. **web_config.c File (609KB) - EXTREME CAUTION REQUIRED**
+- **Size**: 609KB - One of the largest source files
+- **Content**: Mixed HTML/JavaScript/CSS embedded in C strings
+- **Risk Level**: HIGH - Very prone to corruption during edits
+- **Common Issues**:
+  - Sections can merge during copy/paste operations
+  - HTML strings can break C syntax if quotes aren't escaped
+  - Large chunks of legitimate code can be embedded in corrupted sections
+  - Missing `httpd_resp_sendstr_chunk()` calls cause web pages to not load
 
-### Hardware Platform
-- **ESP32-WROOM-32** with 4MB flash memory
-- **RS485 Communication**: GPIO 16 (RX2), GPIO 17 (TX2), GPIO 4 (RTS)
-- **Configuration Trigger**: GPIO 34 (pull-low for config mode)
-- **Industrial temperature range**: -40°C to +85°C
+### 2. **Known Vulnerable Code Sections**
+```
+web_config.c lines 1260-1400: Sensor display logic - easily corrupted
+web_config.c lines 3801-3833: WiFi configuration section
+web_config.c lines 3835-3854: SIM configuration section
+web_config.c lines 3856-3920: Modbus Explorer section
+```
 
-### Software Architecture
-- **Dual-core ESP32 utilization**:
-  - Core 0: Modbus sensor reading tasks
-  - Core 1: MQTT communication and telemetry tasks
-- **Web-based configuration** with responsive interface
-- **Multi-sensor support** (up to 8 sensors)
-- **16 data format interpretations** (ScadaCore compatible)
+### 3. **WiFi Double Initialization Issue**
+- **Problem**: `esp_netif_create_default_wifi_sta()` called twice causes crash
+- **Location**: `web_config_start_ap_mode()` function
+- **Solution**: Always check if interface exists before creating:
+```c
+esp_netif_t *sta_netif = esp_netif_get_handle_from_ifkey("WIFI_STA_DEF");
+if (sta_netif == NULL) {
+    sta_netif = esp_netif_create_default_wifi_sta();
+}
+```
 
-## Key Components
+## 🛠️ LESSONS LEARNED FROM DEBUGGING SESSIONS
 
-### 1. Main Application (`main/main.c`)
-- **Primary entry point** with dual-core task management
-- **Azure IoT Hub** MQTT communication with SAS token authentication
-- **Real-time telemetry** transmission with configurable intervals
-- **GPIO interrupt handling** for configuration mode switching
-- **Graceful task shutdown** and error recovery
+### Issue #1: Heap Corruption with ZEST Sensors
+**Problem**: ESP32 crashes after successful Modbus read from ZEST sensor
+**Root Cause**: Missing ZEST_FIXED data type handler in test_rs485_handler
+**Solution**: Added ZEST_FIXED case and increased buffer sizes
+**Prevention**: Always check all data type cases are handled
 
-### 2. Modbus Communication (`main/modbus.c` + `modbus.h`)
-- **RS485 Modbus RTU** implementation
-- **Professional error handling** with CRC validation
-- **Multiple data formats**: UINT16/32, INT16/32, FLOAT32
-- **Byte order support**: ABCD, DCBA, BADC, CDAB
-- **Statistics tracking** and diagnostics
+### Issue #2: Web Config Sections Missing
+**Problem**: WiFi and SIM configuration sections disappeared from web interface
+**Root Cause**: When fixing corrupted code, legitimate sections were embedded in the corrupted block and got deleted
+**Solution**: Re-added WiFi/SIM sections properly
+**Prevention**:
+- Before removing corrupted code, identify ALL content within it
+- Check that every navigation button has a corresponding section
+- Verify JavaScript references (`getElementById`) have matching HTML elements
 
-### 3. Web Configuration (`main/web_config_backup.c` + `web_config.h`)
-- **Responsive web interface** for industrial use
-- **Individual sensor management** (Add/Edit/Delete/Test)
-- **Real-time sensor testing** with format display
-- **WiFi and Azure configuration** management
-- **Professional troubleshooting guides**
+### Issue #3: JavaScript Errors in Web Interface
+**Problem**: `Cannot read properties of null` errors
+**Root Cause**: JavaScript looking for elements that don't exist
+**Common Missing Elements**:
+- `mode_wifi` and `mode_sim` radio buttons
+- `wifi` and `sim` div sections
+- Various form input fields
+**Solution**: Ensure all referenced IDs exist in HTML
 
-### 4. Sensor Management (`main/sensor_manager.c` + `sensor_manager.h`)
-- **Multi-sensor reading** coordination
-- **Data format conversion** and scaling
-- **Test result formatting** and validation
-- **Comprehensive error reporting**
+### Issue #4: GPIO Conflicts
+**Problem**: False positive GPIO conflict errors during compilation
+**Root Cause**: Overly aggressive conflict detection macros
+**Solution**: Comment out false conflict checks, document actual pin usage
 
-### 5. JSON Templates (`main/json_templates.c` + `json_templates.h`)
-- **Azure IoT telemetry** payload generation
-- **Sensor-specific JSON** formatting
-- **Energy meter support** with hex data
-- **Template-based data structures**
+### Issue #5: MQTT Reconnection Crashes
+**Problem**: System restarts after 5 failed MQTT attempts
+**Root Cause**: `SYSTEM_RESTART_ON_CRITICAL_ERROR` was true with low retry limit
+**Solution**:
+- Set `MAX_MQTT_RECONNECT_ATTEMPTS` to 10
+- Set `SYSTEM_RESTART_ON_CRITICAL_ERROR` to false
+- Added exponential backoff for reconnection
 
-## Configuration Files
+## 📋 BEFORE EDITING CHECKLIST
 
-### Build Configuration
-- **`CMakeLists.txt`**: Main project configuration (ESP-IDF)
-- **`main/CMakeLists.txt`**: Component-specific build settings
-- **`sdkconfig`**: ESP-IDF configuration parameters
-- **`partitions_4mb.csv`**: Flash memory partitioning
+### Before Editing web_config.c:
+- [ ] Make a backup copy of the file
+- [ ] Note the line numbers you're editing
+- [ ] Check what sections come before/after your edit
+- [ ] Verify all `snprintf()` calls have matching `httpd_resp_sendstr_chunk()`
+- [ ] Ensure HTML strings have escaped quotes (`\"` not `"`)
+- [ ] Test one section at a time
 
-### IoT Configuration
-- **`main/iot_configs.h`**: WiFi and Azure IoT Hub credentials
-  - WiFi SSID: "Test" / Password: "config123"
-  - Azure IoT Hub: "fluxgen-testhub.azure-devices.net"
-  - Device ID: "testing_3"
-  - Telemetry interval: 120 seconds
+### Before Major Changes:
+- [ ] Commit current working state to git
+- [ ] Document what you're changing and why
+- [ ] Test incrementally - don't make multiple large changes at once
+- [ ] Check heap usage before and after changes
 
-### Security
-- **`main/azure_ca_cert.pem`**: Azure IoT Hub root certificate
-- **WPA2-PSK WiFi** encryption
-- **SAS token authentication** for Azure IoT Hub
+## 🏗️ PROJECT STRUCTURE
 
-## Data Formats Supported
+### Critical Files and Their Roles:
+```
+main/
+├── main.c                 # Main application (handle with care - task initialization)
+├── web_config.c          # ⚠️ 609KB WEB INTERFACE - EXTREMELY FRAGILE
+├── web_assets.h          # HTML/CSS/JS assets - navigation menu here
+├── modbus.c              # RS485 Modbus implementation
+├── sensor_manager.c      # Sensor data handling
+├── gpio_map.h            # GPIO pin definitions and conflict detection
+├── iot_configs.h         # Configuration constants (MQTT retry, etc.)
+└── a7670c_ppp.c         # SIM module PPP implementation
+```
 
-### 16-bit Formats (1 register)
-- UINT16_BE/LE, INT16_BE/LE
+### Memory Constraints:
+- **Heap Size**: ~150KB available
+- **Task Stack Sizes**:
+  - modbus_task: 8192 bytes (safe)
+  - mqtt_task: 8192 bytes (safe)
+  - telemetry_task: 8192 bytes (safe)
+  - modem_reset_task: 4096 bytes (increased from 2048)
 
-### 32-bit Integer Formats (2 registers)
-- UINT32_ABCD (Big Endian)
-- UINT32_DCBA (Little Endian)
-- UINT32_BADC (Mid-Big Endian)
-- UINT32_CDAB (Mid-Little Endian)
-- INT32_* (signed variants)
+## 🔧 COMMON FIXES
 
-### 32-bit Float Formats (2 registers)
-- FLOAT32_ABCD/DCBA/BADC/CDAB (IEEE 754)
+### Web Page Not Loading:
+1. Check browser console for JavaScript errors
+2. Verify all `getElementById()` calls have matching HTML elements
+3. Ensure all sections end with `httpd_resp_sendstr_chunk(req, NULL);`
+4. Check that `config_page_handler` returns `ESP_OK`
 
-## Operating Modes
+### ESP32 Crash on Boot:
+1. Check for double WiFi initialization
+2. Verify task stack sizes are adequate
+3. Look for buffer overflows in string operations
+4. Check GPIO configurations for conflicts
 
-### 1. Setup Mode (CONFIG_STATE_SETUP)
-- **Web configuration interface** active
-- **WiFi AP**: "ModbusIoT-Config" (password: "config123")
-- **Web portal**: http://192.168.4.1
-- **Sensor configuration** and testing
+### Modbus Communication Issues:
+1. Verify baud rate (9600 default)
+2. Check GPIO pins: RX=16, TX=17, RTS=18
+3. Ensure proper RS485 termination
+4. Verify slave ID and register addresses
 
-### 2. Operation Mode (CONFIG_STATE_OPERATION)
-- **Production telemetry** transmission
-- **Real-time Modbus** sensor reading
-- **Azure IoT Hub** connectivity
-- **Background monitoring** and error recovery
+## 🚀 BUILD AND DEPLOY
 
-## Build Commands
-
-### Standard Build Process
+### Standard Build Process:
 ```bash
-idf.py build                    # Build project
-idf.py -p /dev/ttyUSB0 flash   # Flash firmware
-idf.py monitor                 # Monitor serial output
-idf.py flash monitor           # Flash and monitor
+idf.py build
+idf.py -p COM3 flash monitor  # Windows
+idf.py -p /dev/ttyUSB0 flash monitor  # Linux
 ```
 
-### Development Commands
+### Clean Build (when things go wrong):
 ```bash
-idf.py menuconfig              # Configure project
-idf.py clean                   # Clean build
-idf.py size                    # Check binary sizes
-idf.py erase-flash            # Erase entire flash
+idf.py fullclean
+idf.py build
 ```
 
-## Production Features
-
-### Industrial Reliability
-- **Watchdog timers** and automatic recovery
-- **Dual-core task isolation** for performance
-- **Comprehensive error handling** with specific diagnostics
-- **Persistent configuration** in NVS flash storage
-
-### Professional Interface
-- **Industrial-grade web UI** with company branding
-- **Real-time diagnostics** and troubleshooting
-- **Professional error messages** with solutions
-- **Field-ready operation** with minimal maintenance
-
-### Connectivity & Security
-- **Secure MQTT** with Azure IoT Hub integration
-- **WiFi management** with network scanning
-- **Input validation** and sanitization
-- **Certificate-based authentication**
-
-## Monitoring & Diagnostics
-
-### Serial Monitor Output
-- **Detailed telemetry logs** with emoji indicators
-- **Modbus communication** status and statistics
-- **MQTT connection** status and error details
-- **System performance** metrics (heap, tasks)
-
-### Web Interface Diagnostics
-- **Real-time sensor testing** with format display
-- **Connectivity troubleshooting** guides
-- **Professional error reporting** with solutions
-- **System status** monitoring
-
-## Documentation Structure
-```
-Project Root/
-├── README.md                 # Main project documentation
-├── PRODUCTION_GUIDE.md       # Deployment and setup guide
-├── VERSION.md               # Version history and releases
-├── CHANGELOG.md             # Detailed change log
-├── IMPLEMENTATION_NOTES.md  # Technical implementation details
-├── SYSTEM_DOCUMENTATION.md  # System architecture
-├── WEB_CONFIG_GUIDE.md      # Web interface guide
-└── CLAUDE.md               # This context file
+### Monitor Filters (reduce noise):
+```bash
+idf.py monitor -f esp32_exception_decoder
 ```
 
-## Development Notes
+## 💡 TIPS FOR FUTURE DEVELOPMENT
 
-### Memory Management
-- **Dynamic allocation** for sensor data to prevent stack overflow
-- **Static buffers** for MQTT and telemetry payloads
-- **Queue-based communication** between tasks
-- **Heap monitoring** and leak detection
+1. **Extract web_config.c HTML**: Consider moving HTML to separate files and including at compile time
+2. **Use Version Control**: Commit after each successful change
+3. **Test Incrementally**: Don't make multiple large changes without testing
+4. **Document Changes**: Update this file when you discover new issues
+5. **Buffer Sizes**: When in doubt, increase buffer sizes (but check heap)
+6. **Error Messages**: Make them descriptive - future you will thank present you
 
-### Task Architecture
-- **modbus_task** (Core 0, Priority 5): Sensor reading
-- **mqtt_task** (Core 1, Priority 4): MQTT connectivity
-- **telemetry_task** (Core 1, Priority 3): Data transmission
-- **Web server tasks** (automatic core assignment)
+## 🐛 KNOWN BUGS TO FIX
 
-### Error Recovery
-- **MQTT reconnection** with attempt limits
-- **Modbus reinitialization** on persistent failures
-- **System restart** on critical errors (configurable)
-- **Graceful task shutdown** for mode switching
+1. Web config file too large (609KB) - should be split
+2. Sensor LED logic implemented but may not blink correctly
+3. Missing Azure IoT features (Device Twin, OTA updates, C2D commands)
+4. Race condition in web server toggle (partially fixed with debouncing)
 
-## Integration Points
+## 📝 NOTES FOR CLAUDE CODE
 
-### Azure IoT Hub
-- **Device-to-Cloud** telemetry via MQTT
-- **Cloud-to-Device** command reception
-- **SAS token** authentication with 1-hour validity
-- **JSON payload** format with sensor arrays
+**When working on this project:**
+- Always read this file first
+- Be extra careful with web_config.c - it's fragile
+- Check for null pointers before using `getElementById()`
+- Verify GPIO pins don't conflict before adding new peripherals
+- Test web interface in browser console for JavaScript errors
+- Remember that sections can be lost when fixing corruption
 
-### Modbus Devices
-- **Standard RTU protocol** with CRC validation
-- **Multiple slave support** with individual configuration
-- **Register mapping** for different sensor types
-- **Comprehensive error handling** and retry logic
-
-## Quality Assurance
-- **Production-ready** release (v1.0.0)
-- **Industrial testing** completed
-- **Comprehensive documentation** and support
-- **Field deployment** guidelines available
+**File Edit Priority:**
+1. Try to edit smaller files when possible
+2. If editing web_config.c is necessary, work in small sections
+3. Always verify the web interface still works after changes
+4. Use grep/search before assuming something doesn't exist
 
 ---
 
-**Important Notes for Claude:**
-1. This is a **production industrial system** - prioritize stability and reliability
-2. **Security conscious** - validate all inputs and protect credentials
-3. **Professional grade** - maintain industrial standards and documentation
-4. **Real-time requirements** - consider timing constraints for Modbus/MQTT
-5. **Multi-sensor support** - handle up to 8 sensors with different configurations
-6. **Web interface** is critical for field technicians - keep it simple and robust
+**Last Updated**: November 20, 2024
+**Last Known Working Commit**: 03a4c6b
+**Critical Issue Fixed**: Web config sections restored after corruption

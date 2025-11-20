@@ -1287,7 +1287,11 @@ static void update_led_status(void)
 // Modbus reading task (Core 0)
 static void modbus_task(void *pvParameters)
 {
+    ESP_LOGI(TAG, "╔══════════════════════════════════════════════════════════╗");
+    ESP_LOGI(TAG, "║         🔌 MODBUS READER TASK STARTED 🔌                 ║");
+    ESP_LOGI(TAG, "╚══════════════════════════════════════════════════════════╝");
     ESP_LOGI(TAG, "[CONFIG] Modbus task started on core %d", xPortGetCoreID());
+    ESP_LOGI(TAG, "[CONFIG] Stack: 8192 bytes | Priority: 5");
     
     while (1) {
         if (read_configured_sensors_data() == ESP_OK) {
@@ -1343,7 +1347,11 @@ static void modbus_task(void *pvParameters)
 // MQTT handling task (Core 1)
 static void mqtt_task(void *pvParameters)
 {
+    ESP_LOGI(TAG, "╔══════════════════════════════════════════════════════════╗");
+    ESP_LOGI(TAG, "║           ☁️  MQTT CLIENT TASK STARTED ☁️                 ║");
+    ESP_LOGI(TAG, "╚══════════════════════════════════════════════════════════╝");
     ESP_LOGI(TAG, "[NET] MQTT task started on core %d", xPortGetCoreID());
+    ESP_LOGI(TAG, "[NET] Stack: 8192 bytes | Priority: 4");
     
     // Initialize MQTT client
     if (initialize_mqtt_client() != 0) {
@@ -1377,7 +1385,11 @@ static void mqtt_task(void *pvParameters)
 // Telemetry sending task (Core 1)
 static void telemetry_task(void *pvParameters)
 {
+    ESP_LOGI(TAG, "╔══════════════════════════════════════════════════════════╗");
+    ESP_LOGI(TAG, "║         📊 TELEMETRY SENDER TASK STARTED 📊              ║");
+    ESP_LOGI(TAG, "╚══════════════════════════════════════════════════════════╝");
     ESP_LOGI(TAG, "[DATA] Telemetry task started on core %d", xPortGetCoreID());
+    ESP_LOGI(TAG, "[DATA] Stack: 8192 bytes | Priority: 3");
     
     system_config_t* config = get_system_config();
     TickType_t last_send_time = 0;
@@ -1673,12 +1685,20 @@ static bool send_telemetry(void) {
 }
 
 void app_main(void) {
+    ESP_LOGI(TAG, "╔══════════════════════════════════════════════════════════╗");
+    ESP_LOGI(TAG, "║  🚀 MODBUS IoT GATEWAY v1.1.0 - SYSTEM STARTUP 🚀       ║");
+    ESP_LOGI(TAG, "╠══════════════════════════════════════════════════════════╣");
+    ESP_LOGI(TAG, "║  FluxGen Technologies | Industrial IoT Solutions         ║");
+    ESP_LOGI(TAG, "╚══════════════════════════════════════════════════════════╝");
     ESP_LOGI(TAG, "[START] Starting Unified Modbus IoT Operation System");
-    
+
     // Initialize system uptime tracking
     system_uptime_start = esp_timer_get_time() / 1000000;
 
     // Initialize NVS
+    ESP_LOGI(TAG, "╔══════════════════════════════════════════════════════════╗");
+    ESP_LOGI(TAG, "║           📦 NVS FLASH INITIALIZATION 📦                 ║");
+    ESP_LOGI(TAG, "╚══════════════════════════════════════════════════════════╝");
     esp_err_t ret = nvs_flash_init();
     if (ret == ESP_ERR_NVS_NO_FREE_PAGES || ret == ESP_ERR_NVS_NEW_VERSION_FOUND) {
         ESP_ERROR_CHECK(nvs_flash_erase());
@@ -1687,6 +1707,9 @@ void app_main(void) {
     ESP_ERROR_CHECK(ret);
 
     // Initialize web configuration system
+    ESP_LOGI(TAG, "╔══════════════════════════════════════════════════════════╗");
+    ESP_LOGI(TAG, "║         🌐 WEB CONFIGURATION SYSTEM 🌐                   ║");
+    ESP_LOGI(TAG, "╚══════════════════════════════════════════════════════════╝");
     ESP_LOGI(TAG, "[WEB] Initializing web configuration system...");
     ret = web_config_init();
     if (ret != ESP_OK) {
@@ -1698,6 +1721,9 @@ void app_main(void) {
     system_config_t* config = get_system_config();
 
     // Initialize status LEDs early so they can be used in both SETUP and OPERATION modes
+    ESP_LOGI(TAG, "╔══════════════════════════════════════════════════════════╗");
+    ESP_LOGI(TAG, "║           💡 STATUS LED INITIALIZATION 💡                ║");
+    ESP_LOGI(TAG, "╚══════════════════════════════════════════════════════════╝");
     init_status_leds();
 
     // Check if we need to auto-start web server for initial configuration
@@ -1708,6 +1734,8 @@ void app_main(void) {
         if (ret == ESP_OK) {
             ret = web_config_start_server_only();
             if (ret == ESP_OK) {
+                web_server_running = true;  // Set flag to indicate web server is running
+                update_led_status();         // Update LED to show web server is active
                 ESP_LOGI(TAG, "[WEB] Web server started automatically for initial configuration");
                 ESP_LOGI(TAG, "[ACCESS] Connect to WiFi: 'ModbusIoT-Config' (password: config123)");
                 ESP_LOGI(TAG, "[ACCESS] Then visit: http://192.168.4.1 to configure");
@@ -1738,6 +1766,9 @@ void app_main(void) {
 
     // Initialize RTC if enabled
     if (config->rtc_config.enabled) {
+        ESP_LOGI(TAG, "╔══════════════════════════════════════════════════════════╗");
+        ESP_LOGI(TAG, "║         🕐 DS3231 REAL-TIME CLOCK SETUP 🕐              ║");
+        ESP_LOGI(TAG, "╚══════════════════════════════════════════════════════════╝");
         ESP_LOGI(TAG, "[RTC] 🕐 Initializing DS3231 Real-Time Clock...");
         esp_err_t rtc_ret = ds3231_init();
         if (rtc_ret == ESP_OK) {
@@ -1765,10 +1796,12 @@ void app_main(void) {
     }
 
     // Initialize SD card if enabled
-    ESP_LOGI(TAG, "[SD] 🔧 SD Config: enabled=%d, cache_on_failure=%d",
-             config->sd_config.enabled, config->sd_config.cache_on_failure);
-
     if (config->sd_config.enabled) {
+        ESP_LOGI(TAG, "╔══════════════════════════════════════════════════════════╗");
+        ESP_LOGI(TAG, "║           💾 SD CARD INITIALIZATION 💾                   ║");
+        ESP_LOGI(TAG, "╚══════════════════════════════════════════════════════════╝");
+        ESP_LOGI(TAG, "[SD] 🔧 SD Config: enabled=%d, cache_on_failure=%d",
+                 config->sd_config.enabled, config->sd_config.cache_on_failure);
         ESP_LOGI(TAG, "[SD] 💾 Initializing SD Card for offline data caching...");
         esp_err_t sd_ret = sd_card_init();
         if (sd_ret == ESP_OK) {
@@ -1796,6 +1829,9 @@ void app_main(void) {
     init_modem_reset_gpio();
     
     // Initialize Modbus RS485 communication
+    ESP_LOGI(TAG, "╔══════════════════════════════════════════════════════════╗");
+    ESP_LOGI(TAG, "║         🔌 MODBUS RS485 INITIALIZATION 🔌                ║");
+    ESP_LOGI(TAG, "╚══════════════════════════════════════════════════════════╝");
     ESP_LOGI(TAG, "[CONFIG] Initializing Modbus RS485 communication...");
     ret = modbus_init();
     if (ret != ESP_OK) {
@@ -1822,17 +1858,26 @@ void app_main(void) {
         return;
     }
 
-    // Initialize WiFi stack (always needed for web config AP mode)
-    ret = web_config_start_ap_mode();  // This actually starts STA mode for normal operation
-    if (ret != ESP_OK) {
-        ESP_LOGW(TAG, "[WARN] WiFi initialization had issues - some features may not work");
-        // Don't return - allow system to continue for modbus-only or SIM operation
+    // Initialize WiFi stack only if not already initialized during auto-start
+    // Check if WiFi was already initialized (e.g., from auto-start of web server)
+    if (get_config_state() != CONFIG_STATE_SETUP) {
+        // Only initialize WiFi if we're not already in setup mode (which means WiFi was initialized)
+        ret = web_config_start_ap_mode();  // This actually starts STA mode for normal operation
+        if (ret != ESP_OK) {
+            ESP_LOGW(TAG, "[WARN] WiFi initialization had issues - some features may not work");
+            // Don't return - allow system to continue for modbus-only or SIM operation
+        }
+    } else {
+        ESP_LOGI(TAG, "[NET] WiFi already initialized during setup mode - skipping re-initialization");
     }
 
     // Network initialization based on configured mode (WiFi or SIM)
-    ESP_LOGI(TAG, "[NET] ========================================================");
-    ESP_LOGI(TAG, "[NET] Initializing Network Connection");
-    ESP_LOGI(TAG, "[NET] ========================================================");
+    ESP_LOGI(TAG, "╔══════════════════════════════════════════════════════════╗");
+    ESP_LOGI(TAG, "║         📡 NETWORK CONNECTION SETUP 📡                   ║");
+    ESP_LOGI(TAG, "╚══════════════════════════════════════════════════════════╝");
+    ESP_LOGI(TAG, "[NET] Network Mode: %s",
+             config->network_mode == NETWORK_MODE_WIFI ? "WiFi" : "SIM Module");
+    ESP_LOGI(TAG, "[NET] Status: INITIALIZING");
 
     if (config->network_mode == NETWORK_MODE_WIFI) {
         // WiFi Mode - Check if WiFi was initialized successfully
@@ -1938,8 +1983,13 @@ void app_main(void) {
     // Wait a bit to ensure time is properly synchronized
     vTaskDelay(5000 / portTICK_PERIOD_MS);
 
+    ESP_LOGI(TAG, "╔══════════════════════════════════════════════════════════╗");
+    ESP_LOGI(TAG, "║          ⚙️  DUAL-CORE TASK CREATION ⚙️                   ║");
+    ESP_LOGI(TAG, "╚══════════════════════════════════════════════════════════╝");
+    ESP_LOGI(TAG, "[TASK] Core 0: Modbus Reading");
+    ESP_LOGI(TAG, "[TASK] Core 1: MQTT & Telemetry");
     ESP_LOGI(TAG, "[START] Starting dual-core task distribution...");
-    
+
     // Create Modbus task on Core 0 (dedicated for sensor reading)
     BaseType_t modbus_result = xTaskCreatePinnedToCore(
         modbus_task,
@@ -1993,6 +2043,13 @@ void app_main(void) {
     ESP_LOGI(TAG, "[NET] MQTT handling: Core 1 (priority 4)");
     ESP_LOGI(TAG, "[DATA] Telemetry sending: Core 1 (priority 3)");
     ESP_LOGI(TAG, "[WEB] GPIO %d: Pull LOW to toggle web server ON/OFF", trigger_gpio);
+
+    // System ready announcement
+    ESP_LOGI(TAG, "╔══════════════════════════════════════════════════════════╗");
+    ESP_LOGI(TAG, "║        ✅ SYSTEM READY - ENTERING OPERATION MODE ✅      ║");
+    ESP_LOGI(TAG, "╠══════════════════════════════════════════════════════════╣");
+    ESP_LOGI(TAG, "║         All subsystems initialized and operational        ║");
+    ESP_LOGI(TAG, "╚══════════════════════════════════════════════════════════╝");
     
     // Main monitoring loop with web server toggle support
     while (1) {

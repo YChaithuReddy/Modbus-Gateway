@@ -1857,7 +1857,29 @@ static esp_err_t config_page_handler(httpd_req_t *req)
     // Overview Section with Real-time System Resources
     httpd_resp_sendstr_chunk(req,
         "<div id='overview' class='section active'>"
-        "<h2 class='section-title'><i>📊</i>System Overview</h2>"
+        "<h2 class='section-title'><i>📊</i>System Overview</h2>");
+
+    // Modbus and Azure status cards at the top for immediate visibility
+    httpd_resp_sendstr_chunk(req,
+        "<div class='sensor-card'>"
+        "<h3>Modbus Communication</h3>"
+        "<p><strong>Total Reads:</strong> <span id='ov_modbus_total_reads'>Loading...</span></p>"
+        "<p><strong>Successful:</strong> <span id='ov_modbus_success'>Loading...</span></p>"
+        "<p><strong>Failed:</strong> <span id='ov_modbus_failed'>Loading...</span></p>"
+        "<p><strong>Success Rate:</strong> <span id='ov_modbus_success_rate'>Loading...</span></p>"
+        "<p><strong>CRC Errors:</strong> <span id='ov_modbus_crc_errors'>Loading...</span></p>"
+        "<p><strong>Timeout Errors:</strong> <span id='ov_modbus_timeout_errors'>Loading...</span></p>"
+        "</div>"
+
+        "<div class='sensor-card'>"
+        "<h3>Azure IoT Hub</h3>"
+        "<p><strong>Connection:</strong> <span id='ov_azure_connection'>Loading...</span></p>"
+        "<p><strong>Uptime:</strong> <span id='ov_azure_uptime'>Loading...</span></p>"
+        "<p><strong>Messages Sent:</strong> <span id='ov_azure_messages'>Loading...</span></p>"
+        "<p><strong>Last Telemetry:</strong> <span id='ov_azure_last_telemetry'>Loading...</span></p>"
+        "<p><strong>Reconnects:</strong> <span id='ov_azure_reconnects'>Loading...</span></p>"
+        "<p><strong>Device ID:</strong> <span id='ov_azure_device_id'>Loading...</span></p>"
+        "</div>"
 
         "<div class='sensor-card'>"
         "<h3>System Status</h3>"
@@ -1917,28 +1939,7 @@ static esp_err_t config_page_handler(httpd_req_t *req)
         g_system_config.sensor_count);
     httpd_resp_sendstr_chunk(req, chunk);
 
-    // Modbus and Azure status cards for Overview section
-    httpd_resp_sendstr_chunk(req,
-        "<div class='sensor-card'>"
-        "<h3>Modbus Communication</h3>"
-        "<p><strong>Total Reads:</strong> <span id='ov_modbus_total_reads'>Loading...</span></p>"
-        "<p><strong>Successful:</strong> <span id='ov_modbus_success'>Loading...</span></p>"
-        "<p><strong>Failed:</strong> <span id='ov_modbus_failed'>Loading...</span></p>"
-        "<p><strong>Success Rate:</strong> <span id='ov_modbus_success_rate'>Loading...</span></p>"
-        "<p><strong>CRC Errors:</strong> <span id='ov_modbus_crc_errors'>Loading...</span></p>"
-        "<p><strong>Timeout Errors:</strong> <span id='ov_modbus_timeout_errors'>Loading...</span></p>"
-        "</div>"
-
-        "<div class='sensor-card'>"
-        "<h3>Azure IoT Hub</h3>"
-        "<p><strong>Connection:</strong> <span id='ov_azure_connection'>Loading...</span></p>"
-        "<p><strong>Uptime:</strong> <span id='ov_azure_uptime'>Loading...</span></p>"
-        "<p><strong>Messages Sent:</strong> <span id='ov_azure_messages'>Loading...</span></p>"
-        "<p><strong>Last Telemetry:</strong> <span id='ov_azure_last_telemetry'>Loading...</span></p>"
-        "<p><strong>Reconnects:</strong> <span id='ov_azure_reconnects'>Loading...</span></p>"
-        "<p><strong>Device ID:</strong> <span id='ov_azure_device_id'>Loading...</span></p>"
-        "</div>"
-        "</div>");
+    httpd_resp_sendstr_chunk(req, "</div>");
 
     // Network Mode Selection Section (main WiFi config section)
     snprintf(chunk, sizeof(chunk),
@@ -9365,7 +9366,14 @@ esp_err_t web_config_start_ap_mode(void)
     }
 
     // Create STA interface - this is required for WiFi initialization
-    esp_netif_create_default_wifi_sta();
+    // Check if STA interface already exists to prevent double initialization
+    esp_netif_t *sta_netif = esp_netif_get_handle_from_ifkey("WIFI_STA_DEF");
+    if (sta_netif == NULL) {
+        sta_netif = esp_netif_create_default_wifi_sta();
+        ESP_LOGI(TAG, "Created new WiFi STA interface");
+    } else {
+        ESP_LOGI(TAG, "WiFi STA interface already exists - reusing");
+    }
 
     // Initialize WiFi driver
     wifi_init_config_t cfg = WIFI_INIT_CONFIG_DEFAULT();
