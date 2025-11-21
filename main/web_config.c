@@ -6443,14 +6443,32 @@ static esp_err_t start_operation_handler(httpd_req_t *req)
 // Reboot system handler
 static esp_err_t reboot_handler(httpd_req_t *req)
 {
-    const char* response = "{\"status\":\"success\",\"message\":\"System rebooting...\"}";
+    ESP_LOGI(TAG, "[REBOOT] User clicked 'Reboot to Normal Mode' button");
+    ESP_LOGI(TAG, "[REBOOT] Setting config_complete = TRUE");
+
+    // Mark configuration as complete before reboot
+    g_system_config.config_complete = true;
+
+    ESP_LOGI(TAG, "[REBOOT] Saving configuration to NVS...");
+    esp_err_t save_result = config_save_to_nvs(&g_system_config);
+
+    if (save_result == ESP_OK) {
+        ESP_LOGI(TAG, "[REBOOT] ✅ Configuration saved successfully to NVS");
+    } else {
+        ESP_LOGE(TAG, "[REBOOT] ❌ FAILED to save configuration: %s", esp_err_to_name(save_result));
+    }
+
+    const char* response = "{\"status\":\"success\",\"message\":\"System rebooting to operation mode...\"}";
     httpd_resp_set_type(req, "application/json");
     httpd_resp_send(req, response, strlen(response));
-    
+
+    ESP_LOGI(TAG, "[REBOOT] System will restart in 2 seconds...");
+    ESP_LOGI(TAG, "[REBOOT] After restart, system should enter OPERATION MODE");
+
     // Restart in 2 seconds
     vTaskDelay(pdMS_TO_TICKS(2000));
     esp_restart();
-    
+
     return ESP_OK;
 }
 
