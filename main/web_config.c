@@ -2728,6 +2728,7 @@ static esp_err_t config_page_handler(httpd_req_t *req)
         "  h += '<label><strong>Sensor Type *:</strong></label><select name=\"sensor_' + sensorCount + '_sensor_type\" onchange=\"updateSensorForm(' + sensorCount + ')\" style=\"width:200px;border:2px solid #dc3545\" required>';"
         "  h += '<option value=\"\">Select Sensor Type</option>';"
         "  h += '<option value=\"Flow-Meter\">Flow-Meter</option>';"
+        "  h += '<option value=\"Panda_USM\">Panda USM</option>';"
         "  h += '<option value=\"Clampon\">Clampon</option>';"
         "  h += '<option value=\"Dailian\">Dailian Ultrasonic</option>';"
         "  h += '<option value=\"Piezometer\">Piezometer (Water Level)</option>';"
@@ -2780,6 +2781,7 @@ static esp_err_t config_page_handler(httpd_req_t *req)
         "  h += '<select name=\"sensor_' + sensorCount + '_sensor_type\" onchange=\"updateSensorForm(' + sensorCount + ')\" style=\"width:100%;padding:10px;border:2px solid #dc3545;border-radius:6px;font-size:15px\" required>';"
         "  h += '<option value=\"\">Select Regular Sensor Type</option>';"
         "  h += '<option value=\"Flow-Meter\">Flow-Meter</option>';"
+        "  h += '<option value=\"Panda_USM\">Panda USM</option>';"
         "  h += '<option value=\"Clampon\">Clampon</option>';"
         "  h += '<option value=\"Dailian\">Dailian Ultrasonic</option>';"
         "  h += '<option value=\"Piezometer\">Piezometer (Water Level)</option>';"
@@ -3104,6 +3106,13 @@ static esp_err_t config_page_handler(httpd_req_t *req)
         "formHtml += '<label style=\"font-weight:600;padding-top:10px\">Scale Factor:</label>';"
         "formHtml += '<div><input type=\"number\" name=\"sensor_' + sensorId + '_scale_factor\" value=\"1.0\" step=\"any\" style=\"width:100%;padding:10px;border:1px solid #e0e0e0;border-radius:6px;font-size:15px\">';"
         "formHtml += '<small style=\"color:#888;display:block;margin-top:5px;font-size:13px\">Multiplier applied to raw sensor value (e.g., 0.1 for /10, 1.0 for no scaling)</small></div></div>';"
+        "} else if (sensorType === 'Panda_USM') {"
+        "formHtml += '<div style=\"display:grid;grid-template-columns:180px 1fr;gap:20px;align-items:start;margin-top:20px\">';"
+        "formHtml += '<label style=\"font-weight:600;padding-top:10px\">Scale Factor:</label>';"
+        "formHtml += '<div><input type=\"number\" name=\"sensor_' + sensorId + '_scale_factor\" value=\"1.0\" step=\"any\" style=\"width:100%;padding:10px;border:1px solid #e0e0e0;border-radius:6px;font-size:15px\">';"
+        "formHtml += '<small style=\"color:#888;display:block;margin-top:5px;font-size:13px\">Multiplier for positive volume (usually 1.0)</small></div></div>';"
+        "formHtml += '<p style=\"color:#007bff;font-size:11px;margin:5px 0\"><em>Panda USM defaults: Register 8 (Positive Volume), Quantity 4 (64-bit Double), Format: DOUBLE64 Big-Endian</em></p>';"
+        "formHtml += '<p style=\"color:#28a745;font-size:10px;margin:5px 0\"><strong>Fixed format - no data type selection needed</strong></p>';"
         "} else if (sensorType === 'Level') {"
         "formHtml += '<div style=\"display:grid;grid-template-columns:180px 1fr;gap:20px;align-items:start;margin-top:20px\">';"
         "formHtml += '<label style=\"font-weight:600;padding-top:10px\">Sensor Height:</label>';"
@@ -3184,6 +3193,13 @@ static esp_err_t config_page_handler(httpd_req_t *req)
         "if (quantityInput) quantityInput.value = '1';"
         "if (regAddrInput) regAddrInput.value = '10';"
         "if (scaleInput) scaleInput.value = '0.01';"
+        "} else if (sensorType === 'Panda_USM') {"
+        "const quantityInput = document.querySelector('input[name=\"sensor_' + sensorId + '_quantity\"]');"
+        "const regAddrInput = document.querySelector('input[name=\"sensor_' + sensorId + '_register_address\"]');"
+        "const scaleInput = document.querySelector('input[name=\"sensor_' + sensorId + '_scale_factor\"]');"
+        "if (quantityInput) quantityInput.value = '4';"
+        "if (regAddrInput) regAddrInput.value = '8';"
+        "if (scaleInput) scaleInput.value = '1.0';"
         "} else if (sensorType === 'ZEST') {"
         "const quantityInput = document.querySelector('input[name=\"sensor_' + sensorId + '_quantity\"]');"
         "const regAddrInput = document.querySelector('input[name=\"sensor_' + sensorId + '_register_address\"]');"
@@ -5643,6 +5659,20 @@ static esp_err_t test_sensor_handler(httpd_req_t *req)
                 display_value = (value1 + value2) * sensor->scale_factor;
                 snprintf(value_desc, sizeof(value_desc), "ZEST: UINT16(%lu) + FLOAT32(%.6f) = %.6f",
                          (unsigned long)integer_part, value2, display_value);
+            } else if (strcmp(sensor->sensor_type, "Panda_USM") == 0 && reg_count >= 4) {
+                // Panda USM sensor - 64-bit double format
+                // Registers[0-3]: Net Volume (FLOAT64 Big Endian)
+                uint64_t combined_value64 = ((uint64_t)registers[0] << 48) |
+                                           ((uint64_t)registers[1] << 32) |
+                                           ((uint64_t)registers[2] << 16) |
+                                           registers[3];
+
+                double net_volume;
+                memcpy(&net_volume, &combined_value64, sizeof(double));
+
+                display_value = net_volume * sensor->scale_factor;
+                snprintf(value_desc, sizeof(value_desc), "Panda USM: DOUBLE64 = %.6f m³",
+                         display_value);
             } else {
                 snprintf(value_desc, sizeof(value_desc), "%s×%.3f", sensor->data_type, sensor->scale_factor);
             }

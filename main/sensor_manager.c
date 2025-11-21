@@ -233,7 +233,7 @@ esp_err_t sensor_test_live(const sensor_config_t *sensor, sensor_test_result_t *
         reg_type = "HOLDING";
     }
     
-    // For Flow-Meter and ZEST sensors, read 4 registers
+    // For Flow-Meter, ZEST, and Panda USM sensors, read 4 registers
     int quantity_to_read = sensor->quantity;
     if (strcmp(sensor->sensor_type, "Flow-Meter") == 0) {
         quantity_to_read = 4;
@@ -241,6 +241,9 @@ esp_err_t sensor_test_live(const sensor_config_t *sensor, sensor_test_result_t *
     } else if (strcmp(sensor->sensor_type, "ZEST") == 0) {
         quantity_to_read = 4;
         ESP_LOGI(TAG, "ZEST sensor detected, reading 4 registers for UINT32_CDAB + FLOAT32_ABCD interpretation");
+    } else if (strcmp(sensor->sensor_type, "Panda_USM") == 0) {
+        quantity_to_read = 4;
+        ESP_LOGI(TAG, "Panda USM sensor detected, reading 4 registers for DOUBLE64 (Net Volume)");
     }
     
     // Set the baud rate for this sensor
@@ -351,11 +354,31 @@ esp_err_t sensor_test_live(const sensor_config_t *sensor, sensor_test_result_t *
         ESP_LOGI(TAG, "ZEST Calculation: Integer=0x%04X(%lu) + Decimal(FLOAT)=0x%08lX(%.6f) = %.6f",
                  (unsigned int)integer_part_raw, (unsigned long)integer_part_raw,
                  (unsigned long)float_bits, decimal_part, result->scaled_value);
+    }
+    // Special handling for Panda USM sensors (64-bit double format)
+    else if (strcmp(sensor->sensor_type, "Panda_USM") == 0 && reg_count >= 4) {
+        // Panda USM stores net volume as 64-bit double at register 4
+        // Big-endian format: registers[0] = MSW, registers[3] = LSW
+        uint64_t combined_value64 = ((uint64_t)registers[0] << 48) |
+                                   ((uint64_t)registers[1] << 32) |
+                                   ((uint64_t)registers[2] << 16) |
+                                   registers[3];
+
+        // Convert to double
+        double net_volume;
+        memcpy(&net_volume, &combined_value64, sizeof(double));
+
+        // Apply scale factor
+        result->scaled_value = net_volume * sensor->scale_factor;
+        result->raw_value = (uint32_t)(combined_value64 >> 32); // Store upper 32 bits as raw value
+
+        ESP_LOGI(TAG, "Panda USM Calculation: DOUBLE64=0x%016llX = %.6f m³",
+                 (unsigned long long)combined_value64, result->scaled_value);
     } else {
         // Convert the data using standard conversion
         esp_err_t conv_result = convert_modbus_data(registers, reg_count,
                                                    sensor->data_type, sensor->byte_order,
-                                                   sensor->scale_factor, 
+                                                   sensor->scale_factor,
                                                    &result->scaled_value, &result->raw_value);
 
         if (conv_result != ESP_OK) {
