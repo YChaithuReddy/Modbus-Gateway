@@ -488,6 +488,71 @@ static void mqtt_event_handler(void *handler_args, esp_event_base_t base, int32_
             ESP_LOGI(TAG, "[MSG] CLOUD-TO-DEVICE MESSAGE RECEIVED:");
             printf("TOPIC=%.*s\r\n", event->topic_len, event->topic);
             printf("DATA=%.*s\r\n", event->data_len, event->data);
+
+            // Process C2D command
+            if (event->data_len > 0 && event->data_len < 1024) {
+                char *message = (char*)malloc(event->data_len + 1);
+                if (message) {
+                    memcpy(message, event->data, event->data_len);
+                    message[event->data_len] = '\0';
+
+                    ESP_LOGI(TAG, "[C2D] Processing command: %s", message);
+
+                    // Parse JSON command
+                    cJSON *root = cJSON_Parse(message);
+                    if (root) {
+                        cJSON *command = cJSON_GetObjectItem(root, "command");
+
+                        if (command && cJSON_IsString(command)) {
+                            const char *cmd = command->valuestring;
+                            ESP_LOGI(TAG, "[C2D] Command: %s", cmd);
+
+                            // Handle different commands
+                            if (strcmp(cmd, "restart") == 0) {
+                                ESP_LOGW(TAG, "[C2D] Restart command received - restarting in 3 seconds...");
+                                vTaskDelay(pdMS_TO_TICKS(3000));
+                                esp_restart();
+                            }
+                            else if (strcmp(cmd, "set_telemetry_interval") == 0) {
+                                cJSON *interval = cJSON_GetObjectItem(root, "interval");
+                                if (interval && cJSON_IsNumber(interval)) {
+                                    int new_interval = interval->valueint;
+                                    if (new_interval >= 30 && new_interval <= 3600) {
+                                        system_config_t *cfg = get_system_config();
+                                        cfg->telemetry_interval = new_interval;
+                                        save_system_config();
+                                        ESP_LOGI(TAG, "[C2D] Telemetry interval updated to %d seconds", new_interval);
+                                    } else {
+                                        ESP_LOGW(TAG, "[C2D] Invalid interval: %d (must be 30-3600)", new_interval);
+                                    }
+                                }
+                            }
+                            else if (strcmp(cmd, "get_status") == 0) {
+                                ESP_LOGI(TAG, "[C2D] Status request - sending telemetry now");
+                                send_telemetry();
+                            }
+                            else if (strcmp(cmd, "toggle_webserver") == 0) {
+                                ESP_LOGI(TAG, "[C2D] Toggling web server");
+                                web_server_running = !web_server_running;
+                                if (web_server_running) {
+                                    web_config_start_ap_mode();
+                                } else {
+                                    web_config_stop();
+                                }
+                            }
+                            else {
+                                ESP_LOGW(TAG, "[C2D] Unknown command: %s", cmd);
+                            }
+                        }
+
+                        cJSON_Delete(root);
+                    } else {
+                        ESP_LOGW(TAG, "[C2D] Failed to parse JSON command");
+                    }
+
+                    free(message);
+                }
+            }
             break;
             
         case MQTT_EVENT_ERROR:
