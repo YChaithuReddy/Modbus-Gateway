@@ -11,6 +11,7 @@
 #include "esp_log.h"
 #include "esp_system.h"
 #include "esp_netif.h"
+#include "esp_http_client.h"
 #include "nvs_flash.h"
 #include "nvs.h"
 #include "lwip/err.h"
@@ -9082,7 +9083,7 @@ static esp_err_t save_telegram_config_handler(httpd_req_t *req) {
 
             // URL decode the token
             char decoded[64];
-            url_decode(g_system_config.telegram_config.bot_token, decoded, sizeof(decoded));
+            url_decode(decoded, g_system_config.telegram_config.bot_token);
             strncpy(g_system_config.telegram_config.bot_token, decoded, sizeof(g_system_config.telegram_config.bot_token) - 1);
         }
     }
