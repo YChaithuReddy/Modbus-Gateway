@@ -100,6 +100,16 @@ typedef struct {
     bool update_from_ntp;     // Periodically update RTC from NTP
 } rtc_config_t;
 
+// Telegram Bot configuration
+typedef struct {
+    bool enabled;              // Enable/disable Telegram bot
+    char bot_token[64];       // Bot API token from @BotFather
+    char chat_id[32];         // Your Telegram chat ID (user or group)
+    bool alerts_enabled;      // Enable/disable automatic alerts
+    bool startup_notification; // Send notification on system startup
+    int poll_interval;        // Polling interval in seconds (default: 10)
+} telegram_config_t;
+
 // System configuration
 typedef struct {
     // Network configuration
@@ -121,6 +131,7 @@ typedef struct {
     // Optional features
     sd_card_config_t sd_config;
     rtc_config_t rtc_config;
+    telegram_config_t telegram_config;
 
     // System flags
     bool config_complete;

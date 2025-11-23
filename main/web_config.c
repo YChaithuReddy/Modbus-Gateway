@@ -1243,6 +1243,8 @@ static esp_err_t save_network_mode_handler(httpd_req_t *req);
 static esp_err_t save_sim_config_handler(httpd_req_t *req);
 static esp_err_t save_sd_config_handler(httpd_req_t *req);
 static esp_err_t save_rtc_config_handler(httpd_req_t *req);
+static esp_err_t save_telegram_config_handler(httpd_req_t *req);
+static esp_err_t api_telegram_test_handler(httpd_req_t *req);
 static esp_err_t api_sim_test_handler(httpd_req_t *req);
 static esp_err_t api_sim_test_status_handler(httpd_req_t *req);
 static esp_err_t api_sd_status_handler(httpd_req_t *req);
@@ -2262,6 +2264,82 @@ static esp_err_t config_page_handler(httpd_req_t *req)
         g_system_config.rtc_config.scl_pin,
         g_system_config.rtc_config.i2c_num == 0 ? "selected" : "",
         g_system_config.rtc_config.i2c_num == 1 ? "selected" : "");
+    httpd_resp_sendstr_chunk(req, chunk);
+
+    // Telegram Bot Configuration Section
+    snprintf(chunk, sizeof(chunk),
+        "<div class='sensor-card' style='padding:25px;margin-top:30px'>"
+        "<form id='telegram_config_form' onsubmit='return saveTelegramConfig()'>"
+        "<h2 class='section-title'><i>🤖</i>Telegram Bot Configuration</h2>"
+        "<div style='background:#e3f2fd;border:1px solid #90caf9;padding:15px;margin:15px 0;border-radius:6px'>"
+        "<p style='margin:0;color:#1565c0'><strong>ℹ️ Remote Monitoring & Control:</strong> Control your ESP32 gateway via Telegram messenger. Get alerts, check status, and send commands remotely!</p>"
+        "</div>"
+        "<div class='sensor-card' style='padding:25px'>"
+        "<h3 style='text-align:center;margin-top:0;margin-bottom:20px;color:#007bff;font-size:20px'>Bot Settings</h3>"
+        "<p style='color:#666;margin-bottom:25px;text-align:center;font-size:14px'>Configure Telegram integration for remote access</p>"
+        "<div style='display:flex;align-items:center;justify-content:center;padding:15px;background:#f0f8ff;border-radius:8px;margin-bottom:15px'>"
+        "<label for='telegram_enabled' style='display:flex;align-items:center;justify-content:center;font-weight:600;font-size:16px;cursor:pointer;margin:0'>"
+        "<input type='checkbox' id='telegram_enabled' name='telegram_enabled' value='1' %s onchange='toggleTelegramOptions()' style='margin-right:10px;width:18px;height:18px;cursor:pointer'>"
+        "Enable Telegram Bot</label>"
+        "</div>"
+        "<div id='telegram_options' style='display:%s;margin-top:15px'>"
+        "<div style='display:grid;grid-template-columns:150px 1fr;gap:20px;align-items:start;margin-bottom:20px'>"
+        "<label style='font-weight:600;padding-top:10px'>Bot Token:</label>"
+        "<div>"
+        "<input type='text' id='telegram_bot_token' name='telegram_bot_token' value='%s' placeholder='123456:ABC-DEF...' style='width:100%%;padding:10px;border:1px solid #e0e0e0;border-radius:6px;font-size:15px'>"
+        "<small style='color:#888;display:block;margin-top:5px;font-size:13px'>Get from @BotFather on Telegram</small>"
+        "</div>"
+        "<label style='font-weight:600;padding-top:10px'>Chat ID:</label>"
+        "<div>"
+        "<input type='text' id='telegram_chat_id' name='telegram_chat_id' value='%s' placeholder='123456789' style='width:100%%;padding:10px;border:1px solid #e0e0e0;border-radius:6px;font-size:15px'>"
+        "<small style='color:#888;display:block;margin-top:5px;font-size:13px'>Your Telegram user ID or group chat ID</small>"
+        "</div>"
+        "<label style='font-weight:600;padding-top:10px'>Poll Interval:</label>"
+        "<div>"
+        "<input type='number' id='telegram_poll_interval' name='telegram_poll_interval' value='%d' min='5' max='60' style='width:100%%;padding:10px;border:1px solid #e0e0e0;border-radius:6px;font-size:15px'>"
+        "<small style='color:#888;display:block;margin-top:5px;font-size:13px'>How often to check for commands (5-60 seconds)</small>"
+        "</div>"
+        "</div>"
+        "<div style='display:flex;align-items:center;justify-content:center;padding:15px;background:#e8f4f8;border-radius:8px;margin-top:10px'>"
+        "<label for='telegram_alerts' style='display:flex;align-items:center;justify-content:center;font-size:15px;cursor:pointer;margin:0'>"
+        "<input type='checkbox' id='telegram_alerts' name='telegram_alerts' value='1' %s style='margin-right:10px;width:18px;height:18px;cursor:pointer'>"
+        "Send Automatic Alerts</label>"
+        "</div>"
+        "<div style='display:flex;align-items:center;justify-content:center;padding:15px;background:#e8f4f8;border-radius:8px;margin-top:10px'>"
+        "<label for='telegram_startup' style='display:flex;align-items:center;justify-content:center;font-size:15px;cursor:pointer;margin:0'>"
+        "<input type='checkbox' id='telegram_startup' name='telegram_startup' value='1' %s style='margin-right:10px;width:18px;height:18px;cursor:pointer'>"
+        "Send Startup Notification</label>"
+        "</div>"
+        "</div>"
+        "<div style='background:#fff3cd;border:1px solid #ffc107;padding:15px;margin:15px 0;border-radius:6px'>"
+        "<p style='margin:0;color:#856404;font-size:14px'><strong>📱 Setup Instructions:</strong></p>"
+        "<ol style='margin:10px 0 0 20px;color:#856404;font-size:13px'>"
+        "<li>Open Telegram and search for <code>@BotFather</code></li>"
+        "<li>Send <code>/newbot</code> and follow instructions to create your bot</li>"
+        "<li>Copy the Bot Token and paste above</li>"
+        "<li>Search for <code>@userinfobot</code> on Telegram and send <code>/start</code></li>"
+        "<li>Copy your Chat ID and paste above</li>"
+        "<li>Click Save and your bot will start!</li>"
+        "</ol>"
+        "</div>"
+        "<div style='display:flex;gap:10px;margin-top:20px;flex-wrap:wrap;justify-content:center'>"
+        "<button type='button' onclick='testTelegramBot()' style='background:#17a2b8;color:white;padding:12px 20px;border:none;border-radius:6px;font-weight:bold;min-width:150px;cursor:pointer'>🧪 Test Bot</button>"
+        "</div>"
+        "<div id='telegram_test_result' style='margin-top:15px;padding:10px;border-radius:6px;display:none'></div>"
+        "</div>"
+        "<div style='margin-top:25px;padding:20px;background:#f8f9fa;border-radius:8px;text-align:center'>"
+        "<button type='submit' style='background:#28a745;color:white;padding:12px 30px;border:none;border-radius:6px;font-weight:bold;font-size:16px;cursor:pointer'>Save Telegram Configuration</button>"
+        "<div id='telegram_save_result' style='margin-top:15px;padding:10px;border-radius:6px;display:none'></div>"
+        "</div>"
+        "</form>"
+        "</div>",
+        g_system_config.telegram_config.enabled ? "checked" : "",
+        g_system_config.telegram_config.enabled ? "block" : "none",
+        g_system_config.telegram_config.bot_token,
+        g_system_config.telegram_config.chat_id,
+        g_system_config.telegram_config.poll_interval,
+        g_system_config.telegram_config.alerts_enabled ? "checked" : "",
+        g_system_config.telegram_config.startup_notification ? "checked" : "");
     httpd_resp_sendstr_chunk(req, chunk);
 
     // Configuration Trigger Section
@@ -3484,6 +3562,55 @@ static esp_err_t config_page_handler(httpd_req_t *req)
         "const enabled=document.getElementById('rtc_enabled').checked;"
         "document.getElementById('rtc_options').style.display=enabled?'block':'none';"
         "document.getElementById('rtc_hw_options').style.display=enabled?'block':'none';"
+        "}"
+        "function toggleTelegramOptions(){"
+        "const enabled=document.getElementById('telegram_enabled').checked;"
+        "document.getElementById('telegram_options').style.display=enabled?'block':'none';"
+        "}"
+        "function saveTelegramConfig(){"
+        "const formData=new FormData(document.getElementById('telegram_config_form'));"
+        "const result=document.getElementById('telegram_save_result');"
+        "result.innerHTML='Saving...';"
+        "result.style.display='block';"
+        "result.style.backgroundColor='#fff3cd';"
+        "result.style.color='#856404';"
+        "fetch('/save_telegram_config',{method:'POST',body:formData})"
+        ".then(r=>r.json())"
+        ".then(data=>{"
+        "result.innerHTML=data.message;"
+        "result.style.backgroundColor='#d4edda';"
+        "result.style.color='#155724';"
+        "setTimeout(()=>{result.style.display='none';},3000);"
+        "}).catch(err=>{"
+        "result.innerHTML='Error: '+err.message;"
+        "result.style.backgroundColor='#f8d7da';"
+        "result.style.color='#721c24';"
+        "});"
+        "return false;"
+        "}"
+        "function testTelegramBot(){"
+        "const result=document.getElementById('telegram_test_result');"
+        "result.innerHTML='🧪 Testing Telegram bot...';"
+        "result.style.display='block';"
+        "result.style.backgroundColor='#fff3cd';"
+        "result.style.color='#856404';"
+        "fetch('/api/telegram_test',{method:'POST'})"
+        ".then(r=>r.json())"
+        ".then(data=>{"
+        "if(data.status==='success'){"
+        "result.innerHTML='✅ '+data.message;"
+        "result.style.backgroundColor='#d4edda';"
+        "result.style.color='#155724';"
+        "}else{"
+        "result.innerHTML='❌ '+data.message;"
+        "result.style.backgroundColor='#f8d7da';"
+        "result.style.color='#721c24';"
+        "}"
+        "}).catch(err=>{"
+        "result.innerHTML='❌ Error: '+err.message;"
+        "result.style.backgroundColor='#f8d7da';"
+        "result.style.color='#721c24';"
+        "});"
         "}"
         "let simTestPollInterval=null;"
         "function testSIMConnection(){"
@@ -8483,6 +8610,24 @@ static esp_err_t start_webserver(void)
         };
         httpd_register_uri_handler(g_server, &save_rtc_config_uri);
 
+        // Telegram config endpoint
+        httpd_uri_t save_telegram_config_uri = {
+            .uri = "/save_telegram_config",
+            .method = HTTP_POST,
+            .handler = save_telegram_config_handler,
+            .user_ctx = NULL
+        };
+        httpd_register_uri_handler(g_server, &save_telegram_config_uri);
+
+        // Telegram test API endpoint
+        httpd_uri_t api_telegram_test_uri = {
+            .uri = "/api/telegram_test",
+            .method = HTTP_POST,
+            .handler = api_telegram_test_handler,
+            .user_ctx = NULL
+        };
+        httpd_register_uri_handler(g_server, &api_telegram_test_uri);
+
         // SIM test API endpoint
         httpd_uri_t api_sim_test_uri = {
             .uri = "/api/sim_test",
@@ -8902,6 +9047,127 @@ static esp_err_t save_rtc_config_handler(httpd_req_t *req) {
 
     httpd_resp_set_type(req, "application/json");
     httpd_resp_sendstr(req, "{\"status\":\"success\",\"message\":\"RTC configuration saved\"}");
+    return ESP_OK;
+}
+
+// Handler: /save_telegram_config - Save Telegram Bot configuration
+static esp_err_t save_telegram_config_handler(httpd_req_t *req) {
+    char buf[1024];
+    int ret = httpd_req_recv(req, buf, sizeof(buf) - 1);
+    if (ret <= 0) {
+        if (ret == HTTPD_SOCK_ERR_TIMEOUT) {
+            httpd_resp_send_408(req);
+        }
+        return ESP_FAIL;
+    }
+    buf[ret] = '\0';
+
+    ESP_LOGI(TAG, "Saving Telegram configuration");
+
+    // Parse Telegram configuration parameters
+    g_system_config.telegram_config.enabled = (strstr(buf, "telegram_enabled=1") != NULL);
+    g_system_config.telegram_config.alerts_enabled = (strstr(buf, "telegram_alerts=1") != NULL);
+    g_system_config.telegram_config.startup_notification = (strstr(buf, "telegram_startup=1") != NULL);
+
+    char *param;
+
+    // Parse bot token
+    if ((param = strstr(buf, "telegram_bot_token=")) != NULL) {
+        param += strlen("telegram_bot_token=");
+        char *end = strchr(param, '&');
+        int len = end ? (end - param) : strlen(param);
+        if (len > 0 && len < sizeof(g_system_config.telegram_config.bot_token)) {
+            strncpy(g_system_config.telegram_config.bot_token, param, len);
+            g_system_config.telegram_config.bot_token[len] = '\0';
+
+            // URL decode the token
+            char decoded[64];
+            url_decode(g_system_config.telegram_config.bot_token, decoded, sizeof(decoded));
+            strncpy(g_system_config.telegram_config.bot_token, decoded, sizeof(g_system_config.telegram_config.bot_token) - 1);
+        }
+    }
+
+    // Parse chat ID
+    if ((param = strstr(buf, "telegram_chat_id=")) != NULL) {
+        param += strlen("telegram_chat_id=");
+        char *end = strchr(param, '&');
+        int len = end ? (end - param) : strlen(param);
+        if (len > 0 && len < sizeof(g_system_config.telegram_config.chat_id)) {
+            strncpy(g_system_config.telegram_config.chat_id, param, len);
+            g_system_config.telegram_config.chat_id[len] = '\0';
+        }
+    }
+
+    // Parse poll interval
+    if ((param = strstr(buf, "telegram_poll_interval=")) != NULL) {
+        sscanf(param, "telegram_poll_interval=%d", &g_system_config.telegram_config.poll_interval);
+    }
+
+    ESP_LOGI(TAG, "Telegram enabled: %s", g_system_config.telegram_config.enabled ? "YES" : "NO");
+    ESP_LOGI(TAG, "Chat ID: %s", g_system_config.telegram_config.chat_id);
+
+    config_save_to_nvs(&g_system_config);
+
+    httpd_resp_set_type(req, "application/json");
+    httpd_resp_sendstr(req, "{\"status\":\"success\",\"message\":\"Telegram configuration saved successfully!\"}");
+    return ESP_OK;
+}
+
+// Handler: /api/telegram_test - Test Telegram bot connection
+static esp_err_t api_telegram_test_handler(httpd_req_t *req) {
+    httpd_resp_set_type(req, "application/json");
+
+    if (!g_system_config.telegram_config.enabled) {
+        httpd_resp_sendstr(req, "{\"status\":\"error\",\"message\":\"Telegram bot is disabled\"}");
+        return ESP_OK;
+    }
+
+    if (strlen(g_system_config.telegram_config.bot_token) == 0) {
+        httpd_resp_sendstr(req, "{\"status\":\"error\",\"message\":\"Bot token not configured\"}");
+        return ESP_OK;
+    }
+
+    if (strlen(g_system_config.telegram_config.chat_id) == 0) {
+        httpd_resp_sendstr(req, "{\"status\":\"error\",\"message\":\"Chat ID not configured\"}");
+        return ESP_OK;
+    }
+
+    // Try to send a test message via Telegram API
+    ESP_LOGI(TAG, "Testing Telegram bot...");
+
+    // Build simple test message
+    const char *test_msg = "🧪 Test Message\\n\\nYour Telegram bot is working correctly! 🎉";
+
+    char url[512];
+    snprintf(url, sizeof(url),
+        "https://api.telegram.org/bot%s/sendMessage?chat_id=%s&text=%s",
+        g_system_config.telegram_config.bot_token,
+        g_system_config.telegram_config.chat_id,
+        test_msg);
+
+    // Simple HTTP GET test
+    esp_http_client_config_t config = {
+        .url = url,
+        .timeout_ms = 10000,
+    };
+
+    esp_http_client_handle_t client = esp_http_client_init(&config);
+    esp_err_t err = esp_http_client_perform(client);
+
+    if (err == ESP_OK) {
+        int status = esp_http_client_get_status_code(client);
+        if (status == 200) {
+            httpd_resp_sendstr(req, "{\"status\":\"success\",\"message\":\"Test message sent successfully! Check your Telegram.\"}");
+        } else {
+            char resp[128];
+            snprintf(resp, sizeof(resp), "{\"status\":\"error\",\"message\":\"HTTP Error %d - Check bot token and chat ID\"}", status);
+            httpd_resp_sendstr(req, resp);
+        }
+    } else {
+        httpd_resp_sendstr(req, "{\"status\":\"error\",\"message\":\"Network error - Check internet connection\"}");
+    }
+
+    esp_http_client_cleanup(client);
     return ESP_OK;
 }
 
@@ -9891,6 +10157,15 @@ esp_err_t config_reset_to_defaults(void)
     g_system_config.rtc_config.sda_pin = GPIO_NUM_21;
     g_system_config.rtc_config.scl_pin = GPIO_NUM_22;
     g_system_config.rtc_config.i2c_num = I2C_NUM_0;
+
+    // Telegram Bot defaults
+    g_system_config.telegram_config.enabled = false;
+    strcpy(g_system_config.telegram_config.bot_token, "");
+    strcpy(g_system_config.telegram_config.chat_id, "");
+    g_system_config.telegram_config.alerts_enabled = true;
+    g_system_config.telegram_config.startup_notification = true;
+    g_system_config.telegram_config.poll_interval = 10;
+
     // Initialize all sensors with default values
     for (int i = 0; i < 8; i++) {
         g_system_config.sensors[i].enabled = false;

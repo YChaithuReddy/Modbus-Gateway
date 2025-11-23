@@ -32,6 +32,7 @@
 #include "sd_card_logger.h"
 #include "ds3231_rtc.h"
 #include "a7670c_ppp.h"
+#include "telegram_bot.h"
 #include "cJSON.h"
 
 static const char *TAG = "AZURE_IOT";
@@ -2359,7 +2360,16 @@ void app_main(void) {
         ESP_LOGI(TAG, "║         All subsystems initialized and operational       ║");
     }
     ESP_LOGI(TAG, "╚══════════════════════════════════════════════════════════╝");
-    
+
+    // Initialize and start Telegram bot if enabled
+    telegram_bot_init();
+    if (telegram_is_enabled()) {
+        ESP_LOGI(TAG, "[TELEGRAM] Starting Telegram bot...");
+        telegram_bot_start();
+    } else {
+        ESP_LOGI(TAG, "[TELEGRAM] Telegram bot disabled in configuration");
+    }
+
     // Main monitoring loop with web server toggle support
     while (1) {
         // Check for web server toggle request
