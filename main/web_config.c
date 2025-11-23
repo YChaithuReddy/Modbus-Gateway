@@ -1246,6 +1246,7 @@ static esp_err_t save_sd_config_handler(httpd_req_t *req);
 static esp_err_t save_rtc_config_handler(httpd_req_t *req);
 static esp_err_t save_telegram_config_handler(httpd_req_t *req);
 static esp_err_t api_telegram_test_handler(httpd_req_t *req);
+static esp_err_t api_modbus_poll_handler(httpd_req_t *req);
 static esp_err_t api_sim_test_handler(httpd_req_t *req);
 static esp_err_t api_sim_test_status_handler(httpd_req_t *req);
 static esp_err_t api_sd_status_handler(httpd_req_t *req);
@@ -9367,7 +9368,7 @@ static esp_err_t api_modbus_poll_handler(httpd_req_t *req) {
         result = modbus_read_input_registers(slave_id, start_reg, quantity);
     }
 
-    if (result != MODBUS_OK) {
+    if (result != MODBUS_SUCCESS) {
         char resp[128];
         const char *error_msg = "Unknown error";
         switch (result) {
