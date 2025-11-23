@@ -2802,60 +2802,38 @@ static esp_err_t config_page_handler(httpd_req_t *req)
         "<div id='live_result' style='margin-top:var(--space-md)'></div>"
         "</div>");
 
-    // Live Sensor Poll Card - show configured sensors
+    // Live Sensor Poll Card - Modbus Poll style
     httpd_resp_sendstr_chunk(req,
         ""
         "<div class='sensor-card'>"
-        "<h3>📊 Live Sensor Poll</h3>"
-        "<p>Monitor real-time values from your configured sensors. Click 'Start Polling' to see live data updates every 3 seconds.</p>");
-
-    if (g_system_config.sensor_count > 0) {
-        bool has_sensors = false;
-        for (int i = 0; i < g_system_config.sensor_count; i++) {
-            if (g_system_config.sensors[i].enabled) {
-                has_sensors = true;
-                snprintf(chunk, sizeof(chunk),
-                    "<div style='border:1px solid #dee2e6;padding:12px;margin:10px 0;border-radius:5px;background:#f8f9fa'>"
-                    "<div style='display:flex;justify-content:space-between;align-items:center'>"
-                    "<div style='flex:1'>"
-                    "<strong style='color:#28a745'>%s</strong>"
-                    "<span style='color:#6c757d;font-size:13px;margin-left:10px'>(%s | Slave: %d)</span>"
-                    "</div>"
-                    "<button onclick='startLivePoll(%d)' class='btn' style='background:#28a745;color:white;padding:6px 16px;font-size:13px'>Start</button>"
-                    "</div>"
-                    "<div id='live-poll-%d' style='display:none;margin-top:10px;padding:10px;background:white;border-radius:4px'>"
-                    "<div style='display:flex;justify-content:space-between;align-items:center;margin-bottom:8px'>"
-                    "<span style='font-weight:bold;color:#28a745;font-size:13px'>● Polling Active</span>"
-                    "<button onclick='stopLivePoll(%d)' style='background:#dc3545;color:white;border:none;padding:4px 12px;border-radius:4px;cursor:pointer;font-size:12px'>Stop</button>"
-                    "</div>"
-                    "<div id='live-poll-data-%d' style='font-family:monospace;font-size:12px;max-height:200px;overflow-y:auto'>"
-                    "</div>"
-                    "<div id='live-poll-status-%d' style='margin-top:8px;font-size:11px;color:#6c757d;border-top:1px solid #dee2e6;padding-top:8px'>"
-                    "Ready to poll"
-                    "</div>"
-                    "</div>"
-                    "</div>",
-                    g_system_config.sensors[i].name,
-                    g_system_config.sensors[i].sensor_type,
-                    g_system_config.sensors[i].slave_id,
-                    i, i, i, i, i);
-                httpd_resp_sendstr_chunk(req, chunk);
-            }
-        }
-        if (!has_sensors) {
-            httpd_resp_sendstr_chunk(req,
-                "<div style='background:#fff3cd;border:1px solid #ffc107;padding:12px;margin:10px 0;border-radius:5px'>"
-                "<p style='margin:0;color:#856404;font-size:13px'>All sensors are disabled. Enable sensors to use live polling.</p>"
-                "</div>");
-        }
-    } else {
-        httpd_resp_sendstr_chunk(req,
-            "<div style='background:#fff3cd;border:1px solid #ffc107;padding:12px;margin:10px 0;border-radius:5px'>"
-            "<p style='margin:0;color:#856404;font-size:13px'>No sensors configured. Add sensors in the Regular Sensors or Water Quality Sensors sections first.</p>"
-            "</div>");
-    }
-
-    httpd_resp_sendstr_chunk(req,
+        "<h3>📊 Live Sensor Poll (Modbus Poll Style)</h3>"
+        "<p>Test ANY Modbus device in real-time - just like Modbus Poll software. Enter parameters and start polling to see live register values.</p>"
+        "<div class='form-grid'>"
+        "<label>Slave ID:</label>"
+        "<input type='number' id='poll_slave' min='1' max='247' value='1'>"
+        "<label>Start Register:</label>"
+        "<input type='number' id='poll_register' min='0' max='65535' value='0'>"
+        "<label>Quantity:</label>"
+        "<input type='number' id='poll_quantity' min='1' max='20' value='5'>"
+        "<label>Register Type:</label>"
+        "<select id='poll_reg_type'>"
+        "<option value='holding'>Holding Register (0x03)</option>"
+        "<option value='input'>Input Register (0x04)</option>"
+        "</select>"
+        "<label>Poll Interval:</label>"
+        "<select id='poll_interval'>"
+        "<option value='1000'>1 second</option>"
+        "<option value='2000'>2 seconds</option>"
+        "<option value='3000' selected>3 seconds</option>"
+        "<option value='5000'>5 seconds</option>"
+        "<option value='10000'>10 seconds</option>"
+        "</select>"
+        "</div>"
+        "<div style='display:flex;gap:var(--space-md);margin-top:var(--space-md)'>"
+        "<button onclick='startModbusPoll()' id='start_poll_btn' class='btn' style='background:#28a745;color:white;flex:1'>Start Polling</button>"
+        "<button onclick='stopModbusPoll()' id='stop_poll_btn' class='btn' style='background:#dc3545;color:white;flex:1;display:none'>Stop Polling</button>"
+        "</div>"
+        "<div id='poll_result' style='margin-top:var(--space-md)'></div>"
         "</div>"
         ""
         "<div class='sensor-card'>"
@@ -5232,43 +5210,52 @@ static esp_err_t config_page_handler(httpd_req_t *req)
         "btn.textContent='Disable Auto-Refresh';"
         "btn.style.background='var(--color-error)';"
         "}}"
-        "let livePollIntervals={};"
-        "function startLivePoll(sensorIndex){"
-        "const pollDiv=document.getElementById('live-poll-'+sensorIndex);"
-        "const dataDiv=document.getElementById('live-poll-data-'+sensorIndex);"
-        "const statusDiv=document.getElementById('live-poll-status-'+sensorIndex);"
-        "pollDiv.style.display='block';"
-        "dataDiv.innerHTML='<p style=\"color:#6c757d\">Starting poll...</p>';"
+        "let modbusPollInterval=null;"
+        "function startModbusPoll(){"
+        "const slaveId=parseInt(document.getElementById('poll_slave').value);"
+        "const startReg=parseInt(document.getElementById('poll_register').value);"
+        "const quantity=parseInt(document.getElementById('poll_quantity').value);"
+        "const regType=document.getElementById('poll_reg_type').value;"
+        "const interval=parseInt(document.getElementById('poll_interval').value);"
+        "const resultDiv=document.getElementById('poll_result');"
+        "const startBtn=document.getElementById('start_poll_btn');"
+        "const stopBtn=document.getElementById('stop_poll_btn');"
+        "if(slaveId<1||slaveId>247||startReg<0||startReg>65535||quantity<1||quantity>20){"
+        "alert('Invalid parameters');return;}"
+        "startBtn.style.display='none';"
+        "stopBtn.style.display='block';"
+        "resultDiv.style.display='block';"
+        "resultDiv.innerHTML='<div style=\"background:#d1ecf1;padding:10px;border-radius:4px;color:#0c5460;margin-bottom:10px\">● Polling Slave '+slaveId+', Reg '+startReg+'-'+(startReg+quantity-1)+' ('+regType+') every '+(interval/1000)+'s</div>';"
         "const pollFunc=()=>{"
-        "fetch('/api/sensor_data?index='+sensorIndex)"
+        "fetch('/api/modbus_poll?slave='+slaveId+'&reg='+startReg+'&qty='+quantity+'&type='+regType)"
         ".then(r=>r.json())"
         ".then(data=>{"
         "if(data.status==='success'){"
-        "let html='<table style=\"width:100%;border-collapse:collapse\">';"
-        "for(let key in data.values){"
-        "html+='<tr style=\"border-bottom:1px solid #dee2e6\"><td style=\"padding:4px;font-weight:bold\">'+key+'</td><td style=\"padding:4px;text-align:right\">'+data.values[key]+'</td></tr>';"
+        "let html='<table style=\"width:100%;border-collapse:collapse;background:white;border:1px solid #dee2e6\">';"
+        "html+='<thead><tr style=\"background:#28a745;color:white\"><th style=\"padding:8px;text-align:left\">Register</th><th style=\"padding:8px;text-align:right\">Value (Dec)</th><th style=\"padding:8px;text-align:right\">Value (Hex)</th></tr></thead><tbody>';"
+        "for(let i=0;i<data.values.length;i++){"
+        "html+='<tr style=\"border-bottom:1px solid #dee2e6\"><td style=\"padding:6px;font-weight:bold\">'+(startReg+i)+'</td><td style=\"padding:6px;text-align:right;font-family:monospace\">'+data.values[i]+'</td><td style=\"padding:6px;text-align:right;font-family:monospace;color:#007bff\">0x'+data.values[i].toString(16).toUpperCase().padStart(4,'0')+'</td></tr>';"
         "}"
-        "html+='</table>';"
-        "dataDiv.innerHTML=html;"
-        "const now=new Date();"
-        "statusDiv.innerHTML='Last update: '+now.toLocaleTimeString();"
+        "html+='</tbody></table>';"
+        "html+='<div style=\"margin-top:8px;font-size:12px;color:#6c757d\">Last update: '+new Date().toLocaleTimeString()+'</div>';"
+        "resultDiv.innerHTML='<div style=\"background:#d1ecf1;padding:10px;border-radius:4px;color:#0c5460;margin-bottom:10px\">● Polling Active - Slave '+slaveId+', Reg '+startReg+'-'+(startReg+quantity-1)+'</div>'+html;"
         "}else{"
-        "dataDiv.innerHTML='<p style=\"color:#dc3545\">Error: '+data.message+'</p>';"
+        "resultDiv.innerHTML='<div style=\"background:#f8d7da;padding:10px;border-radius:4px;color:#721c24\">ERROR: '+data.message+'</div>';"
         "}"
         "}).catch(err=>{"
-        "dataDiv.innerHTML='<p style=\"color:#dc3545\">Network error: '+err.message+'</p>';"
+        "resultDiv.innerHTML='<div style=\"background:#f8d7da;padding:10px;border-radius:4px;color:#721c24\">NETWORK ERROR: '+err.message+'</div>';"
         "});"
         "};"
         "pollFunc();"
-        "livePollIntervals[sensorIndex]=setInterval(pollFunc,3000);"
+        "modbusPollInterval=setInterval(pollFunc,interval);"
         "}"
-        "function stopLivePoll(sensorIndex){"
-        "if(livePollIntervals[sensorIndex]){"
-        "clearInterval(livePollIntervals[sensorIndex]);"
-        "delete livePollIntervals[sensorIndex];"
-        "}"
-        "const pollDiv=document.getElementById('live-poll-'+sensorIndex);"
-        "pollDiv.style.display='none';"
+        "function stopModbusPoll(){"
+        "if(modbusPollInterval){"
+        "clearInterval(modbusPollInterval);"
+        "modbusPollInterval=null;}"
+        "document.getElementById('start_poll_btn').style.display='block';"
+        "document.getElementById('stop_poll_btn').style.display='none';"
+        "document.getElementById('poll_result').innerHTML='<div style=\"background:#fff3cd;padding:10px;border-radius:4px;color:#856404\">Polling stopped</div>';"
         "}"
         "console.log('Script loaded successfully. addSensor function defined:', typeof addSensor);"
         "</script>");
@@ -8728,14 +8715,14 @@ static esp_err_t start_webserver(void)
         };
         httpd_register_uri_handler(g_server, &api_telegram_test_uri);
 
-        // Live sensor poll API endpoint
-        httpd_uri_t api_sensor_data_uri = {
-            .uri = "/api/sensor_data",
+        // Live Modbus poll API endpoint
+        httpd_uri_t api_modbus_poll_uri = {
+            .uri = "/api/modbus_poll",
             .method = HTTP_GET,
-            .handler = api_sensor_data_handler,
+            .handler = api_modbus_poll_handler,
             .user_ctx = NULL
         };
-        httpd_register_uri_handler(g_server, &api_sensor_data_uri);
+        httpd_register_uri_handler(g_server, &api_modbus_poll_uri);
 
         // SIM test API endpoint
         httpd_uri_t api_sim_test_uri = {
@@ -9342,70 +9329,75 @@ static esp_err_t api_telegram_test_handler(httpd_req_t *req) {
     return ESP_OK;
 }
 
-// Handler: /api/sensor_data - Get current sensor readings for live poll
-static esp_err_t api_sensor_data_handler(httpd_req_t *req) {
+// Handler: /api/modbus_poll - Live Modbus polling (Modbus Poll style)
+static esp_err_t api_modbus_poll_handler(httpd_req_t *req) {
     httpd_resp_set_type(req, "application/json");
 
-    // Parse sensor index from query parameter
-    char query[64];
+    // Parse query parameters: slave, reg, qty, type
+    char query[128];
     if (httpd_req_get_url_query_str(req, query, sizeof(query)) != ESP_OK) {
-        httpd_resp_sendstr(req, "{\"status\":\"error\",\"message\":\"Missing sensor index\"}");
+        httpd_resp_sendstr(req, "{\"status\":\"error\",\"message\":\"Missing parameters\"}");
         return ESP_OK;
     }
 
-    char index_str[8];
-    if (httpd_query_key_value(query, "index", index_str, sizeof(index_str)) != ESP_OK) {
-        httpd_resp_sendstr(req, "{\"status\":\"error\",\"message\":\"Invalid index parameter\"}");
+    char slave_str[8], reg_str[8], qty_str[8], type_str[16];
+
+    if (httpd_query_key_value(query, "slave", slave_str, sizeof(slave_str)) != ESP_OK ||
+        httpd_query_key_value(query, "reg", reg_str, sizeof(reg_str)) != ESP_OK ||
+        httpd_query_key_value(query, "qty", qty_str, sizeof(qty_str)) != ESP_OK ||
+        httpd_query_key_value(query, "type", type_str, sizeof(type_str)) != ESP_OK) {
+        httpd_resp_sendstr(req, "{\"status\":\"error\",\"message\":\"Invalid parameters\"}");
         return ESP_OK;
     }
 
-    int sensor_index = atoi(index_str);
-    if (sensor_index < 0 || sensor_index >= g_system_config.sensor_count) {
-        httpd_resp_sendstr(req, "{\"status\":\"error\",\"message\":\"Sensor index out of range\"}");
+    uint8_t slave_id = atoi(slave_str);
+    uint16_t start_reg = atoi(reg_str);
+    uint16_t quantity = atoi(qty_str);
+
+    if (slave_id < 1 || slave_id > 247 || start_reg > 65535 || quantity < 1 || quantity > 20) {
+        httpd_resp_sendstr(req, "{\"status\":\"error\",\"message\":\"Parameter out of range\"}");
         return ESP_OK;
     }
 
-    sensor_config_t *sensor = &g_system_config.sensors[sensor_index];
-    if (!sensor->enabled) {
-        httpd_resp_sendstr(req, "{\"status\":\"error\",\"message\":\"Sensor is disabled\"}");
-        return ESP_OK;
+    // Read Modbus registers
+    modbus_result_t result;
+    if (strcmp(type_str, "holding") == 0) {
+        result = modbus_read_holding_registers(slave_id, start_reg, quantity);
+    } else {
+        result = modbus_read_input_registers(slave_id, start_reg, quantity);
     }
 
-    // Read current sensor values from Modbus
-    uint16_t registers[10];
-    int num_regs = sensor->num_registers > 10 ? 10 : sensor->num_registers;
-
-    esp_err_t err = modbus_read_holding_registers(
-        sensor->slave_id,
-        sensor->start_register,
-        num_regs,
-        registers
-    );
-
-    if (err != ESP_OK) {
+    if (result != MODBUS_OK) {
         char resp[128];
-        snprintf(resp, sizeof(resp), "{\"status\":\"error\",\"message\":\"Failed to read sensor (Slave %d)\"}",
-                 sensor->slave_id);
+        const char *error_msg = "Unknown error";
+        switch (result) {
+            case MODBUS_TIMEOUT: error_msg = "Timeout - No response from slave"; break;
+            case MODBUS_INVALID_CRC: error_msg = "Invalid CRC"; break;
+            case MODBUS_ILLEGAL_FUNCTION: error_msg = "Illegal function"; break;
+            case MODBUS_ILLEGAL_DATA_ADDRESS: error_msg = "Illegal register address"; break;
+            case MODBUS_ILLEGAL_DATA_VALUE: error_msg = "Illegal data value"; break;
+            default: break;
+        }
+        snprintf(resp, sizeof(resp), "{\"status\":\"error\",\"message\":\"Modbus Error (Slave %d): %s\"}",
+                 slave_id, error_msg);
         httpd_resp_sendstr(req, resp);
         return ESP_OK;
     }
 
-    // Build JSON response with sensor values
+    // Build JSON response with register values
     char response[1024];
     int offset = snprintf(response, sizeof(response),
-        "{\"status\":\"success\",\"sensor\":\"%s\",\"type\":\"%s\",\"slave_id\":%d,\"values\":{",
-        sensor->name, sensor->sensor_type, sensor->slave_id);
+        "{\"status\":\"success\",\"slave\":%d,\"register\":%d,\"quantity\":%d,\"type\":\"%s\",\"values\":[",
+        slave_id, start_reg, quantity, type_str);
 
-    // Add register values
-    for (int i = 0; i < num_regs && offset < sizeof(response) - 100; i++) {
+    // Get values from response buffer
+    for (int i = 0; i < quantity && offset < sizeof(response) - 50; i++) {
+        uint16_t value = modbus_get_response_buffer(i);
         offset += snprintf(response + offset, sizeof(response) - offset,
-            "%s\"Reg %d\":%u",
-            i > 0 ? "," : "",
-            sensor->start_register + i,
-            registers[i]);
+            "%s%u", i > 0 ? "," : "", value);
     }
 
-    offset += snprintf(response + offset, sizeof(response) - offset, "}}");
+    offset += snprintf(response + offset, sizeof(response) - offset, "]}");
 
     httpd_resp_sendstr(req, response);
     return ESP_OK;
