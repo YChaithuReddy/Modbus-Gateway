@@ -3593,14 +3593,14 @@ static esp_err_t config_page_handler(httpd_req_t *req)
         "const result=document.getElementById('telegram_test_result');"
         "const botToken=document.getElementById('telegram_bot_token').value;"
         "const chatId=document.getElementById('telegram_chat_id').value;"
-        "const formData=new FormData();"
-        "formData.append('bot_token',botToken);"
-        "formData.append('chat_id',chatId);"
+        "const params=new URLSearchParams();"
+        "params.append('bot_token',botToken);"
+        "params.append('chat_id',chatId);"
         "result.innerHTML='🧪 Testing Telegram bot...';"
         "result.style.display='block';"
         "result.style.backgroundColor='#fff3cd';"
         "result.style.color='#856404';"
-        "fetch('/api/telegram_test',{method:'POST',body:formData})"
+        "fetch('/api/telegram_test',{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},body:params.toString()})"
         ".then(r=>r.json())"
         ".then(data=>{"
         "if(data.status==='success'){"
@@ -9123,8 +9123,8 @@ static esp_err_t save_telegram_config_handler(httpd_req_t *req) {
 static esp_err_t api_telegram_test_handler(httpd_req_t *req) {
     httpd_resp_set_type(req, "application/json");
 
-    // Read POST data to get bot token and chat ID from form (not from saved config)
-    char buf[512];
+    // Read POST data (URL-encoded format)
+    char buf[1024];
     int ret = httpd_req_recv(req, buf, sizeof(buf) - 1);
     if (ret <= 0) {
         httpd_resp_sendstr(req, "{\"status\":\"error\",\"message\":\"Failed to read request data\"}");
@@ -9132,11 +9132,14 @@ static esp_err_t api_telegram_test_handler(httpd_req_t *req) {
     }
     buf[ret] = '\0';
 
-    // Parse bot token from form
-    char bot_token[64] = {0};
-    char chat_id[32] = {0};
+    ESP_LOGI(TAG, "Telegram test request received, data length: %d", ret);
+
+    // Parse URL-encoded parameters: bot_token=xxx&chat_id=yyy
+    char bot_token[128] = {0};
+    char chat_id[64] = {0};
     char *param;
 
+    // Parse bot_token
     if ((param = strstr(buf, "bot_token=")) != NULL) {
         param += strlen("bot_token=");
         char *end = strchr(param, '&');
@@ -9144,13 +9147,14 @@ static esp_err_t api_telegram_test_handler(httpd_req_t *req) {
         if (len > 0 && len < sizeof(bot_token)) {
             strncpy(bot_token, param, len);
             bot_token[len] = '\0';
-            // URL decode
-            char decoded[64];
+            // URL decode (handles %3A for : and other special chars)
+            char decoded[128];
             url_decode(decoded, bot_token);
             strncpy(bot_token, decoded, sizeof(bot_token) - 1);
         }
     }
 
+    // Parse chat_id
     if ((param = strstr(buf, "chat_id=")) != NULL) {
         param += strlen("chat_id=");
         char *end = strchr(param, '&');
@@ -9158,8 +9162,14 @@ static esp_err_t api_telegram_test_handler(httpd_req_t *req) {
         if (len > 0 && len < sizeof(chat_id)) {
             strncpy(chat_id, param, len);
             chat_id[len] = '\0';
+            // URL decode
+            char decoded[64];
+            url_decode(decoded, chat_id);
+            strncpy(chat_id, decoded, sizeof(chat_id) - 1);
         }
     }
+
+    ESP_LOGI(TAG, "Parsed bot_token length: %d, chat_id: %s", strlen(bot_token), chat_id);
 
     if (strlen(bot_token) == 0) {
         httpd_resp_sendstr(req, "{\"status\":\"error\",\"message\":\"Bot token is empty. Please enter a bot token first.\"}");
