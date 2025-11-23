@@ -9191,8 +9191,7 @@ static esp_err_t api_telegram_test_handler(httpd_req_t *req) {
     // Build POST data
     char post_data[256];
     snprintf(post_data, sizeof(post_data),
-        "chat_id=%s&text=Test%%20from%%20ESP32%%20Gateway%%20-%20Bot%%20is%%20working!",
-        chat_id);
+        "chat_id=%s&text=Test%%20message%%20from%%20ESP32%%20Gateway", chat_id);
 
     ESP_LOGI(TAG, "POST to: %s", url);
 
