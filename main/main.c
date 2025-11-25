@@ -1758,29 +1758,34 @@ static bool send_telemetry(void) {
     static uint32_t call_counter = 0;
     static bool send_in_progress = false;
     TickType_t current_time = xTaskGetTickCount();
-    
+    system_config_t* config = get_system_config();
+
     call_counter++;
-    ESP_LOGI(TAG, "[TRACK] send_telemetry() called #%lu, time=%lu, last_send=%lu, mqtt_connected=%d", 
+    ESP_LOGI(TAG, "[TRACK] send_telemetry() called #%lu, time=%lu, last_send=%lu, mqtt_connected=%d",
              call_counter, current_time, last_actual_send_time, mqtt_connected);
-    
+
     // Check if a send is already in progress
     if (send_in_progress) {
         ESP_LOGW(TAG, "[WARN] Telemetry send already in progress, skipping duplicate call #%lu", call_counter);
         return false;
     }
-    
-    // Prevent duplicate sends within 10 seconds (increased safety window)
-    if (last_actual_send_time != 0 && 
-        (current_time - last_actual_send_time) < pdMS_TO_TICKS(10000)) {
-        ESP_LOGW(TAG, "[WARN] Telemetry send attempted too soon (%.1f sec ago), skipping call #%lu", 
-                (current_time - last_actual_send_time) * portTICK_PERIOD_MS / 1000.0, call_counter);
-        return false;
+
+    // Check telemetry interval - respect configured interval for both online and offline caching
+    if (last_actual_send_time != 0) {
+        TickType_t elapsed_ticks = current_time - last_actual_send_time;
+        TickType_t interval_ticks = pdMS_TO_TICKS(config->telemetry_interval * 1000);
+
+        if (elapsed_ticks < interval_ticks) {
+            uint32_t elapsed_sec = elapsed_ticks * portTICK_PERIOD_MS / 1000;
+            ESP_LOGW(TAG, "[WARN] Telemetry interval not reached (%lu/%d sec), skipping call #%lu",
+                    elapsed_sec, config->telemetry_interval, call_counter);
+            return false;
+        }
     }
-    
+
     send_in_progress = true;
-    
+
     // Check network connectivity first
-    system_config_t* config = get_system_config();
     bool network_available = is_network_connected();
 
     if (!network_available) {
