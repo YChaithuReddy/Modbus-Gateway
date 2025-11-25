@@ -13,12 +13,12 @@
 
 static const char *TAG = "SD_CARD";
 
-// Hardware pin configuration (hardcoded)
-#define SD_CARD_MOSI GPIO_NUM_13
-#define SD_CARD_MISO GPIO_NUM_12
-#define SD_CARD_CLK GPIO_NUM_14
-#define SD_CARD_CS GPIO_NUM_5
-#define SD_CARD_SPI_HOST SPI2_HOST
+// Hardware pin configuration (VSPI - Safe from boot conflicts)
+#define SD_CARD_MOSI GPIO_NUM_23
+#define SD_CARD_MISO GPIO_NUM_19
+#define SD_CARD_CLK GPIO_NUM_5
+#define SD_CARD_CS GPIO_NUM_15
+#define SD_CARD_SPI_HOST SPI3_HOST
 
 // SD Card state
 static bool sd_initialized = false;
