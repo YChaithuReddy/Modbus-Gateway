@@ -1067,10 +1067,10 @@ static void create_telemetry_payload(char* payload, size_t payload_size) {
         }
         
         int payload_pos = 0;
-        
-        // JSON array start - send as direct array, Azure will wrap it in "body"
-        payload_pos += snprintf(payload + payload_pos, payload_size - payload_pos, "[");
-        
+
+        // Don't use array wrapper - send single JSON object directly
+        // (JSON templates already have "body" wrapper)
+
         int valid_sensors = 0;
         for (int i = 0; i < actual_count; i++) {
             if (readings[i].valid) {
@@ -1121,18 +1121,19 @@ static void create_telemetry_payload(char* payload, size_t payload_size) {
                 }
                 
                 if (json_result == ESP_OK) {
-                    // Add comma if not first sensor
-                    if (valid_sensors > 0) {
-                        payload_pos += snprintf(payload + payload_pos, payload_size - payload_pos, ",");
-                    }
-                    
-                    // Add this sensor's JSON to the array
-                    int remaining_space = payload_size - payload_pos;
-                    if (remaining_space > strlen(temp_json) + 50) { // Leave room for closing JSON
-                        payload_pos += snprintf(payload + payload_pos, remaining_space, "%s", temp_json);
-                        valid_sensors++;
+                    // For first sensor, use its JSON directly (no array wrapper)
+                    // For multiple sensors, would need different strategy
+                    if (valid_sensors == 0) {
+                        int remaining_space = payload_size - payload_pos;
+                        if (remaining_space > strlen(temp_json) + 10) {
+                            payload_pos += snprintf(payload + payload_pos, remaining_space, "%s", temp_json);
+                            valid_sensors++;
+                        } else {
+                            ESP_LOGW(TAG, "[WARN] Payload buffer too small for sensor %d", i);
+                            break;
+                        }
                     } else {
-                        ESP_LOGW(TAG, "[WARN] Payload buffer too small for sensor %d", i);
+                        ESP_LOGW(TAG, "[WARN] Multiple sensors not supported in this JSON format - only first sensor sent");
                         break;
                     }
                 } else {
@@ -1140,17 +1141,8 @@ static void create_telemetry_payload(char* payload, size_t payload_size) {
                 }
             }
         }
-        
-        // Close JSON array and add metadata
-        char timestamp[32];
-        time_t now;
-        time(&now);
-        struct tm timeinfo;
-        gmtime_r(&now, &timeinfo);
-        strftime(timestamp, sizeof(timestamp), "%Y-%m-%dT%H:%M:%SZ", &timeinfo);
-        
-        // Close JSON array - remove extra metadata as Azure adds its own
-        payload_pos += snprintf(payload + payload_pos, payload_size - payload_pos, "]");
+
+        // No closing bracket needed - single JSON object
         
         ESP_LOGI(TAG, "[OK] Merged JSON created with %d sensors (%d bytes)", valid_sensors, payload_pos);
     } else {
