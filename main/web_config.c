@@ -10268,7 +10268,7 @@ esp_err_t config_load_from_nvs(system_config_t *config)
         config_reset_to_defaults();
         return err;
     }
-    
+
     size_t required_size = sizeof(system_config_t);
     size_t stored_size = 0;
 
@@ -10277,6 +10277,36 @@ esp_err_t config_load_from_nvs(system_config_t *config)
     if (err == ESP_OK) {
         ESP_LOGI(TAG, "[NVS_LOAD] Stored blob size: %d bytes, Expected: %d bytes",
                  stored_size, sizeof(system_config_t));
+
+        // Handle struct size mismatch (firmware upgrade/downgrade)
+        if (stored_size != sizeof(system_config_t)) {
+            ESP_LOGW(TAG, "[NVS_LOAD] ⚠️ Struct size mismatch! Stored: %d, Expected: %d",
+                     stored_size, sizeof(system_config_t));
+
+            // Zero out the config first
+            memset(config, 0, sizeof(system_config_t));
+
+            // Read the smaller of the two sizes to preserve what we can
+            size_t read_size = (stored_size < sizeof(system_config_t)) ? stored_size : sizeof(system_config_t);
+            err = nvs_get_blob(nvs_handle, "system", config, &read_size);
+
+            if (err == ESP_OK) {
+                ESP_LOGI(TAG, "[NVS_LOAD] ✅ Partial config loaded (%d bytes), preserving existing settings", read_size);
+                ESP_LOGI(TAG, "[NVS_LOAD] config_complete = %s, network_mode = %d, sensor_count = %d",
+                         config->config_complete ? "TRUE" : "FALSE", config->network_mode, config->sensor_count);
+
+                // Re-save with new struct size to fix the mismatch
+                nvs_close(nvs_handle);
+                ESP_LOGI(TAG, "[NVS_LOAD] 🔄 Re-saving config with updated struct size...");
+                config_save_to_nvs(config);
+                return ESP_OK;
+            } else {
+                ESP_LOGE(TAG, "[NVS_LOAD] Failed to load partial config: %s", esp_err_to_name(err));
+                config_reset_to_defaults();
+                nvs_close(nvs_handle);
+                return err;
+            }
+        }
     }
 
     err = nvs_get_blob(nvs_handle, "system", config, &required_size);
