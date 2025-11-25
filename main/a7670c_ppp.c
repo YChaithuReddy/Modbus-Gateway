@@ -229,6 +229,12 @@ static esp_err_t init_modem_for_ppp(void) {
     // Disable echo
     send_at_command("ATE0", "OK", 1000);
 
+    // Configure modem for LTE/4G data connection
+    ESP_LOGI(TAG, "📡 Configuring modem for data connection...");
+    send_at_command("AT+CNMP=38", "OK", 2000);  // Set to LTE only mode (38 = LTE)
+    send_at_command("AT+CMNB=1", "OK", 2000);   // Set to CAT-M preferred mode
+    vTaskDelay(pdMS_TO_TICKS(2000));            // Give modem time to reconfigure
+
     // Check SIM with retries (SIM needs time to initialize)
     ESP_LOGI(TAG, "📱 Checking SIM card...");
     int sim_retries = 10;
@@ -253,24 +259,43 @@ static esp_err_t init_modem_for_ppp(void) {
     // Wait for network registration
     ESP_LOGI(TAG, "📶 Waiting for network...");
     int retries = 30;
+    bool status_6_detected = false;
     while (retries-- > 0) {
-        // Check for registered status (,1 = registered home network, ,5 = registered roaming)
-        // Format can be "+CREG: 0,1", "+CREG: 1,1", "+CREG: 2,1", etc.
+        // Check for registered status:
+        // ,1 = registered home network (full service)
+        // ,5 = registered roaming (full service)
+        // ,6 = registered SMS only (limited service - try anyway)
         if (send_at_command("AT+CREG?", ",1", 2000) == ESP_OK ||
             send_at_command("AT+CREG?", ",5", 2000) == ESP_OK) {
-            ESP_LOGI(TAG, "✓ Network registered!");
+            ESP_LOGI(TAG, "✓ Network registered (full service)!");
+            break;
+        }
+        // Check for status 6 (SMS only)
+        if (send_at_command("AT+CREG?", ",6", 2000) == ESP_OK) {
+            ESP_LOGW(TAG, "⚠ Network registered but SMS only (status 6)");
+            ESP_LOGW(TAG, "   This may indicate:");
+            ESP_LOGW(TAG, "   - SIM card has no data plan");
+            ESP_LOGW(TAG, "   - Network congestion");
+            ESP_LOGW(TAG, "   - Operator restrictions");
+            ESP_LOGW(TAG, "   Attempting data connection anyway...");
+            status_6_detected = true;
             break;
         }
         vTaskDelay(pdMS_TO_TICKS(2000));
     }
 
-    if (retries <= 0) {
+    if (retries <= 0 && !status_6_detected) {
         ESP_LOGE(TAG, "Network registration timeout - Check:");
         ESP_LOGE(TAG, "  1. Antenna is connected properly");
         ESP_LOGE(TAG, "  2. SIM card has active service");
         ESP_LOGE(TAG, "  3. Signal strength in your area");
         return ESP_ERR_TIMEOUT;
     }
+
+    // Query network mode to understand what we're connected to
+    ESP_LOGI(TAG, "📡 Checking network mode...");
+    send_at_command("AT+CNMP?", "OK", 2000);  // Query preferred mode
+    send_at_command("AT+COPS?", "OK", 2000);  // Query operator
 
     // Set APN
     ESP_LOGI(TAG, "🌐 Setting APN: %s", modem_config.apn);
@@ -280,6 +305,11 @@ static esp_err_t init_modem_for_ppp(void) {
         ESP_LOGE(TAG, "Failed to set APN");
         return ESP_FAIL;
     }
+
+    // Try to attach to packet service
+    ESP_LOGI(TAG, "📲 Attaching to packet service...");
+    send_at_command("AT+CGATT=1", "OK", 5000);  // Attach to GPRS/LTE packet service
+    vTaskDelay(pdMS_TO_TICKS(2000));
 
     // Check signal strength BEFORE entering PPP mode (last chance for AT commands)
     ESP_LOGI(TAG, "📶 Checking signal strength...");
