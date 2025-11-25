@@ -585,27 +585,44 @@ static void mqtt_event_handler(void *handler_args, esp_event_base_t base, int32_
             ESP_LOGW(TAG, "[WARN] MQTT_EVENT_DISCONNECTED");
             mqtt_connected = false;
             mqtt_reconnect_count++;
-            
-            // Trigger modem reset if enabled and not already running
-            if (modem_reset_enabled && modem_reset_task_handle == NULL) {
-                ESP_LOGI(TAG, "[MODEM] MQTT disconnected, triggering modem reset...");
-                
-                // Create modem reset task
-                BaseType_t result = xTaskCreate(
-                    modem_reset_task,
-                    "modem_reset",
-                    2048,
-                    NULL,
-                    2,  // Low priority
-                    &modem_reset_task_handle
-                );
-                
-                if (result != pdPASS) {
-                    ESP_LOGE(TAG, "[MODEM] Failed to create modem reset task");
-                    modem_reset_task_handle = NULL;
+
+            // Check if network recovery is needed
+            {
+                system_config_t* disconnect_config = get_system_config();
+                bool need_network_recovery = false;
+
+                if (disconnect_config->network_mode == NETWORK_MODE_SIM) {
+                    // SIM mode: Check if PPP connection is down
+                    if (!a7670c_ppp_is_connected()) {
+                        ESP_LOGW(TAG, "[SIM] 📱 PPP connection lost - will trigger recovery");
+                        need_network_recovery = true;
+                    }
+                } else if (modem_reset_enabled) {
+                    // WiFi mode: Use modem reset setting
+                    need_network_recovery = true;
+                }
+
+                // Trigger network recovery if needed and not already running
+                if (need_network_recovery && modem_reset_task_handle == NULL) {
+                    ESP_LOGI(TAG, "[NET] Network disconnected, triggering recovery...");
+
+                    // Create modem reset task (handles both WiFi and SIM modes)
+                    BaseType_t result = xTaskCreate(
+                        modem_reset_task,
+                        "modem_reset",
+                        4096,  // Increased stack for SIM mode operations
+                        NULL,
+                        2,  // Low priority
+                        &modem_reset_task_handle
+                    );
+
+                    if (result != pdPASS) {
+                        ESP_LOGE(TAG, "[NET] Failed to create network recovery task");
+                        modem_reset_task_handle = NULL;
+                    }
                 }
             }
-            
+
             // Check if we've exceeded maximum reconnection attempts
             if (mqtt_reconnect_count >= MAX_MQTT_RECONNECT_ATTEMPTS) {
                 ESP_LOGE(TAG, "[ERROR] Exceeded maximum MQTT reconnection attempts (%d)", MAX_MQTT_RECONNECT_ATTEMPTS);
