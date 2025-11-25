@@ -52,7 +52,6 @@ extern uint32_t total_telemetry_sent;
 extern uint32_t mqtt_reconnect_count;
 extern int64_t mqtt_connect_time;
 extern int64_t last_telemetry_time;
-extern esp_err_t start_mqtt_connection(void);
 
 // LOGO CONFIGURATION - Edit these values to customize your logo
 #define COMPANY_NAME "Fluxgen"
@@ -5567,42 +5566,8 @@ static esp_err_t save_azure_config_handler(httpd_req_t *req)
     esp_err_t save_result = config_save_to_nvs(&g_system_config);
     if (save_result == ESP_OK) {
         ESP_LOGI(TAG, "Azure configuration saved successfully");
-
-        // Check if network is ready and Azure credentials are valid
-        bool network_ready = false;
-        if (g_system_config.network_mode == NETWORK_MODE_SIM) {
-            network_ready = a7670c_ppp_is_connected();
-        } else {
-            wifi_ap_record_t ap_info;
-            network_ready = (esp_wifi_sta_get_ap_info(&ap_info) == ESP_OK);
-        }
-
-        // If network ready and credentials valid, start MQTT connection
-        if (network_ready && strlen(g_system_config.azure_device_id) > 0 &&
-            strlen(g_system_config.azure_device_key) > 0) {
-            ESP_LOGI(TAG, "[AZURE] Network ready and credentials configured - starting MQTT connection");
-
-            // Mark config as complete
-            g_system_config.config_complete = true;
-            config_save_to_nvs(&g_system_config);
-
-            // Start MQTT connection
-            esp_err_t mqtt_result = start_mqtt_connection();
-            if (mqtt_result == ESP_OK) {
-                httpd_resp_set_type(req, "application/json");
-                httpd_resp_sendstr(req, "{\"status\":\"success\",\"message\":\"Azure configuration saved and MQTT connection started!\"}");
-            } else {
-                httpd_resp_set_type(req, "application/json");
-                httpd_resp_sendstr(req, "{\"status\":\"success\",\"message\":\"Azure configuration saved. MQTT will connect shortly.\"}");
-            }
-        } else {
-            httpd_resp_set_type(req, "application/json");
-            if (!network_ready) {
-                httpd_resp_sendstr(req, "{\"status\":\"success\",\"message\":\"Azure configuration saved. Connect network (run SIM test) to start MQTT.\"}");
-            } else {
-                httpd_resp_sendstr(req, "{\"status\":\"success\",\"message\":\"Azure configuration saved successfully\"}");
-            }
-        }
+        httpd_resp_set_type(req, "application/json");
+        httpd_resp_sendstr(req, "{\"status\":\"success\",\"message\":\"Azure configuration saved successfully\"}");
     } else {
         ESP_LOGE(TAG, "Failed to save Azure configuration: %s", esp_err_to_name(save_result));
         httpd_resp_set_type(req, "application/json");

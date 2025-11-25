@@ -135,63 +135,6 @@ static void modem_reset_task(void *pvParameters);
 static void mqtt_task(void *pvParameters);
 static void telemetry_task(void *pvParameters);
 
-// Public function to start MQTT connection (called from web_config after Azure config is saved)
-esp_err_t start_mqtt_connection(void) {
-    ESP_LOGI(TAG, "╔══════════════════════════════════════════════════════════╗");
-    ESP_LOGI(TAG, "║    🚀 STARTING MQTT CONNECTION FROM WEB CONFIG 🚀        ║");
-    ESP_LOGI(TAG, "╚══════════════════════════════════════════════════════════╝");
-
-    // Check if tasks are already running
-    if (mqtt_task_handle != NULL) {
-        ESP_LOGI(TAG, "[MQTT] MQTT task already running");
-        return ESP_OK;
-    }
-
-    // Create mutex if not exists
-    if (telemetry_history_mutex == NULL) {
-        telemetry_history_mutex = xSemaphoreCreateMutex();
-    }
-
-    // Create MQTT task
-    BaseType_t mqtt_result = xTaskCreatePinnedToCore(
-        mqtt_task,
-        "mqtt_task",
-        8192,
-        NULL,
-        4,
-        &mqtt_task_handle,
-        1
-    );
-
-    if (mqtt_result != pdPASS) {
-        ESP_LOGE(TAG, "[ERROR] Failed to create MQTT task");
-        return ESP_FAIL;
-    }
-
-    // Create Telemetry task if not running
-    if (telemetry_task_handle == NULL) {
-        BaseType_t telemetry_result = xTaskCreatePinnedToCore(
-            telemetry_task,
-            "telemetry_task",
-            8192,
-            NULL,
-            3,
-            &telemetry_task_handle,
-            1
-        );
-
-        if (telemetry_result != pdPASS) {
-            ESP_LOGW(TAG, "[WARN] Failed to create Telemetry task");
-        }
-    }
-
-    // Update config state to operation
-    set_config_state(CONFIG_STATE_OPERATION);
-
-    ESP_LOGI(TAG, "[OK] MQTT and Telemetry tasks started");
-    return ESP_OK;
-}
-
 // Function to add telemetry to history buffer
 static void add_telemetry_to_history(const char *payload, bool success) {
     if (telemetry_history_mutex == NULL) return;
