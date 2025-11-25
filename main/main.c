@@ -132,6 +132,65 @@ static bool send_telemetry(void);
 static void init_modem_reset_gpio(void);
 static void perform_modem_reset(void);
 static void modem_reset_task(void *pvParameters);
+static void mqtt_task(void *pvParameters);
+static void telemetry_task(void *pvParameters);
+
+// Public function to start MQTT connection (called from web_config after Azure config is saved)
+esp_err_t start_mqtt_connection(void) {
+    ESP_LOGI(TAG, "╔══════════════════════════════════════════════════════════╗");
+    ESP_LOGI(TAG, "║    🚀 STARTING MQTT CONNECTION FROM WEB CONFIG 🚀        ║");
+    ESP_LOGI(TAG, "╚══════════════════════════════════════════════════════════╝");
+
+    // Check if tasks are already running
+    if (mqtt_task_handle != NULL) {
+        ESP_LOGI(TAG, "[MQTT] MQTT task already running");
+        return ESP_OK;
+    }
+
+    // Create mutex if not exists
+    if (telemetry_history_mutex == NULL) {
+        telemetry_history_mutex = xSemaphoreCreateMutex();
+    }
+
+    // Create MQTT task
+    BaseType_t mqtt_result = xTaskCreatePinnedToCore(
+        mqtt_task,
+        "mqtt_task",
+        8192,
+        NULL,
+        4,
+        &mqtt_task_handle,
+        1
+    );
+
+    if (mqtt_result != pdPASS) {
+        ESP_LOGE(TAG, "[ERROR] Failed to create MQTT task");
+        return ESP_FAIL;
+    }
+
+    // Create Telemetry task if not running
+    if (telemetry_task_handle == NULL) {
+        BaseType_t telemetry_result = xTaskCreatePinnedToCore(
+            telemetry_task,
+            "telemetry_task",
+            8192,
+            NULL,
+            3,
+            &telemetry_task_handle,
+            1
+        );
+
+        if (telemetry_result != pdPASS) {
+            ESP_LOGW(TAG, "[WARN] Failed to create Telemetry task");
+        }
+    }
+
+    // Update config state to operation
+    set_config_state(CONFIG_STATE_OPERATION);
+
+    ESP_LOGI(TAG, "[OK] MQTT and Telemetry tasks started");
+    return ESP_OK;
+}
 
 // Function to add telemetry to history buffer
 static void add_telemetry_to_history(const char *payload, bool success) {
@@ -1316,71 +1375,137 @@ static void init_modem_reset_gpio(void)
     ESP_LOGI(TAG, "[MODEM] GPIO %d configured for modem reset control", modem_reset_gpio_pin);
 }
 
-// Perform modem reset with WiFi reconnection
+// Perform modem reset with network reconnection (WiFi or SIM)
 static void perform_modem_reset(void)
 {
-    if (!modem_reset_enabled) {
-        ESP_LOGI(TAG, "[MODEM] Modem reset disabled, skipping reset");
-        return;
-    }
-    
     system_config_t* config = get_system_config();
     int boot_delay = (config->modem_boot_delay > 0) ? config->modem_boot_delay : 15; // Default 15 seconds
-    
+
     ESP_LOGI(TAG, "[MODEM] Starting modem reset sequence...");
-    
-    // Step 1: Disconnect WiFi gracefully
-    ESP_LOGI(TAG, "[MODEM] Disconnecting WiFi before modem reset");
-    esp_wifi_disconnect();
-    vTaskDelay(pdMS_TO_TICKS(1000)); // Wait for WiFi to disconnect cleanly
-    
-    // Step 2: Reset modem power (2-second power cycle)
-    ESP_LOGI(TAG, "[MODEM] Power cycling modem...");
-    gpio_set_level(modem_reset_gpio_pin, 1);
-    ESP_LOGI(TAG, "[MODEM] Power disconnected (GPIO %d HIGH)", modem_reset_gpio_pin);
-    
-    // Wait 2 seconds for power cycle
-    vTaskDelay(pdMS_TO_TICKS(2000));
-    
-    // Restore modem power
-    gpio_set_level(modem_reset_gpio_pin, 0);
-    ESP_LOGI(TAG, "[MODEM] Power restored (GPIO %d LOW)", modem_reset_gpio_pin);
-    
-    // Step 3: Wait for modem to boot up
-    ESP_LOGI(TAG, "[MODEM] Waiting %d seconds for modem to boot up...", boot_delay);
-    vTaskDelay(pdMS_TO_TICKS(boot_delay * 1000));
-    
-    // Step 4: Reconnect WiFi
-    ESP_LOGI(TAG, "[MODEM] Attempting WiFi reconnection...");
-    esp_err_t wifi_result = esp_wifi_connect();
-    if (wifi_result == ESP_OK) {
-        ESP_LOGI(TAG, "[MODEM] WiFi reconnection initiated successfully");
-        
-        // Wait up to 30 seconds for WiFi connection
-        wifi_ap_record_t ap_info;
+    ESP_LOGI(TAG, "[MODEM] Network mode: %s", config->network_mode == NETWORK_MODE_WIFI ? "WiFi" : "SIM");
+
+    if (config->network_mode == NETWORK_MODE_WIFI) {
+        // WiFi Mode Reset
+        if (!modem_reset_enabled) {
+            ESP_LOGI(TAG, "[MODEM] Modem reset disabled, skipping reset");
+            return;
+        }
+
+        // Step 1: Disconnect WiFi gracefully
+        ESP_LOGI(TAG, "[MODEM] Disconnecting WiFi before modem reset");
+        esp_wifi_disconnect();
+        vTaskDelay(pdMS_TO_TICKS(1000));
+
+        // Step 2: Reset modem power (2-second power cycle)
+        ESP_LOGI(TAG, "[MODEM] Power cycling modem...");
+        gpio_set_level(modem_reset_gpio_pin, 1);
+        ESP_LOGI(TAG, "[MODEM] Power disconnected (GPIO %d HIGH)", modem_reset_gpio_pin);
+        vTaskDelay(pdMS_TO_TICKS(2000));
+
+        // Restore modem power
+        gpio_set_level(modem_reset_gpio_pin, 0);
+        ESP_LOGI(TAG, "[MODEM] Power restored (GPIO %d LOW)", modem_reset_gpio_pin);
+
+        // Step 3: Wait for modem to boot up
+        ESP_LOGI(TAG, "[MODEM] Waiting %d seconds for modem to boot up...", boot_delay);
+        vTaskDelay(pdMS_TO_TICKS(boot_delay * 1000));
+
+        // Step 4: Reconnect WiFi
+        ESP_LOGI(TAG, "[MODEM] Attempting WiFi reconnection...");
+        esp_err_t wifi_result = esp_wifi_connect();
+        if (wifi_result == ESP_OK) {
+            ESP_LOGI(TAG, "[MODEM] WiFi reconnection initiated successfully");
+
+            wifi_ap_record_t ap_info;
+            int retry_count = 0;
+            while (retry_count < 30) {
+                if (esp_wifi_sta_get_ap_info(&ap_info) == ESP_OK) {
+                    ESP_LOGI(TAG, "[MODEM] WiFi reconnected successfully to: %s", ap_info.ssid);
+                    break;
+                }
+                vTaskDelay(pdMS_TO_TICKS(1000));
+                retry_count++;
+                if (retry_count % 5 == 0) {
+                    ESP_LOGI(TAG, "[MODEM] Still waiting for WiFi connection... (%d/30)", retry_count);
+                }
+            }
+            if (retry_count >= 30) {
+                ESP_LOGW(TAG, "[MODEM] WiFi reconnection timeout - check modem and network");
+            }
+        } else {
+            ESP_LOGE(TAG, "[MODEM] Failed to initiate WiFi reconnection: %s", esp_err_to_name(wifi_result));
+        }
+
+    } else if (config->network_mode == NETWORK_MODE_SIM) {
+        // SIM Mode Reset - Reconnect PPP
+        ESP_LOGI(TAG, "[SIM] 📱 Starting SIM module reconnection...");
+
+        // Step 1: Disconnect existing PPP if connected
+        if (a7670c_ppp_is_connected()) {
+            ESP_LOGI(TAG, "[SIM] Disconnecting existing PPP connection...");
+            a7670c_ppp_disconnect();
+            vTaskDelay(pdMS_TO_TICKS(2000));
+        }
+
+        // Step 2: Deinitialize modem
+        ESP_LOGI(TAG, "[SIM] Deinitializing modem...");
+        a7670c_ppp_deinit();
+        vTaskDelay(pdMS_TO_TICKS(2000));
+
+        // Step 3: Wait for modem to settle
+        ESP_LOGI(TAG, "[SIM] Waiting %d seconds for modem to reset...", boot_delay);
+        vTaskDelay(pdMS_TO_TICKS(boot_delay * 1000));
+
+        // Step 4: Reinitialize modem with config
+        ESP_LOGI(TAG, "[SIM] Reinitializing A7670C modem...");
+        ppp_config_t ppp_config = {
+            .uart_num = config->sim_config.uart_num,
+            .tx_pin = config->sim_config.uart_tx_pin,
+            .rx_pin = config->sim_config.uart_rx_pin,
+            .pwr_pin = config->sim_config.pwr_pin,
+            .reset_pin = config->sim_config.reset_pin,
+            .baud_rate = config->sim_config.uart_baud_rate,
+            .apn = config->sim_config.apn,
+            .user = config->sim_config.apn_user,
+            .pass = config->sim_config.apn_pass,
+        };
+
+        esp_err_t ret = a7670c_ppp_init(&ppp_config);
+        if (ret != ESP_OK) {
+            ESP_LOGE(TAG, "[SIM] ❌ Failed to reinitialize A7670C: %s", esp_err_to_name(ret));
+            return;
+        }
+
+        // Step 5: Connect PPP
+        ESP_LOGI(TAG, "[SIM] Connecting PPP...");
+        ret = a7670c_ppp_connect();
+        if (ret != ESP_OK) {
+            ESP_LOGE(TAG, "[SIM] ❌ Failed to connect PPP: %s", esp_err_to_name(ret));
+            return;
+        }
+
+        // Step 6: Wait for connection
+        ESP_LOGI(TAG, "[SIM] ⏳ Waiting for PPP connection...");
         int retry_count = 0;
-        while (retry_count < 30) {
-            esp_err_t status = esp_wifi_sta_get_ap_info(&ap_info);
-            if (status == ESP_OK) {
-                ESP_LOGI(TAG, "[MODEM] WiFi reconnected successfully to: %s", ap_info.ssid);
+        while (retry_count < 60) {
+            if (a7670c_is_connected()) {
+                ESP_LOGI(TAG, "[SIM] ✅ PPP reconnected successfully!");
+                mqtt_reconnect_count = 0; // Reset reconnect counter
                 break;
             }
             vTaskDelay(pdMS_TO_TICKS(1000));
             retry_count++;
-            
-            if (retry_count % 5 == 0) {
-                ESP_LOGI(TAG, "[MODEM] Still waiting for WiFi connection... (%d/30)", retry_count);
+            if (retry_count % 10 == 0) {
+                ESP_LOGI(TAG, "[SIM] Still waiting for PPP... (%d/60)", retry_count);
             }
         }
-        
-        if (retry_count >= 30) {
-            ESP_LOGW(TAG, "[MODEM] WiFi reconnection timeout - check modem and network");
+
+        if (retry_count >= 60) {
+            ESP_LOGW(TAG, "[SIM] ⚠️ PPP reconnection timeout");
         }
-    } else {
-        ESP_LOGE(TAG, "[MODEM] Failed to initiate WiFi reconnection: %s", esp_err_to_name(wifi_result));
     }
-    
-    ESP_LOGI(TAG, "[MODEM] Modem reset sequence completed");
+
+    ESP_LOGI(TAG, "[MODEM] Network reset sequence completed");
 }
 
 // Reinitialize modem reset GPIO with new pin

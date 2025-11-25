@@ -52,6 +52,7 @@ extern uint32_t total_telemetry_sent;
 extern uint32_t mqtt_reconnect_count;
 extern int64_t mqtt_connect_time;
 extern int64_t last_telemetry_time;
+extern esp_err_t start_mqtt_connection(void);
 
 // LOGO CONFIGURATION - Edit these values to customize your logo
 #define COMPANY_NAME "Fluxgen"
@@ -5551,14 +5552,48 @@ static esp_err_t save_azure_config_handler(httpd_req_t *req)
     esp_err_t save_result = config_save_to_nvs(&g_system_config);
     if (save_result == ESP_OK) {
         ESP_LOGI(TAG, "Azure configuration saved successfully");
-        httpd_resp_set_type(req, "application/json");
-        httpd_resp_sendstr(req, "{\"status\":\"success\",\"message\":\"Azure configuration saved successfully\"}");
+
+        // Check if network is ready and Azure credentials are valid
+        bool network_ready = false;
+        if (g_system_config.network_mode == NETWORK_MODE_SIM) {
+            network_ready = a7670c_ppp_is_connected();
+        } else {
+            wifi_ap_record_t ap_info;
+            network_ready = (esp_wifi_sta_get_ap_info(&ap_info) == ESP_OK);
+        }
+
+        // If network ready and credentials valid, start MQTT connection
+        if (network_ready && strlen(g_system_config.azure_device_id) > 0 &&
+            strlen(g_system_config.azure_device_key) > 0) {
+            ESP_LOGI(TAG, "[AZURE] Network ready and credentials configured - starting MQTT connection");
+
+            // Mark config as complete
+            g_system_config.config_complete = true;
+            config_save_to_nvs(&g_system_config);
+
+            // Start MQTT connection
+            esp_err_t mqtt_result = start_mqtt_connection();
+            if (mqtt_result == ESP_OK) {
+                httpd_resp_set_type(req, "application/json");
+                httpd_resp_sendstr(req, "{\"status\":\"success\",\"message\":\"Azure configuration saved and MQTT connection started!\"}");
+            } else {
+                httpd_resp_set_type(req, "application/json");
+                httpd_resp_sendstr(req, "{\"status\":\"success\",\"message\":\"Azure configuration saved. MQTT will connect shortly.\"}");
+            }
+        } else {
+            httpd_resp_set_type(req, "application/json");
+            if (!network_ready) {
+                httpd_resp_sendstr(req, "{\"status\":\"success\",\"message\":\"Azure configuration saved. Connect network (run SIM test) to start MQTT.\"}");
+            } else {
+                httpd_resp_sendstr(req, "{\"status\":\"success\",\"message\":\"Azure configuration saved successfully\"}");
+            }
+        }
     } else {
         ESP_LOGE(TAG, "Failed to save Azure configuration: %s", esp_err_to_name(save_result));
         httpd_resp_set_type(req, "application/json");
         httpd_resp_sendstr(req, "{\"status\":\"error\",\"message\":\"Failed to save Azure configuration\"}");
     }
-    
+
     return ESP_OK;
 }
 
@@ -7979,6 +8014,27 @@ static esp_err_t system_status_handler(httpd_req_t *req)
     size_t app_used = app_partition_size / 2; // Rough estimate
     size_t nvs_used = nvs_partition_size / 4; // Rough estimate
     
+    // Get SIM/PPP status
+    bool sim_connected = a7670c_ppp_is_connected();
+    char sim_ip[32] = "N/A";
+    if (sim_connected) {
+        a7670c_ppp_get_ip_info(sim_ip, sizeof(sim_ip));
+    }
+
+    // Get SIM test status (if available)
+    char sim_signal_quality[32] = "Unknown";
+    char sim_operator[64] = "Unknown";
+    int sim_signal = 0;
+    if (g_sim_test_mutex != NULL) {
+        xSemaphoreTake(g_sim_test_mutex, portMAX_DELAY);
+        if (g_sim_test_status.completed && g_sim_test_status.success) {
+            sim_signal = g_sim_test_status.signal;
+            strncpy(sim_signal_quality, g_sim_test_status.signal_quality, sizeof(sim_signal_quality) - 1);
+            strncpy(sim_operator, g_sim_test_status.operator_name, sizeof(sim_operator) - 1);
+        }
+        xSemaphoreGive(g_sim_test_mutex);
+    }
+
     // Build JSON response
     snprintf(response, sizeof(response),
         "{"
@@ -8014,6 +8070,13 @@ static esp_err_t system_status_handler(httpd_req_t *req)
             "\"rssi\":%ld,"
             "\"ssid\":\"%s\""
         "},"
+        "\"sim\":{"
+            "\"status\":\"%s\","
+            "\"ip\":\"%s\","
+            "\"signal\":%d,"
+            "\"signal_quality\":\"%s\","
+            "\"operator\":\"%s\""
+        "},"
         "\"sensors\":{"
             "\"count\":%d,"
             "\"configured\":%s"
@@ -8045,6 +8108,11 @@ static esp_err_t system_status_handler(httpd_req_t *req)
         wifi_status,
         (long)rssi,
         (wifi_err == ESP_OK) ? (char*)ap_info.ssid : "N/A",
+        sim_connected ? "connected" : "disconnected",
+        sim_ip,
+        sim_signal,
+        sim_signal_quality,
+        sim_operator,
         g_system_config.sensor_count,
         (g_system_config.sensor_count > 0) ? "true" : "false",
         task_count
@@ -8430,7 +8498,7 @@ static esp_err_t start_webserver(void)
 {
     httpd_config_t config = HTTPD_DEFAULT_CONFIG();
     config.server_port = 80;
-    config.max_uri_handlers = 40; // Increased to accommodate all SIM/SD/RTC endpoints (34+ handlers)
+    config.max_uri_handlers = 50; // Increased to accommodate all 45+ handlers (SIM/SD/RTC/Modbus endpoints)
     config.max_open_sockets = 7;      // Maximum allowed by LWIP configuration
     config.stack_size = 16384;        // Increased to 16KB to handle large stack buffers safely
     config.task_priority = 5;
@@ -9558,21 +9626,27 @@ static void sim_test_task(void *pvParameters) {
         xSemaphoreGive(g_sim_test_mutex);
     }
 
-    // Cleanup - disconnect and deinitialize modem
-    // CRITICAL: Must wait long enough for LWIP timers to expire to prevent crash
-    ESP_LOGI(TAG, "Cleaning up SIM test - disconnecting PPP...");
-    a7670c_ppp_disconnect();
+    // Check if test was successful
+    xSemaphoreTake(g_sim_test_mutex, portMAX_DELAY);
+    bool test_success = g_sim_test_status.success;
+    xSemaphoreGive(g_sim_test_mutex);
 
-    // Wait for PPP/LWIP stack to fully settle before deinit
-    ESP_LOGI(TAG, "Waiting for PPP stack to settle...");
-    vTaskDelay(pdMS_TO_TICKS(3000));
+    if (test_success) {
+        // SUCCESS: Keep PPP connection alive - user wants to use SIM!
+        ESP_LOGI(TAG, "╔══════════════════════════════════════════════════════════╗");
+        ESP_LOGI(TAG, "║  ✅ SIM TEST PASSED - KEEPING CONNECTION ACTIVE          ║");
+        ESP_LOGI(TAG, "╚══════════════════════════════════════════════════════════╝");
+        ESP_LOGI(TAG, "SIM test successful - PPP connection kept alive for use");
+    } else {
+        // FAILED: Disconnect and cleanup
+        ESP_LOGI(TAG, "SIM test failed - cleaning up...");
+        a7670c_ppp_disconnect();
+        vTaskDelay(pdMS_TO_TICKS(1000));
+        a7670c_ppp_deinit();
+        ESP_LOGI(TAG, "SIM test cleanup complete");
+    }
 
-    ESP_LOGI(TAG, "Deinitializing modem...");
-    a7670c_ppp_deinit();
-    vTaskDelay(pdMS_TO_TICKS(1000));
-
-    ESP_LOGI(TAG, "SIM test task completed, modem deinitialized");
-
+    ESP_LOGI(TAG, "SIM test task completed");
     vTaskDelete(NULL);
 }
 
@@ -9703,6 +9777,12 @@ static esp_err_t api_sd_replay_handler(httpd_req_t *req) {
 static esp_err_t api_rtc_time_handler(httpd_req_t *req) {
     httpd_resp_set_type(req, "application/json");
 
+    // Check if RTC is enabled first
+    if (!g_system_config.rtc_config.enabled) {
+        httpd_resp_sendstr(req, "{\"success\":false,\"error\":\"RTC not enabled. Enable RTC in settings first.\"}");
+        return ESP_OK;
+    }
+
     time_t rtc_time;
     float temperature;
     esp_err_t ret = ds3231_get_time(&rtc_time);
@@ -9720,7 +9800,7 @@ static esp_err_t api_rtc_time_handler(httpd_req_t *req) {
                  time_str, temperature);
         httpd_resp_sendstr(req, response);
     } else {
-        httpd_resp_sendstr(req, "{\"success\":false}");
+        httpd_resp_sendstr(req, "{\"success\":false,\"error\":\"Failed to read from RTC. Check I2C wiring.\"}");
     }
     return ESP_OK;
 }
@@ -10190,12 +10270,22 @@ esp_err_t config_load_from_nvs(system_config_t *config)
     }
     
     size_t required_size = sizeof(system_config_t);
+    size_t stored_size = 0;
+
+    // First check the stored blob size
+    err = nvs_get_blob(nvs_handle, "system", NULL, &stored_size);
+    if (err == ESP_OK) {
+        ESP_LOGI(TAG, "[NVS_LOAD] Stored blob size: %d bytes, Expected: %d bytes",
+                 stored_size, sizeof(system_config_t));
+    }
+
     err = nvs_get_blob(nvs_handle, "system", config, &required_size);
     if (err != ESP_OK) {
         ESP_LOGW(TAG, "Failed to load config from NVS: %s", esp_err_to_name(err));
         config_reset_to_defaults();
     } else {
-        ESP_LOGI(TAG, "Configuration loaded from NVS");
+        ESP_LOGI(TAG, "[NVS_LOAD] Configuration loaded from NVS - config_complete = %s, network_mode = %d",
+                 config->config_complete ? "TRUE" : "FALSE", config->network_mode);
         
         // Migrate old format data type names to new format
         bool migration_needed = false;
@@ -10307,13 +10397,19 @@ esp_err_t config_load_from_nvs(system_config_t *config)
 
 esp_err_t config_save_to_nvs(const system_config_t *config)
 {
+    // Debug: Log config_complete value being saved
+    ESP_LOGI(TAG, "[NVS_SAVE] config_complete = %s, network_mode = %d, sensor_count = %d",
+             config->config_complete ? "TRUE" : "FALSE",
+             config->network_mode,
+             config->sensor_count);
+
     nvs_handle_t nvs_handle;
     esp_err_t err = nvs_open("config", NVS_READWRITE, &nvs_handle);
     if (err != ESP_OK) {
         ESP_LOGE(TAG, "Failed to open NVS handle: %s", esp_err_to_name(err));
         return err;
     }
-    
+
     // First attempt to save configuration
     err = nvs_set_blob(nvs_handle, "system", config, sizeof(system_config_t));
     

@@ -581,9 +581,20 @@ static esp_err_t exit_ppp_mode(void) {
 esp_err_t a7670c_ppp_disconnect(void) {
     ESP_LOGI(TAG, "Disconnecting PPP...");
 
-    // CRITICAL: Stop UART RX task FIRST to prevent feeding data to PPP after disconnect
+    // Step 1: Signal PPP to disconnect FIRST (before stopping UART)
+    // This allows PPP to send LCP terminate request properly
+    if (ppp_netif != NULL && ppp_connected) {
+        ESP_LOGI(TAG, "Signaling PPP disconnection...");
+        esp_netif_action_disconnected(ppp_netif, NULL, 0, NULL);
+
+        // Wait for PPP to process disconnect and send terminate
+        ESP_LOGI(TAG, "Waiting for PPP terminate handshake (3 seconds)...");
+        vTaskDelay(pdMS_TO_TICKS(3000));
+    }
+
+    // Step 2: Stop UART RX task to stop feeding data to PPP
     if (uart_rx_task_handle != NULL) {
-        ESP_LOGI(TAG, "Stopping UART RX task before PPP disconnect...");
+        ESP_LOGI(TAG, "Stopping UART RX task...");
         uart_rx_task_running = false;
 
         // Wait for task to stop (up to 1 second)
@@ -600,26 +611,22 @@ esp_err_t a7670c_ppp_disconnect(void) {
         }
     }
 
-    // Exit PPP mode on the modem
+    // Step 3: Exit PPP mode on the modem (send +++ and reset)
     exit_ppp_mode();
 
-    // Stop and destroy the PPP interface
+    // Step 4: Stop the netif
     if (ppp_netif != NULL) {
         ESP_LOGI(TAG, "Stopping PPP netif...");
         esp_netif_action_stop(ppp_netif, NULL, 0, NULL);
 
-        // CRITICAL: Wait for LWIP timers to expire before destroying netif
-        // This prevents crash from fsm_timeout trying to write to destroyed interface
-        // PPP FSM timeout is typically 3 seconds, so wait at least 4 seconds
-        ESP_LOGI(TAG, "Waiting for LWIP timers to settle (4 seconds)...");
-        vTaskDelay(pdMS_TO_TICKS(4000));
+        // Wait for any remaining LWIP timers to expire
+        // FSM retransmit timeout is 3 seconds, wait a bit more
+        ESP_LOGI(TAG, "Waiting for LWIP cleanup (5 seconds)...");
+        vTaskDelay(pdMS_TO_TICKS(5000));
 
         ESP_LOGI(TAG, "Destroying PPP netif...");
         esp_netif_destroy(ppp_netif);
         ppp_netif = NULL;
-
-        // Extra delay after destroy to ensure cleanup completes
-        vTaskDelay(pdMS_TO_TICKS(500));
     }
 
     ppp_connected = false;
@@ -627,7 +634,7 @@ esp_err_t a7670c_ppp_disconnect(void) {
         xEventGroupClearBits(ppp_event_group, PPP_CONNECTED_BIT);
     }
 
-    ESP_LOGI(TAG, "PPP disconnected");
+    ESP_LOGI(TAG, "PPP disconnected successfully");
     return ESP_OK;
 }
 
