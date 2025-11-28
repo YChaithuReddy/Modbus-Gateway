@@ -10,27 +10,75 @@
 static const char *TAG = "JSON_TEMPLATES";
 
 // Map sensor type string to JSON template type
+// This function maps ALL known sensor types to their JSON template format
+// Flow meters use JSON_TYPE_FLOW, Level sensors use JSON_TYPE_LEVEL, etc.
+// IMPORTANT: If adding new sensor types, add them here to avoid "Unknown sensor type" errors
 json_template_type_t get_json_type_from_sensor_type(const char* sensor_type)
 {
-    if (!sensor_type) return JSON_TYPE_UNKNOWN;
-    
-    if (strcasecmp(sensor_type, "FLOW") == 0 || strcasecmp(sensor_type, "Flow-Meter") == 0 || strcasecmp(sensor_type, "ZEST") == 0) {
+    if (!sensor_type || strlen(sensor_type) == 0) {
+        ESP_LOGW(TAG, "Empty sensor type, defaulting to FLOW");
+        return JSON_TYPE_FLOW;  // Default to FLOW for empty types
+    }
+
+    // === FLOW METER TYPES ===
+    // All flow meters (fixed and configurable) use the same JSON format
+    if (strcasecmp(sensor_type, "FLOW") == 0 ||
+        strcasecmp(sensor_type, "Flow-Meter") == 0 ||
+        strcasecmp(sensor_type, "ZEST") == 0 ||
+        strcasecmp(sensor_type, "Clampon") == 0 ||
+        strcasecmp(sensor_type, "Dailian") == 0 ||
+        strcasecmp(sensor_type, "Dailian_EMF") == 0 ||
+        strcasecmp(sensor_type, "Panda_USM") == 0 ||
+        strstr(sensor_type, "flow") != NULL ||      // Match any type containing "flow"
+        strstr(sensor_type, "Flow") != NULL ||
+        strstr(sensor_type, "FLOW") != NULL ||
+        strstr(sensor_type, "meter") != NULL ||     // Match any type containing "meter"
+        strstr(sensor_type, "Meter") != NULL) {
         return JSON_TYPE_FLOW;
-    } else if (strcasecmp(sensor_type, "LEVEL") == 0 || strcasecmp(sensor_type, "Level") == 0) {
+    }
+
+    // === LEVEL SENSOR TYPES ===
+    if (strcasecmp(sensor_type, "LEVEL") == 0 ||
+        strcasecmp(sensor_type, "Level") == 0 ||
+        strcasecmp(sensor_type, "Radar Level") == 0 ||
+        strcasecmp(sensor_type, "Piezometer") == 0 ||   // Water level sensor
+        strstr(sensor_type, "level") != NULL ||
+        strstr(sensor_type, "Level") != NULL ||
+        strstr(sensor_type, "LEVEL") != NULL) {
         return JSON_TYPE_LEVEL;
-    } else if (strcasecmp(sensor_type, "Radar Level") == 0) {
-        return JSON_TYPE_LEVEL;  // Uses same JSON format as regular Level sensors
-    } else if (strcasecmp(sensor_type, "RAINGAUGE") == 0) {
+    }
+
+    // === OTHER SPECIFIC TYPES ===
+    if (strcasecmp(sensor_type, "RAINGAUGE") == 0 ||
+        strstr(sensor_type, "rain") != NULL ||
+        strstr(sensor_type, "Rain") != NULL) {
         return JSON_TYPE_RAINGAUGE;
-    } else if (strcasecmp(sensor_type, "BOREWELL") == 0) {
+    }
+
+    if (strcasecmp(sensor_type, "BOREWELL") == 0 ||
+        strstr(sensor_type, "bore") != NULL ||
+        strstr(sensor_type, "Bore") != NULL) {
         return JSON_TYPE_BOREWELL;
-    } else if (strcasecmp(sensor_type, "ENERGY") == 0) {
+    }
+
+    if (strcasecmp(sensor_type, "ENERGY") == 0 ||
+        strstr(sensor_type, "energy") != NULL ||
+        strstr(sensor_type, "Energy") != NULL ||
+        strstr(sensor_type, "power") != NULL ||
+        strstr(sensor_type, "Power") != NULL) {
         return JSON_TYPE_ENERGY;
-    } else if (strcasecmp(sensor_type, "QUALITY") == 0) {
+    }
+
+    if (strcasecmp(sensor_type, "QUALITY") == 0 ||
+        strstr(sensor_type, "quality") != NULL ||
+        strstr(sensor_type, "Quality") != NULL) {
         return JSON_TYPE_QUALITY;
     }
-    
-    return JSON_TYPE_UNKNOWN;
+
+    // === FALLBACK: Default to FLOW for any unknown type ===
+    // This prevents "Unknown sensor type" errors for new/custom sensor types
+    ESP_LOGW(TAG, "Unknown sensor type '%s', defaulting to FLOW JSON format", sensor_type);
+    return JSON_TYPE_FLOW;
 }
 
 // Get human-readable name for JSON template type
@@ -271,11 +319,8 @@ esp_err_t generate_sensor_json(const sensor_config_t* sensor, double scaled_valu
     json_params_t params = {0};
 
     // Determine JSON template type from sensor type
+    // Note: get_json_type_from_sensor_type() defaults to JSON_TYPE_FLOW for unknown types
     params.type = get_json_type_from_sensor_type(sensor->sensor_type);
-    if (params.type == JSON_TYPE_UNKNOWN) {
-        ESP_LOGE(TAG, "Unknown sensor type: %s", sensor->sensor_type);
-        return ESP_ERR_INVALID_ARG;
-    }
 
     // Copy basic parameters
     strncpy(params.unit_id, sensor->unit_id, sizeof(params.unit_id) - 1);
@@ -356,11 +401,8 @@ esp_err_t generate_sensor_json_with_hex(const sensor_config_t* sensor, double sc
     json_params_t params = {0};
 
     // Determine JSON template type from sensor type
+    // Note: get_json_type_from_sensor_type() defaults to JSON_TYPE_FLOW for unknown types
     params.type = get_json_type_from_sensor_type(sensor->sensor_type);
-    if (params.type == JSON_TYPE_UNKNOWN) {
-        ESP_LOGE(TAG, "Unknown sensor type: %s", sensor->sensor_type);
-        return ESP_ERR_INVALID_ARG;
-    }
 
     // Copy basic parameters
     strncpy(params.unit_id, sensor->unit_id, sizeof(params.unit_id) - 1);

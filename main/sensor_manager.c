@@ -374,6 +374,48 @@ esp_err_t sensor_test_live(const sensor_config_t *sensor, sensor_test_result_t *
 
         ESP_LOGI(TAG, "Panda USM Calculation: DOUBLE64=0x%016llX = %.6f m³",
                  (unsigned long long)combined_value64, result->scaled_value);
+    }
+    // Special handling for Clampon flow meters (4 registers: UINT32_BADC + FLOAT32_BADC)
+    else if (strcmp(sensor->sensor_type, "Clampon") == 0 && reg_count >= 4) {
+        // Clampon reads 4 registers:
+        // Registers [0-1]: Cumulative Flow Integer part (32-bit UINT, BADC word-swapped)
+        // Registers [2-3]: Cumulative Flow Decimal part (32-bit FLOAT, BADC word-swapped)
+        // Example: 33073.865 m³ = 33073 (registers[0-1]) + 0.865 (float in registers[2-3])
+
+        // Integer part: BADC format (word-swapped) = (reg[1] << 16) | reg[0]
+        uint32_t integer_part_raw = ((uint32_t)registers[1] << 16) | registers[0];
+        double integer_part = (double)integer_part_raw;
+
+        // Decimal part: BADC format (word-swapped) = (reg[3] << 16) | reg[2]
+        uint32_t float_bits = ((uint32_t)registers[3] << 16) | registers[2];
+        float decimal_part_float;
+        memcpy(&decimal_part_float, &float_bits, sizeof(float));
+        double decimal_part = (double)decimal_part_float;
+
+        // Sum integer and decimal parts, then apply scale factor
+        result->scaled_value = (integer_part + decimal_part) * sensor->scale_factor;
+        result->raw_value = integer_part_raw; // Store integer part as raw value
+
+        ESP_LOGI(TAG, "Clampon Calculation: Integer=0x%08lX(%lu) + Decimal(FLOAT)=0x%08lX(%.6f) = %.6f",
+                 (unsigned long)integer_part_raw, (unsigned long)integer_part_raw,
+                 (unsigned long)float_bits, decimal_part, result->scaled_value);
+    }
+    // Special handling for Dailian EMF flow meters (2 registers: UINT32 word-swapped totaliser)
+    else if (strcmp(sensor->sensor_type, "Dailian_EMF") == 0 && reg_count >= 2) {
+        // Dailian EMF reads 2 registers at address 0x07D6 (2006):
+        // Registers [0-1]: Totaliser value (32-bit UINT, word-swapped)
+        // Format: (reg[1] << 16) | reg[0]
+
+        // Totaliser: word-swapped = (reg[1] << 16) | reg[0]
+        uint32_t totaliser_raw = ((uint32_t)registers[1] << 16) | registers[0];
+
+        // Apply scale factor
+        result->scaled_value = (double)totaliser_raw * sensor->scale_factor;
+        result->raw_value = totaliser_raw;
+
+        ESP_LOGI(TAG, "Dailian_EMF Calculation: Totaliser=0x%08lX(%lu) * %.6f = %.6f",
+                 (unsigned long)totaliser_raw, (unsigned long)totaliser_raw,
+                 sensor->scale_factor, result->scaled_value);
     } else {
         // Convert the data using standard conversion
         esp_err_t conv_result = convert_modbus_data(registers, reg_count,
