@@ -246,6 +246,16 @@ static const char* html_header =
 ".sensor-card h3{margin-top:0;margin-bottom:var(--space-md);padding-bottom:var(--space-sm);border-bottom:2px solid var(--color-border-light)}"
 ".sensor-card p:last-child{margin-bottom:0}"
 ".sensor-card>p{word-wrap:break-word;overflow-wrap:break-word;hyphens:auto;max-width:100%}"
+".config-row{display:flex;justify-content:space-between;padding:var(--space-md);background:var(--color-bg-secondary);border-radius:var(--radius-md);color:var(--color-text-secondary)}"
+".config-row strong{color:var(--color-primary);font-weight:var(--weight-semibold)}"
+".status-box{border-radius:var(--radius-md);padding:var(--space-lg);margin-bottom:var(--space-md)}"
+".status-box.success{background:rgba(16,185,129,0.1);border:2px solid var(--color-success)}"
+".status-box.warning{background:rgba(245,158,11,0.1);border:2px solid var(--color-warning)}"
+".status-title{font-weight:var(--weight-bold);font-size:var(--text-lg);margin-bottom:var(--space-sm)}"
+".status-title.success{color:var(--color-success)}"
+".status-title.warning{color:var(--color-warning)}"
+".info-box{background:var(--color-bg-secondary);border-radius:var(--radius-md);padding:var(--space-md)}"
+".hint{color:var(--color-text-tertiary);font-size:var(--text-sm)}"
 "/* ===== LAYOUT ===== */"
 ".container{display:flex;min-height:100vh;position:relative;z-index:1}"
 "/* ===== SIDEBAR ===== */"
@@ -5808,30 +5818,23 @@ static esp_err_t save_config_handler(httpd_req_t *req)
 
     // Configuration summary card
     httpd_resp_sendstr_chunk(req, "<div class='sensor-card' style='padding:var(--space-xl);margin-bottom:var(--space-xl)'>");
-    httpd_resp_sendstr_chunk(req, "<h3 style='margin-bottom:var(--space-lg);display:flex;align-items:center;gap:var(--space-sm)'>");
-    httpd_resp_sendstr_chunk(req, "<span style='font-size:24px'>📋</span> Configuration Summary</h3>");
+    httpd_resp_sendstr_chunk(req, "<h3 style='margin-bottom:var(--space-lg)'>📋 Configuration Summary</h3>");
     httpd_resp_sendstr_chunk(req, "<div style='display:grid;gap:var(--space-md)'>");
 
-    char temp_buf[256];
-    snprintf(temp_buf, sizeof(temp_buf),
-        "<div style='display:flex;justify-content:space-between;padding:var(--space-md);background:var(--color-bg-secondary);border-radius:var(--radius-md)'>"
-        "<span style='color:var(--color-text-secondary)'>WiFi SSID</span>"
-        "<span style='font-weight:var(--weight-semibold);color:var(--color-primary)'>%s</span></div>",
-        g_system_config.wifi_ssid);
+    char temp_buf[128];
+    // WiFi SSID row
+    httpd_resp_sendstr_chunk(req, "<div class='config-row'><span>WiFi SSID</span>");
+    snprintf(temp_buf, sizeof(temp_buf), "<strong>%s</strong></div>", g_system_config.wifi_ssid);
     httpd_resp_sendstr_chunk(req, temp_buf);
 
-    snprintf(temp_buf, sizeof(temp_buf),
-        "<div style='display:flex;justify-content:space-between;padding:var(--space-md);background:var(--color-bg-secondary);border-radius:var(--radius-md)'>"
-        "<span style='color:var(--color-text-secondary)'>Telemetry Interval</span>"
-        "<span style='font-weight:var(--weight-semibold);color:var(--color-primary)'>%d seconds</span></div>",
-        g_system_config.telemetry_interval);
+    // Telemetry interval row
+    httpd_resp_sendstr_chunk(req, "<div class='config-row'><span>Telemetry Interval</span>");
+    snprintf(temp_buf, sizeof(temp_buf), "<strong>%d seconds</strong></div>", g_system_config.telemetry_interval);
     httpd_resp_sendstr_chunk(req, temp_buf);
 
-    snprintf(temp_buf, sizeof(temp_buf),
-        "<div style='display:flex;justify-content:space-between;padding:var(--space-md);background:var(--color-bg-secondary);border-radius:var(--radius-md)'>"
-        "<span style='color:var(--color-text-secondary)'>Sensors Configured</span>"
-        "<span style='font-weight:var(--weight-semibold);color:var(--color-primary)'>%d</span></div>",
-        g_system_config.sensor_count);
+    // Sensors row
+    httpd_resp_sendstr_chunk(req, "<div class='config-row'><span>Sensors Configured</span>");
+    snprintf(temp_buf, sizeof(temp_buf), "<strong>%d</strong></div>", g_system_config.sensor_count);
     httpd_resp_sendstr_chunk(req, temp_buf);
 
     httpd_resp_sendstr_chunk(req, "</div></div>");
@@ -5839,32 +5842,31 @@ static esp_err_t save_config_handler(httpd_req_t *req)
     // WiFi connection status card
     if (strlen(g_system_config.wifi_ssid) > 0) {
         httpd_resp_sendstr_chunk(req, "<div class='sensor-card' style='padding:var(--space-xl);margin-bottom:var(--space-xl)'>");
-        httpd_resp_sendstr_chunk(req, "<h3 style='margin-bottom:var(--space-lg);display:flex;align-items:center;gap:var(--space-sm)'>");
-        httpd_resp_sendstr_chunk(req, "<span style='font-size:24px'>📶</span> WiFi Connection Status</h3>");
+        httpd_resp_sendstr_chunk(req, "<h3 style='margin-bottom:var(--space-lg)'>📶 WiFi Connection Status</h3>");
 
         // Check current WiFi connection status
         wifi_ap_record_t ap_info;
         esp_err_t conn_status = esp_wifi_sta_get_ap_info(&ap_info);
         if (conn_status == ESP_OK) {
             // Successfully connected
-            httpd_resp_sendstr_chunk(req, "<div style='background:linear-gradient(135deg,rgba(16,185,129,0.1),rgba(52,211,153,0.1));border:2px solid var(--color-success);border-radius:var(--radius-md);padding:var(--space-lg);margin-bottom:var(--space-md)'>");
-            httpd_resp_sendstr_chunk(req, "<p style='color:var(--color-success);font-weight:var(--weight-bold);font-size:var(--text-lg);margin-bottom:var(--space-sm)'>✅ Connected Successfully!</p>");
-            snprintf(temp_buf, sizeof(temp_buf), "<p style='color:var(--color-text-secondary);margin:var(--space-xs) 0'>Network: <strong>%s</strong></p>", ap_info.ssid);
+            httpd_resp_sendstr_chunk(req, "<div class='status-box success'>");
+            httpd_resp_sendstr_chunk(req, "<p class='status-title success'>✅ Connected Successfully!</p>");
+            snprintf(temp_buf, sizeof(temp_buf), "<p>Network: <strong>%s</strong></p>", (char*)ap_info.ssid);
             httpd_resp_sendstr_chunk(req, temp_buf);
-            snprintf(temp_buf, sizeof(temp_buf), "<p style='color:var(--color-text-secondary);margin:var(--space-xs) 0'>Signal: <strong>%d dBm</strong></p>", ap_info.rssi);
+            snprintf(temp_buf, sizeof(temp_buf), "<p>Signal: <strong>%d dBm</strong></p>", ap_info.rssi);
             httpd_resp_sendstr_chunk(req, temp_buf);
             httpd_resp_sendstr_chunk(req, "</div>");
-            httpd_resp_sendstr_chunk(req, "<p style='color:var(--color-text-tertiary);font-size:var(--text-sm)'>You can now access this interface via your main WiFi network.</p>");
+            httpd_resp_sendstr_chunk(req, "<p class='hint'>You can now access this interface via your main WiFi network.</p>");
         } else {
             // Connection in progress or failed
-            httpd_resp_sendstr_chunk(req, "<div style='background:linear-gradient(135deg,rgba(245,158,11,0.1),rgba(251,191,36,0.1));border:2px solid var(--color-warning);border-radius:var(--radius-md);padding:var(--space-lg);margin-bottom:var(--space-md)'>");
-            httpd_resp_sendstr_chunk(req, "<p style='color:var(--color-warning);font-weight:var(--weight-bold);font-size:var(--text-lg);margin-bottom:var(--space-sm)'>⏳ Connecting to WiFi network...</p>");
-            snprintf(temp_buf, sizeof(temp_buf), "<p style='color:var(--color-text-secondary);margin:var(--space-xs) 0'>Target: <strong>%s</strong></p>", g_system_config.wifi_ssid);
+            httpd_resp_sendstr_chunk(req, "<div class='status-box warning'>");
+            httpd_resp_sendstr_chunk(req, "<p class='status-title warning'>⏳ Connecting to WiFi network...</p>");
+            snprintf(temp_buf, sizeof(temp_buf), "<p>Target: <strong>%s</strong></p>", g_system_config.wifi_ssid);
             httpd_resp_sendstr_chunk(req, temp_buf);
             httpd_resp_sendstr_chunk(req, "</div>");
-            httpd_resp_sendstr_chunk(req, "<div style='background:var(--color-bg-secondary);border-radius:var(--radius-md);padding:var(--space-md)'>");
-            httpd_resp_sendstr_chunk(req, "<p style='color:var(--color-text-secondary);font-size:var(--text-sm);margin-bottom:var(--space-xs)'><strong>SoftAP Access:</strong> 'ModbusIoT-Config' remains active at 192.168.4.1</p>");
-            httpd_resp_sendstr_chunk(req, "<p style='color:var(--color-text-tertiary);font-size:var(--text-sm)'>If connection fails, you can still access this interface via the SoftAP.</p>");
+            httpd_resp_sendstr_chunk(req, "<div class='info-box'>");
+            httpd_resp_sendstr_chunk(req, "<p><strong>SoftAP Access:</strong> 'ModbusIoT-Config' remains active at 192.168.4.1</p>");
+            httpd_resp_sendstr_chunk(req, "<p class='hint'>If connection fails, you can still access this interface via the SoftAP.</p>");
             httpd_resp_sendstr_chunk(req, "</div>");
         }
         httpd_resp_sendstr_chunk(req, "</div>");
