@@ -7108,9 +7108,40 @@ static esp_err_t test_rs485_handler(httpd_req_t *req)
             conv.i = raw_val;
             primary_value = (double)conv.f * scale_factor;
         } else if (reg_count >= 2 && strstr(data_type, "UINT32")) {
-            primary_value = (double)(strstr(data_type, "4321") ? 
+            primary_value = (double)(strstr(data_type, "4321") ?
                 (((uint32_t)registers[1] << 16) | registers[0]) :
                 (((uint32_t)registers[0] << 16) | registers[1])) * scale_factor;
+        } else if (reg_count >= 4 && strstr(data_type, "PANDA_EMF_FIXED")) {
+            // PANDA_EMF_FIXED: INT32_BE (Integer) + FLOAT32_BE (Decimal)
+            int32_t integer_part = (int32_t)(((uint32_t)registers[0] << 16) | registers[1]);
+            uint32_t float_bits = ((uint32_t)registers[2] << 16) | registers[3];
+            float decimal_part;
+            memcpy(&decimal_part, &float_bits, sizeof(float));
+            primary_value = ((double)integer_part + (double)decimal_part) * scale_factor;
+        } else if (reg_count >= 4 && strstr(data_type, "ZEST_FIXED")) {
+            // ZEST_FIXED: UINT16 (Integer) + FLOAT32_BE (Decimal)
+            // Register[0]: Integer part, Register[1]: unused, Registers[2-3]: Float decimal (Big Endian)
+            uint32_t integer_part = (uint32_t)registers[0];
+            uint32_t float_bits = ((uint32_t)registers[2] << 16) | registers[3];
+            float decimal_part;
+            memcpy(&decimal_part, &float_bits, sizeof(float));
+            primary_value = ((double)integer_part + (double)decimal_part) * scale_factor;
+        } else if (reg_count >= 4 && strstr(data_type, "CLAMPON_FIXED")) {
+            // CLAMPON_FIXED: UINT32_BADC (Integer) + FLOAT32_BADC (Decimal)
+            // Word-swapped: (reg[1] << 16) | reg[0] for integer, (reg[3] << 16) | reg[2] for float
+            uint32_t integer_part = ((uint32_t)registers[1] << 16) | registers[0];
+            uint32_t float_bits = ((uint32_t)registers[3] << 16) | registers[2];
+            float decimal_part;
+            memcpy(&decimal_part, &float_bits, sizeof(float));
+            primary_value = ((double)integer_part + (double)decimal_part) * scale_factor;
+        } else if (reg_count >= 2 && strstr(data_type, "DAILIAN_EMF_FIXED")) {
+            // DAILIAN_EMF_FIXED: UINT32 word-swapped totaliser
+            // Format: (reg[1] << 16) | reg[0]
+            uint32_t totaliser = ((uint32_t)registers[1] << 16) | registers[0];
+            primary_value = (double)totaliser * scale_factor;
+        } else if (reg_count >= 1 && strstr(data_type, "PANDA_LEVEL_FIXED")) {
+            // PANDA_LEVEL_FIXED: UINT16 raw level value
+            primary_value = (double)registers[0] * scale_factor;
         } else if (reg_count >= 1) {
             primary_value = (double)registers[0] * scale_factor;
         }
