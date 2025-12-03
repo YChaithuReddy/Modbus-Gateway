@@ -10744,7 +10744,7 @@ esp_err_t config_reset_to_defaults(void)
     g_system_config.sim_config.uart_baud_rate = 115200;
 
     // SD Card defaults (VSPI configuration - avoids boot pin conflicts)
-    g_system_config.sd_config.enabled = true;   // ENABLED by default for production use
+    g_system_config.sd_config.enabled = false;  // DISABLED by default - enable via web interface
     g_system_config.sd_config.cache_on_failure = true;  // Auto-cache when network fails
     g_system_config.sd_config.mosi_pin = GPIO_NUM_23;  // VSPI MOSI
     g_system_config.sd_config.miso_pin = GPIO_NUM_19;  // VSPI MISO
