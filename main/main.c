@@ -2028,11 +2028,30 @@ static bool send_telemetry(void) {
     }
     
     ESP_LOGI(TAG, "[SEND] Sending telemetry message #%lu...", telemetry_send_count);
-    
+
+    // IMPORTANT: Replay cached offline messages FIRST before sending live data
+    // This ensures chronological order - older cached data must be sent before newer live data
+    // Otherwise cloud analytics will use live data as reference and cached data becomes useless
+    if (config->sd_config.enabled) {
+        uint32_t pending_count = 0;
+        sd_card_get_pending_count(&pending_count);
+        if (pending_count > 0) {
+            ESP_LOGI(TAG, "[SD] 📤 Found %lu cached messages - sending FIRST (before live data)", pending_count);
+            esp_err_t replay_ret = sd_card_replay_messages(replay_message_callback);
+            if (replay_ret == ESP_OK) {
+                ESP_LOGI(TAG, "[SD] ✅ Cached messages sent successfully - now sending live data");
+            } else {
+                ESP_LOGW(TAG, "[SD] ⚠️ Some cached messages failed: %s", esp_err_to_name(replay_ret));
+            }
+            // Small delay to ensure cached messages are processed before live data
+            vTaskDelay(pdMS_TO_TICKS(500));
+        }
+    }
+
     // Data is now provided by the modbus task via queue
 
     // Use Azure IoT Hub D2C telemetry topic format
-    snprintf(telemetry_topic, sizeof(telemetry_topic), 
+    snprintf(telemetry_topic, sizeof(telemetry_topic),
              "devices/%s/messages/events/", config->azure_device_id);
     
     // Validate topic format
@@ -2106,19 +2125,6 @@ static bool send_telemetry(void) {
 
         // Store in telemetry history for web interface
         add_telemetry_to_history(telemetry_payload, true);
-
-        // After successful send, try to replay any cached messages from SD card
-        if (config->sd_config.enabled) {
-            ESP_LOGI(TAG, "[SD] 📤 Checking for cached messages to replay...");
-            esp_err_t replay_ret = sd_card_replay_messages(replay_message_callback);
-            if (replay_ret == ESP_OK) {
-                ESP_LOGI(TAG, "[SD] ✅ Cached messages replayed successfully");
-            } else if (replay_ret == ESP_ERR_NOT_FOUND) {
-                ESP_LOGD(TAG, "[SD] No cached messages to replay");
-            } else {
-                ESP_LOGW(TAG, "[SD] ⚠️ Failed to replay cached messages: %s", esp_err_to_name(replay_ret));
-            }
-        }
 
         send_in_progress = false; // Reset flag on success
         return true;
