@@ -34,6 +34,7 @@
 #include "ds3231_rtc.h"
 #include "a7670c_ppp.h"
 #include "telegram_bot.h"
+#include "ota_update.h"
 #include "cJSON.h"
 #include "esp_crt_bundle.h"
 
@@ -569,11 +570,14 @@ static void report_device_twin(void) {
     int64_t current_time = esp_timer_get_time() / 1000000;
     int64_t uptime = current_time - system_uptime_start;
 
-    // Create Device Twin reported properties JSON
-    char twin_json[1024];
+    // Get OTA status for Device Twin
+    ota_info_t* ota_info = ota_get_info();
+
+    // Create Device Twin reported properties JSON with OTA status
+    char twin_json[1536];
     snprintf(twin_json, sizeof(twin_json),
         "{\"deviceId\":\"%s\","
-        "\"firmwareVersion\":\"1.1.0\","
+        "\"firmwareVersion\":\"%s\","
         "\"uptimeSeconds\":%lld,"
         "\"freeHeapBytes\":%lu,"
         "\"minFreeHeapBytes\":%lu,"
@@ -583,8 +587,19 @@ static void report_device_twin(void) {
         "\"systemRestartCount\":%lu,"
         "\"networkMode\":\"%s\","
         "\"sdCardEnabled\":%s,"
-        "\"sensorCount\":%d}",
+        "\"sensorCount\":%d,"
+        "\"ota\":{"
+        "\"status\":\"%s\","
+        "\"currentVersion\":\"%s\","
+        "\"newVersion\":\"%s\","
+        "\"progress\":%d,"
+        "\"bytesDownloaded\":%lu,"
+        "\"totalBytes\":%lu,"
+        "\"isRollback\":%s,"
+        "\"bootCount\":%d,"
+        "\"errorMsg\":\"%s\"}}",
         config->azure_device_id,
+        FW_VERSION_STRING,
         (long long)uptime,
         esp_get_free_heap_size(),
         esp_get_minimum_free_heap_size(),
@@ -594,7 +609,16 @@ static void report_device_twin(void) {
         system_restart_count,
         config->network_mode == NETWORK_MODE_WIFI ? "WiFi" : "SIM",
         config->sd_config.enabled ? "true" : "false",
-        config->sensor_count);
+        config->sensor_count,
+        ota_status_to_string(ota_info->status),
+        ota_info->current_version,
+        ota_info->new_version,
+        ota_info->progress,
+        ota_info->bytes_downloaded,
+        ota_info->total_bytes,
+        ota_info->is_rollback ? "true" : "false",
+        ota_info->boot_count,
+        ota_info->error_msg);
 
     // Publish to Device Twin reported properties topic
     // Azure IoT Hub Device Twin topic format: $iothub/twin/PATCH/properties/reported/?$rid=<request_id>
@@ -893,6 +917,63 @@ static void mqtt_event_handler(void *handler_args, esp_event_base_t base, int32_
                                     } else {
                                         ESP_LOGW(TAG, "[C2D] Invalid sensor index: %d", idx);
                                     }
+                                }
+                            }
+                            // OTA (Over-The-Air) Update Commands
+                            else if (strcmp(cmd, "ota_update") == 0) {
+                                cJSON *url = cJSON_GetObjectItem(root, "url");
+                                cJSON *version = cJSON_GetObjectItem(root, "version");
+
+                                if (url && cJSON_IsString(url)) {
+                                    const char *fw_url = url->valuestring;
+                                    const char *fw_version = (version && cJSON_IsString(version)) ? version->valuestring : "unknown";
+
+                                    ESP_LOGI(TAG, "[C2D] OTA update requested: %s (v%s)", fw_url, fw_version);
+
+                                    esp_err_t ret = ota_start_update(fw_url, fw_version);
+                                    if (ret == ESP_OK) {
+                                        ESP_LOGI(TAG, "[C2D] OTA update started successfully");
+                                    } else {
+                                        ESP_LOGE(TAG, "[C2D] OTA update failed to start: %s", esp_err_to_name(ret));
+                                    }
+                                } else {
+                                    ESP_LOGW(TAG, "[C2D] OTA update requires 'url' parameter");
+                                }
+                            }
+                            else if (strcmp(cmd, "ota_status") == 0) {
+                                ota_info_t *info = ota_get_info();
+                                ESP_LOGI(TAG, "[C2D] OTA Status: %s", ota_status_to_string(info->status));
+                                ESP_LOGI(TAG, "  Current version: %s", info->current_version);
+                                ESP_LOGI(TAG, "  Progress: %d%% (%lu/%lu bytes)",
+                                         info->progress, info->bytes_downloaded, info->total_bytes);
+                                if (info->is_rollback) {
+                                    ESP_LOGW(TAG, "  Running after ROLLBACK!");
+                                }
+                                if (info->error_msg[0] != '\0') {
+                                    ESP_LOGE(TAG, "  Error: %s", info->error_msg);
+                                }
+                            }
+                            else if (strcmp(cmd, "ota_cancel") == 0) {
+                                esp_err_t ret = ota_cancel_update();
+                                if (ret == ESP_OK) {
+                                    ESP_LOGI(TAG, "[C2D] OTA update cancelled");
+                                } else {
+                                    ESP_LOGW(TAG, "[C2D] No OTA update in progress to cancel");
+                                }
+                            }
+                            else if (strcmp(cmd, "ota_confirm") == 0) {
+                                ota_mark_valid();
+                                ESP_LOGI(TAG, "[C2D] Current firmware marked as valid (rollback disabled)");
+                            }
+                            else if (strcmp(cmd, "ota_reboot") == 0) {
+                                ota_info_t *info = ota_get_info();
+                                if (info->status == OTA_STATUS_PENDING_REBOOT) {
+                                    ESP_LOGI(TAG, "[C2D] Rebooting to apply OTA update...");
+                                    vTaskDelay(pdMS_TO_TICKS(1000));
+                                    ota_reboot();
+                                } else {
+                                    ESP_LOGW(TAG, "[C2D] No pending OTA update to apply (status: %s)",
+                                             ota_status_to_string(info->status));
                                 }
                             }
                             else {
@@ -2045,6 +2126,15 @@ static void telemetry_task(void *pvParameters)
                 // For subsequent telemetries, only update timestamp after successful send
                 last_send_time = current_time;
                 ESP_LOGI(TAG, "[OK] Telemetry timestamp updated after successful send");
+
+                // Mark OTA firmware as valid after first successful telemetry
+                // This prevents automatic rollback once system is confirmed working
+                static bool ota_marked_valid = false;
+                if (!ota_marked_valid) {
+                    ota_mark_valid();
+                    ESP_LOGI(TAG, "[OTA] Firmware marked as valid after successful telemetry");
+                    ota_marked_valid = true;
+                }
             } else if (!telemetry_success) {
                 ESP_LOGW(TAG, "[WARN] Telemetry failed - timestamp not updated, will retry on next interval");
             }
@@ -2295,7 +2385,7 @@ static bool send_telemetry(void) {
 
 void app_main(void) {
     ESP_LOGI(TAG, "╔══════════════════════════════════════════════════════════╗");
-    ESP_LOGI(TAG, "║  🚀 MODBUS IoT GATEWAY v1.1.0 - SYSTEM STARTUP 🚀        ║");
+    ESP_LOGI(TAG, "║  🚀 MODBUS IoT GATEWAY v%s - SYSTEM STARTUP 🚀        ║", FW_VERSION_STRING);
     ESP_LOGI(TAG, "╠══════════════════════════════════════════════════════════╣");
     ESP_LOGI(TAG, "║    FluxGen Technologies | Industrial IoT Solutions       ║");
     ESP_LOGI(TAG, "╚══════════════════════════════════════════════════════════╝");
@@ -2334,6 +2424,21 @@ void app_main(void) {
 
     // Load recovery restart count from NVS
     load_restart_count();
+
+    // Initialize OTA (Over-The-Air) update module
+    ESP_LOGI(TAG, "╔══════════════════════════════════════════════════════════╗");
+    ESP_LOGI(TAG, "║           🔄 OTA UPDATE MODULE INITIALIZATION 🔄         ║");
+    ESP_LOGI(TAG, "╚══════════════════════════════════════════════════════════╝");
+    ret = ota_init();
+    if (ret == ESP_OK) {
+        ESP_LOGI(TAG, "[OTA] Module initialized - Firmware v%s", ota_get_version());
+        if (ota_is_rollback()) {
+            ESP_LOGW(TAG, "[OTA] ⚠️ RUNNING AFTER ROLLBACK - Previous firmware failed!");
+            ESP_LOGW(TAG, "[OTA] Please verify system functionality before confirming.");
+        }
+    } else {
+        ESP_LOGW(TAG, "[OTA] Module initialization failed: %s", esp_err_to_name(ret));
+    }
 
     // Initialize web configuration system
     ESP_LOGI(TAG, "╔══════════════════════════════════════════════════════════╗");

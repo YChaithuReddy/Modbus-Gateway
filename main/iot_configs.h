@@ -1,6 +1,12 @@
 #ifndef IOT_CONFIGS_H
 #define IOT_CONFIGS_H
 
+// Firmware Version - Update these for each release
+#define FW_VERSION_MAJOR 1
+#define FW_VERSION_MINOR 2
+#define FW_VERSION_PATCH 0
+#define FW_VERSION_STRING "1.2.0"
+
 // WiFi Configuration (Replace with your credentials)
 #define IOT_CONFIG_WIFI_SSID "YOUR_WIFI_SSID"
 #define IOT_CONFIG_WIFI_PASSWORD "YOUR_WIFI_PASSWORD"
@@ -25,5 +31,11 @@
 
 // Device Twin Configuration
 #define DEVICE_TWIN_UPDATE_INTERVAL_SEC 60  // 1 minute - report device status to Azure
+
+// OTA Configuration
+#define OTA_RECV_TIMEOUT_MS 5000          // HTTP receive timeout
+#define OTA_BUF_SIZE 4096                 // Download buffer size
+#define OTA_MAX_RETRY 3                   // Max download retries
+#define OTA_CONFIRM_TIMEOUT_SEC 300       // 5 minutes to confirm new firmware before rollback
 
 #endif // IOT_CONFIGS_H

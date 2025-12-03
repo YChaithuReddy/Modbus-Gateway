@@ -36,6 +36,7 @@
 #include "driver/i2c.h"
 #include "esp_mac.h"
 #include "esp_ota_ops.h"
+#include "ota_update.h"
 #include "driver/gpio.h"
 #include "esp_task_wdt.h"
 
@@ -8656,6 +8657,177 @@ static esp_err_t gpio_trigger_handler(httpd_req_t *req)
     return ESP_OK;
 }
 
+// ============================================================================
+// OTA (Over-The-Air) Update Handlers
+// ============================================================================
+
+// Get OTA status API endpoint
+static esp_err_t api_ota_status_handler(httpd_req_t *req) {
+    ota_info_t* info = ota_get_info();
+
+    char response[512];
+    snprintf(response, sizeof(response),
+        "{\"status\":\"%s\","
+        "\"currentVersion\":\"%s\","
+        "\"newVersion\":\"%s\","
+        "\"progress\":%d,"
+        "\"bytesDownloaded\":%lu,"
+        "\"totalBytes\":%lu,"
+        "\"isRollback\":%s,"
+        "\"bootCount\":%d,"
+        "\"errorMsg\":\"%s\"}",
+        ota_status_to_string(info->status),
+        info->current_version,
+        info->new_version,
+        info->progress,
+        info->bytes_downloaded,
+        info->total_bytes,
+        info->is_rollback ? "true" : "false",
+        info->boot_count,
+        info->error_msg);
+
+    httpd_resp_set_type(req, "application/json");
+    httpd_resp_sendstr(req, response);
+    return ESP_OK;
+}
+
+// Start OTA update from URL
+static esp_err_t api_ota_start_handler(httpd_req_t *req) {
+    char buf[512];
+    int ret, remaining = req->content_len;
+
+    if (remaining > sizeof(buf) - 1) {
+        httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Request too large");
+        return ESP_FAIL;
+    }
+
+    ret = httpd_req_recv(req, buf, MIN(remaining, sizeof(buf) - 1));
+    if (ret <= 0) {
+        httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Failed to receive data");
+        return ESP_FAIL;
+    }
+    buf[ret] = '\0';
+
+    // Parse JSON
+    cJSON *root = cJSON_Parse(buf);
+    if (!root) {
+        httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Invalid JSON");
+        return ESP_FAIL;
+    }
+
+    cJSON *url = cJSON_GetObjectItem(root, "url");
+    cJSON *version = cJSON_GetObjectItem(root, "version");
+
+    if (!url || !cJSON_IsString(url)) {
+        cJSON_Delete(root);
+        httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Missing 'url' parameter");
+        return ESP_FAIL;
+    }
+
+    const char *fw_version = (version && cJSON_IsString(version)) ? version->valuestring : "unknown";
+
+    ESP_LOGI(TAG, "[OTA] Starting update from URL: %s (v%s)", url->valuestring, fw_version);
+
+    esp_err_t ota_ret = ota_start_update(url->valuestring, fw_version);
+    cJSON_Delete(root);
+
+    httpd_resp_set_type(req, "application/json");
+    if (ota_ret == ESP_OK) {
+        httpd_resp_sendstr(req, "{\"success\":true,\"message\":\"OTA update started\"}");
+    } else {
+        char error_response[128];
+        snprintf(error_response, sizeof(error_response),
+            "{\"success\":false,\"message\":\"Failed to start OTA: %s\"}", esp_err_to_name(ota_ret));
+        httpd_resp_sendstr(req, error_response);
+    }
+    return ESP_OK;
+}
+
+// Cancel ongoing OTA update
+static esp_err_t api_ota_cancel_handler(httpd_req_t *req) {
+    esp_err_t ret = ota_cancel_update();
+
+    httpd_resp_set_type(req, "application/json");
+    if (ret == ESP_OK) {
+        httpd_resp_sendstr(req, "{\"success\":true,\"message\":\"OTA update cancelled\"}");
+    } else {
+        httpd_resp_sendstr(req, "{\"success\":false,\"message\":\"No update in progress\"}");
+    }
+    return ESP_OK;
+}
+
+// Confirm current firmware as valid
+static esp_err_t api_ota_confirm_handler(httpd_req_t *req) {
+    ota_mark_valid();
+
+    httpd_resp_set_type(req, "application/json");
+    httpd_resp_sendstr(req, "{\"success\":true,\"message\":\"Firmware marked as valid\"}");
+    return ESP_OK;
+}
+
+// Reboot to apply pending OTA update
+static esp_err_t api_ota_reboot_handler(httpd_req_t *req) {
+    ota_info_t* info = ota_get_info();
+
+    httpd_resp_set_type(req, "application/json");
+    if (info->status == OTA_STATUS_PENDING_REBOOT) {
+        httpd_resp_sendstr(req, "{\"success\":true,\"message\":\"Rebooting to apply update...\"}");
+        vTaskDelay(pdMS_TO_TICKS(500));  // Give time for response to be sent
+        ota_reboot();
+    } else {
+        httpd_resp_sendstr(req, "{\"success\":false,\"message\":\"No pending update to apply\"}");
+    }
+    return ESP_OK;
+}
+
+// OTA firmware upload handler (for web-based file upload)
+static esp_err_t api_ota_upload_handler(httpd_req_t *req) {
+    char buf[1024];
+    int received;
+    bool is_first = true;
+    size_t total_received = 0;
+
+    ESP_LOGI(TAG, "[OTA] Starting firmware upload, content_len=%d", req->content_len);
+
+    // Receive and write firmware chunks
+    while (total_received < req->content_len) {
+        received = httpd_req_recv(req, buf, MIN(sizeof(buf), req->content_len - total_received));
+
+        if (received <= 0) {
+            if (received == HTTPD_SOCK_ERR_TIMEOUT) {
+                continue;  // Retry on timeout
+            }
+            ESP_LOGE(TAG, "[OTA] Upload failed - receive error");
+            ota_cancel_update();
+            httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "Upload failed");
+            return ESP_FAIL;
+        }
+
+        bool is_last = (total_received + received >= req->content_len);
+
+        esp_err_t ret = ota_write_chunk((uint8_t*)buf, received, is_first, is_last);
+        if (ret != ESP_OK) {
+            ESP_LOGE(TAG, "[OTA] Upload failed - write error: %s", esp_err_to_name(ret));
+            httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "Firmware write failed");
+            return ESP_FAIL;
+        }
+
+        is_first = false;
+        total_received += received;
+
+        // Log progress every 100KB
+        if (total_received % (100 * 1024) < sizeof(buf)) {
+            ESP_LOGI(TAG, "[OTA] Upload progress: %d%%", (int)(total_received * 100 / req->content_len));
+        }
+    }
+
+    ESP_LOGI(TAG, "[OTA] Upload complete - %d bytes received", total_received);
+
+    httpd_resp_set_type(req, "application/json");
+    httpd_resp_sendstr(req, "{\"success\":true,\"message\":\"Firmware uploaded. Reboot to apply.\"}");
+    return ESP_OK;
+}
+
 // Start HTTP server
 static esp_err_t start_webserver(void)
 {
@@ -9119,6 +9291,57 @@ static esp_err_t start_webserver(void)
         } else {
             ESP_LOGE(TAG, "ERROR: Failed to register /modbus_read_live endpoint: %s", esp_err_to_name(live_reg));
         }
+
+        // OTA Update API endpoints
+        httpd_uri_t api_ota_status_uri = {
+            .uri = "/api/ota/status",
+            .method = HTTP_GET,
+            .handler = api_ota_status_handler,
+            .user_ctx = NULL
+        };
+        httpd_register_uri_handler(g_server, &api_ota_status_uri);
+
+        httpd_uri_t api_ota_start_uri = {
+            .uri = "/api/ota/start",
+            .method = HTTP_POST,
+            .handler = api_ota_start_handler,
+            .user_ctx = NULL
+        };
+        httpd_register_uri_handler(g_server, &api_ota_start_uri);
+
+        httpd_uri_t api_ota_upload_uri = {
+            .uri = "/api/ota/upload",
+            .method = HTTP_POST,
+            .handler = api_ota_upload_handler,
+            .user_ctx = NULL
+        };
+        httpd_register_uri_handler(g_server, &api_ota_upload_uri);
+
+        httpd_uri_t api_ota_cancel_uri = {
+            .uri = "/api/ota/cancel",
+            .method = HTTP_POST,
+            .handler = api_ota_cancel_handler,
+            .user_ctx = NULL
+        };
+        httpd_register_uri_handler(g_server, &api_ota_cancel_uri);
+
+        httpd_uri_t api_ota_confirm_uri = {
+            .uri = "/api/ota/confirm",
+            .method = HTTP_POST,
+            .handler = api_ota_confirm_handler,
+            .user_ctx = NULL
+        };
+        httpd_register_uri_handler(g_server, &api_ota_confirm_uri);
+
+        httpd_uri_t api_ota_reboot_uri = {
+            .uri = "/api/ota/reboot",
+            .method = HTTP_POST,
+            .handler = api_ota_reboot_handler,
+            .user_ctx = NULL
+        };
+        httpd_register_uri_handler(g_server, &api_ota_reboot_uri);
+
+        ESP_LOGI(TAG, "SUCCESS: OTA API endpoints registered (/api/ota/status, /api/ota/start, /api/ota/upload, /api/ota/cancel, /api/ota/confirm, /api/ota/reboot)");
 
         ESP_LOGI(TAG, "Web server started on port 80");
         ESP_LOGI(TAG, "[NET] All URI handlers registered successfully (including Modbus Explorer endpoints)");
