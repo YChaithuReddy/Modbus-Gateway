@@ -47,7 +47,7 @@
 static const char *TAG = "WEB_CONFIG";
 
 // External declarations for MQTT/Azure status from main.c
-extern bool mqtt_connected;
+extern volatile bool mqtt_connected;
 extern uint32_t total_telemetry_sent;
 extern uint32_t mqtt_reconnect_count;
 extern int64_t mqtt_connect_time;

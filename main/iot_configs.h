@@ -18,5 +18,12 @@
 #define MAX_MODBUS_READ_FAILURES 10
 #define SYSTEM_RESTART_ON_CRITICAL_ERROR true
 
+// Watchdog and Recovery Configuration
+#define WATCHDOG_TIMEOUT_SEC 120          // 2 minutes - system restarts if main loop stuck
+#define TELEMETRY_TIMEOUT_SEC 1800        // 30 minutes - force restart if no successful telemetry
+#define HEARTBEAT_LOG_INTERVAL_SEC 300    // 5 minutes - log heartbeat to SD card
+
+// Device Twin Configuration
+#define DEVICE_TWIN_UPDATE_INTERVAL_SEC 60  // 1 minute - report device status to Azure
 
 #endif // IOT_CONFIGS_H

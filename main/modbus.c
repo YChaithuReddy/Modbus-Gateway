@@ -306,20 +306,27 @@ modbus_result_t modbus_read_holding_registers(uint8_t slave_id, uint16_t start_a
     ESP_LOGI(TAG, "[READ] Reading %d holding registers from slave %d, starting at 0x%04X", 
              num_regs, slave_id, start_addr);
     
-    modbus_result_t result = modbus_send_request(slave_id, MODBUS_READ_HOLDING_REGISTERS, 
+    modbus_result_t result = modbus_send_request(slave_id, MODBUS_READ_HOLDING_REGISTERS,
                                                start_addr, num_regs, response, sizeof(response));
-    
+
     if (result == MODBUS_SUCCESS) {
         uint8_t byte_count = response[2];
+
+        // Bounds check: Validate byte_count to prevent buffer overflow from malformed response
+        if (byte_count > MODBUS_MAX_REGISTERS * 2) {
+            ESP_LOGE(TAG, "[ERROR] Response byte_count too large: %d bytes (max %d)", byte_count, MODBUS_MAX_REGISTERS * 2);
+            return MODBUS_ERROR_INVALID_RESPONSE;
+        }
+
         int num_registers = byte_count / 2;
-        
+
         // Extract register values into response buffer
         for (int i = 0; i < num_registers && i < MODBUS_MAX_REGISTERS; i++) {
             response_buffer[i] = (response[3 + i*2] << 8) | response[4 + i*2];
         }
-        
+
         response_length = num_registers;
-        
+
         ESP_LOGI(TAG, "[OK] Successfully read %d registers", num_registers);
         
         // Log register values for debugging
@@ -339,18 +346,25 @@ modbus_result_t modbus_read_input_registers(uint8_t slave_id, uint16_t start_add
     ESP_LOGI(TAG, "[READ] Reading %d input registers from slave %d, starting at 0x%04X", 
              num_regs, slave_id, start_addr);
     
-    modbus_result_t result = modbus_send_request(slave_id, MODBUS_READ_INPUT_REGISTERS, 
+    modbus_result_t result = modbus_send_request(slave_id, MODBUS_READ_INPUT_REGISTERS,
                                                start_addr, num_regs, response, sizeof(response));
-    
+
     if (result == MODBUS_SUCCESS) {
         uint8_t byte_count = response[2];
+
+        // Bounds check: Validate byte_count to prevent buffer overflow from malformed response
+        if (byte_count > MODBUS_MAX_REGISTERS * 2) {
+            ESP_LOGE(TAG, "[ERROR] Response byte_count too large: %d bytes (max %d)", byte_count, MODBUS_MAX_REGISTERS * 2);
+            return MODBUS_ERROR_INVALID_RESPONSE;
+        }
+
         int num_registers = byte_count / 2;
-        
+
         // Extract register values into response buffer
         for (int i = 0; i < num_registers && i < MODBUS_MAX_REGISTERS; i++) {
             response_buffer[i] = (response[3 + i*2] << 8) | response[4 + i*2];
         }
-        
+
         response_length = num_registers;
         ESP_LOGI(TAG, "[OK] Successfully read %d input registers", num_registers);
         

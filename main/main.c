@@ -16,6 +16,7 @@
 #include "esp_netif.h"
 #include "esp_sntp.h"
 #include "esp_timer.h"
+#include "esp_task_wdt.h"
 #include "lwip/netdb.h"
 #include "lwip/sockets.h"
 #include "mqtt_client.h"
@@ -68,7 +69,7 @@ QueueHandle_t sensor_data_queue = NULL;
 static esp_mqtt_client_handle_t mqtt_client;
 static char sas_token[512];
 static uint32_t telemetry_send_count = 0;
-bool mqtt_connected = false;  // Non-static for external access
+volatile bool mqtt_connected = false;  // Non-static for external access, volatile for thread-safe reads
 
 // Flow meter configuration now comes from web interface (NVS storage)
 // Hardcoded configuration removed - using dynamic sensor configuration
@@ -88,6 +89,12 @@ static uint32_t system_uptime_start = 0;
 // MQTT connection timing for status monitoring
 int64_t mqtt_connect_time = 0;  // Timestamp when MQTT connected
 int64_t last_telemetry_time = 0;  // Timestamp of last telemetry sent
+
+// Recovery and monitoring variables
+static int64_t last_successful_telemetry_time = 0;  // For auto-recovery timeout
+static int64_t last_heartbeat_time = 0;             // For SD card heartbeat logging
+static uint32_t telemetry_failure_count = 0;        // Track consecutive failures
+static uint32_t system_restart_count = 0;           // Loaded from NVS on boot
 
 // Static buffers to avoid stack overflow
 static char mqtt_broker_uri[256];
@@ -505,6 +512,152 @@ static void replay_message_callback(const pending_message_t* msg) {
 
     // Small delay between replayed messages to avoid overwhelming MQTT broker
     vTaskDelay(pdMS_TO_TICKS(100));
+}
+
+// Log heartbeat to SD card for post-mortem debugging
+static void log_heartbeat_to_sd(void) {
+    system_config_t* config = get_system_config();
+    if (!config->sd_config.enabled) {
+        return;
+    }
+
+    int64_t current_time = esp_timer_get_time() / 1000000;
+
+    // Create heartbeat JSON
+    char heartbeat_json[512];
+    time_t now = time(NULL);
+    struct tm timeinfo;
+    gmtime_r(&now, &timeinfo);
+    char time_str[32];
+    strftime(time_str, sizeof(time_str), "%Y-%m-%dT%H:%M:%SZ", &timeinfo);
+
+    snprintf(heartbeat_json, sizeof(heartbeat_json),
+        "{\"type\":\"heartbeat\",\"timestamp\":\"%s\","
+        "\"uptime_sec\":%lld,\"free_heap\":%lu,\"min_heap\":%lu,"
+        "\"mqtt_connected\":%s,\"telemetry_sent\":%lu,"
+        "\"mqtt_reconnects\":%lu,\"telemetry_failures\":%lu,"
+        "\"restart_count\":%lu}",
+        time_str,
+        (long long)(current_time - system_uptime_start),
+        esp_get_free_heap_size(),
+        esp_get_minimum_free_heap_size(),
+        mqtt_connected ? "true" : "false",
+        total_telemetry_sent,
+        mqtt_reconnect_count,
+        telemetry_failure_count,
+        system_restart_count);
+
+    // Write to SD card heartbeat log file
+    FILE* f = fopen("/sdcard/heartbeat.log", "a");
+    if (f) {
+        fprintf(f, "%s\n", heartbeat_json);
+        fclose(f);
+        ESP_LOGI(TAG, "[HEARTBEAT] Logged to SD card: uptime=%llds, heap=%lu",
+                 (long long)(current_time - system_uptime_start), esp_get_free_heap_size());
+    } else {
+        ESP_LOGW(TAG, "[HEARTBEAT] Failed to write to SD card");
+    }
+}
+
+// Report device status to Azure IoT Hub Device Twin
+static void report_device_twin(void) {
+    if (!mqtt_connected || mqtt_client == NULL) {
+        return;
+    }
+
+    system_config_t* config = get_system_config();
+    int64_t current_time = esp_timer_get_time() / 1000000;
+    int64_t uptime = current_time - system_uptime_start;
+
+    // Create Device Twin reported properties JSON
+    char twin_json[1024];
+    snprintf(twin_json, sizeof(twin_json),
+        "{\"deviceId\":\"%s\","
+        "\"firmwareVersion\":\"1.1.0\","
+        "\"uptimeSeconds\":%lld,"
+        "\"freeHeapBytes\":%lu,"
+        "\"minFreeHeapBytes\":%lu,"
+        "\"mqttReconnectCount\":%lu,"
+        "\"telemetrySentCount\":%lu,"
+        "\"telemetryFailureCount\":%lu,"
+        "\"systemRestartCount\":%lu,"
+        "\"networkMode\":\"%s\","
+        "\"sdCardEnabled\":%s,"
+        "\"sensorCount\":%d}",
+        config->azure_device_id,
+        (long long)uptime,
+        esp_get_free_heap_size(),
+        esp_get_minimum_free_heap_size(),
+        mqtt_reconnect_count,
+        total_telemetry_sent,
+        telemetry_failure_count,
+        system_restart_count,
+        config->network_mode == NETWORK_MODE_WIFI ? "WiFi" : "SIM",
+        config->sd_config.enabled ? "true" : "false",
+        config->sensor_count);
+
+    // Publish to Device Twin reported properties topic
+    // Azure IoT Hub Device Twin topic format: $iothub/twin/PATCH/properties/reported/?$rid=<request_id>
+    char twin_topic[128];
+    static uint32_t twin_request_id = 0;
+    snprintf(twin_topic, sizeof(twin_topic), "$iothub/twin/PATCH/properties/reported/?$rid=%lu", ++twin_request_id);
+
+    int msg_id = esp_mqtt_client_publish(mqtt_client, twin_topic, twin_json, 0, 1, 0);
+    if (msg_id >= 0) {
+        ESP_LOGI(TAG, "[TWIN] Reported device status to Azure IoT Hub");
+    } else {
+        ESP_LOGW(TAG, "[TWIN] Failed to report device status");
+    }
+}
+
+// Check for telemetry timeout and force restart if needed
+static void check_telemetry_timeout_recovery(void) {
+    int64_t current_time = esp_timer_get_time() / 1000000;
+
+    // Only check after initial startup period (5 minutes)
+    if (current_time - system_uptime_start < 300) {
+        return;
+    }
+
+    // If we've never had a successful telemetry, use system start time
+    if (last_successful_telemetry_time == 0) {
+        last_successful_telemetry_time = system_uptime_start;
+    }
+
+    int64_t time_since_last_success = current_time - last_successful_telemetry_time;
+
+    if (time_since_last_success > TELEMETRY_TIMEOUT_SEC) {
+        ESP_LOGE(TAG, "[RECOVERY] No successful telemetry for %lld seconds (limit: %d)",
+                 (long long)time_since_last_success, TELEMETRY_TIMEOUT_SEC);
+        ESP_LOGE(TAG, "[RECOVERY] Forcing system restart to recover...");
+
+        // Log to SD before restart
+        log_heartbeat_to_sd();
+
+        // Increment restart count in NVS
+        nvs_handle_t nvs;
+        if (nvs_open("recovery", NVS_READWRITE, &nvs) == ESP_OK) {
+            system_restart_count++;
+            nvs_set_u32(nvs, "restart_cnt", system_restart_count);
+            nvs_commit(nvs);
+            nvs_close(nvs);
+        }
+
+        vTaskDelay(pdMS_TO_TICKS(1000));
+        esp_restart();
+    }
+}
+
+// Load restart count from NVS
+static void load_restart_count(void) {
+    nvs_handle_t nvs;
+    if (nvs_open("recovery", NVS_READONLY, &nvs) == ESP_OK) {
+        nvs_get_u32(nvs, "restart_cnt", &system_restart_count);
+        nvs_close(nvs);
+        if (system_restart_count > 0) {
+            ESP_LOGW(TAG, "[RECOVERY] System has restarted %lu times due to recovery", system_restart_count);
+        }
+    }
 }
 
 static void mqtt_event_handler(void *handler_args, esp_event_base_t base, int32_t event_id, void *event_data) {
@@ -1667,9 +1820,11 @@ static void modbus_task(void *pvParameters)
     // Wait a bit to let the system stabilize before starting
     vTaskDelay(pdMS_TO_TICKS(100));
 
-    // Use mutex to prevent log interleaving during startup
+    // Use mutex to prevent log interleaving during startup (5 second timeout to prevent deadlock)
     if (startup_log_mutex != NULL) {
-        xSemaphoreTake(startup_log_mutex, portMAX_DELAY);
+        if (xSemaphoreTake(startup_log_mutex, pdMS_TO_TICKS(5000)) != pdTRUE) {
+            ESP_LOGW(TAG, "[WARN] Semaphore timeout in modbus_task - continuing anyway");
+        }
     }
 
     ESP_LOGI(TAG, "╔══════════════════════════════════════════════════════════╗");
@@ -1739,9 +1894,11 @@ static void mqtt_task(void *pvParameters)
     // Wait a bit to let the system stabilize and avoid log collision
     vTaskDelay(pdMS_TO_TICKS(200));
 
-    // Use mutex to prevent log interleaving during startup
+    // Use mutex to prevent log interleaving during startup (5 second timeout to prevent deadlock)
     if (startup_log_mutex != NULL) {
-        xSemaphoreTake(startup_log_mutex, portMAX_DELAY);
+        if (xSemaphoreTake(startup_log_mutex, pdMS_TO_TICKS(5000)) != pdTRUE) {
+            ESP_LOGW(TAG, "[WARN] Semaphore timeout in mqtt_task - continuing anyway");
+        }
     }
 
     ESP_LOGI(TAG, "╔══════════════════════════════════════════════════════════╗");
@@ -1809,9 +1966,11 @@ static void telemetry_task(void *pvParameters)
         return;
     }
 
-    // Use mutex to prevent log interleaving during startup
+    // Use mutex to prevent log interleaving during startup (5 second timeout to prevent deadlock)
     if (startup_log_mutex != NULL) {
-        xSemaphoreTake(startup_log_mutex, portMAX_DELAY);
+        if (xSemaphoreTake(startup_log_mutex, pdMS_TO_TICKS(5000)) != pdTRUE) {
+            ESP_LOGW(TAG, "[WARN] Semaphore timeout in telemetry_task - continuing anyway");
+        }
     }
 
     ESP_LOGI(TAG, "╔══════════════════════════════════════════════════════════╗");
@@ -2103,11 +2262,12 @@ static bool send_telemetry(void) {
         ESP_LOGE(TAG, "   MQTT connected: %s", mqtt_connected ? "YES" : "NO");
         
         // Try to reconnect MQTT if disconnected
-        if (!mqtt_connected) {
+        if (!mqtt_connected && mqtt_client != NULL) {
             ESP_LOGW(TAG, "[WARN] Attempting MQTT reconnection...");
             esp_mqtt_client_reconnect(mqtt_client);
         }
         send_in_progress = false; // Reset flag on failure
+        telemetry_failure_count++;  // Track failures for recovery monitoring
         return false;
     } else {
         ESP_LOGI(TAG, "[OK] Telemetry queued for publish, msg_id=%d", msg_id);
@@ -2116,6 +2276,8 @@ static bool send_telemetry(void) {
         total_telemetry_sent++; // Increment counter for web interface (Azure IoT doesn't send PUBACK)
         last_telemetry_time = esp_timer_get_time() / 1000000; // Update last telemetry timestamp
         last_actual_send_time = current_time; // Record successful send time
+        last_successful_telemetry_time = esp_timer_get_time() / 1000000;  // For recovery timeout
+        telemetry_failure_count = 0;  // Reset failure count on success
 
         // Log detailed publish info
         ESP_LOGI(TAG, "[SEND] Published to Azure IoT Hub:");
@@ -2142,6 +2304,23 @@ void app_main(void) {
     // Initialize system uptime tracking
     system_uptime_start = esp_timer_get_time() / 1000000;
 
+    // Initialize Hardware Watchdog Timer (prevents system hang)
+    ESP_LOGI(TAG, "[WDT] Initializing hardware watchdog timer (%d seconds)...", WATCHDOG_TIMEOUT_SEC);
+    esp_task_wdt_config_t wdt_config = {
+        .timeout_ms = WATCHDOG_TIMEOUT_SEC * 1000,
+        .idle_core_mask = 0,  // Don't watch idle tasks
+        .trigger_panic = true  // Restart on timeout
+    };
+    esp_err_t wdt_ret = esp_task_wdt_reconfigure(&wdt_config);
+    if (wdt_ret != ESP_OK) {
+        ESP_LOGW(TAG, "[WDT] Failed to reconfigure watchdog: %s", esp_err_to_name(wdt_ret));
+    }
+    // Add main task to watchdog
+    wdt_ret = esp_task_wdt_add(NULL);
+    if (wdt_ret == ESP_OK) {
+        ESP_LOGI(TAG, "[WDT] Main task added to watchdog monitoring");
+    }
+
     // Initialize NVS
     ESP_LOGI(TAG, "╔══════════════════════════════════════════════════════════╗");
     ESP_LOGI(TAG, "║           📦 NVS FLASH INITIALIZATION 📦                 ║");
@@ -2152,6 +2331,9 @@ void app_main(void) {
         ret = nvs_flash_init();
     }
     ESP_ERROR_CHECK(ret);
+
+    // Load recovery restart count from NVS
+    load_restart_count();
 
     // Initialize web configuration system
     ESP_LOGI(TAG, "╔══════════════════════════════════════════════════════════╗");
@@ -2604,7 +2786,29 @@ void app_main(void) {
 
             last_status_log = current_time_ms;
         }
-        
+
+        // Feed the hardware watchdog to prevent system reset
+        esp_task_wdt_reset();
+
+        // Check for telemetry timeout and force restart if needed (only in operation mode)
+        if (get_config_state() != CONFIG_STATE_SETUP) {
+            check_telemetry_timeout_recovery();
+        }
+
+        // Heartbeat logging to SD card (every 5 minutes)
+        int64_t current_time_sec = esp_timer_get_time() / 1000000;
+        if (current_time_sec - last_heartbeat_time >= HEARTBEAT_LOG_INTERVAL_SEC) {
+            log_heartbeat_to_sd();
+            last_heartbeat_time = current_time_sec;
+        }
+
+        // Device Twin reporting to Azure (every 1 minute when connected)
+        static int64_t last_twin_report = 0;
+        if (mqtt_connected && (current_time_sec - last_twin_report >= DEVICE_TWIN_UPDATE_INTERVAL_SEC)) {
+            report_device_twin();
+            last_twin_report = current_time_sec;
+        }
+
         vTaskDelay(pdMS_TO_TICKS(5000)); // Check every 5 seconds
     }
 }
