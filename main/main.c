@@ -2,6 +2,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
+#include <sys/time.h>
 #include <inttypes.h>
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
@@ -108,6 +109,7 @@ static char c2d_topic[256];
 static volatile bool web_server_toggle_requested = false;
 static volatile bool system_shutdown_requested = false;
 static volatile bool web_server_running = false;
+static volatile bool wifi_initialized_for_sim_mode = false;  // Track if WiFi was init'd in SIM mode
 
 // Modem control variables
 static bool modem_reset_enabled = false;
@@ -177,8 +179,13 @@ static void add_telemetry_to_history(const char *payload, bool success) {
 
 // Function to get telemetry history as JSON (called from web_config.c)
 int get_telemetry_history_json(char *buffer, size_t buffer_size) {
-    if (telemetry_history_mutex == NULL || buffer == NULL || buffer_size < 100) {
+    if (buffer == NULL || buffer_size < 10) {
         return 0;
+    }
+
+    // Always return valid JSON array, even if mutex not ready
+    if (telemetry_history_mutex == NULL) {
+        return snprintf(buffer, buffer_size, "[]");
     }
 
     int written = 0;
@@ -333,21 +340,39 @@ static void initialize_time(void) {
     tzset();
     ESP_LOGI(TAG, "Timezone set to IST (UTC+5:30)");
 
+    // Check if system time is already valid (from RTC)
+    time_t now = time(NULL);
+    struct tm timeinfo = { 0 };
+    localtime_r(&now, &timeinfo);
+
+    if (timeinfo.tm_year >= (2024 - 1900)) {
+        ESP_LOGI(TAG, "[TIME] ✅ System time already valid from RTC (year %d) - skipping NTP", timeinfo.tm_year + 1900);
+        ESP_LOGI(TAG, "Time initialized");
+        return;
+    }
+
+    // Configure SNTP with multiple servers for redundancy
     esp_sntp_setoperatingmode(SNTP_OPMODE_POLL);
     esp_sntp_setservername(0, "pool.ntp.org");
+    esp_sntp_setservername(1, "time.google.com");
+    esp_sntp_setservername(2, "time.cloudflare.com");
     esp_sntp_init();
 
-    // Wait for time to be set
-    time_t now = 0;
-    struct tm timeinfo = { 0 };
+    // Wait for time to be set with more retries
     int retry = 0;
-    const int retry_count = 10;
+    const int retry_count = 15;  // Increased from 10
 
-    while (timeinfo.tm_year < (2016 - 1900) && ++retry < retry_count) {
+    while (timeinfo.tm_year < (2024 - 1900) && ++retry < retry_count) {
         ESP_LOGI(TAG, "Waiting for system time to be set... (%d/%d)", retry, retry_count);
         vTaskDelay(2000 / portTICK_PERIOD_MS);
         time(&now);
         localtime_r(&now, &timeinfo);
+    }
+
+    if (timeinfo.tm_year >= (2024 - 1900)) {
+        ESP_LOGI(TAG, "[TIME] ✅ NTP sync successful - year %d", timeinfo.tm_year + 1900);
+    } else {
+        ESP_LOGW(TAG, "[TIME] ⚠️ NTP sync failed - system time may be incorrect");
     }
     ESP_LOGI(TAG, "Time initialized");
 }
@@ -1802,6 +1827,62 @@ static void start_web_server(void)
 {
     if (!web_server_running) {
         ESP_LOGI(TAG, "[WEB] GPIO trigger detected - starting web server with SoftAP");
+
+        // Check if WiFi needs to be initialized (SIM mode doesn't init WiFi by default)
+        system_config_t *config = get_system_config();
+        if (config && config->network_mode == NETWORK_MODE_SIM && !wifi_initialized_for_sim_mode) {
+            ESP_LOGI(TAG, "[WEB] SIM mode detected - initializing WiFi for web server...");
+
+            // Initialize WiFi in AP-only mode for web server
+            wifi_init_config_t wifi_cfg = WIFI_INIT_CONFIG_DEFAULT();
+            esp_err_t ret = esp_wifi_init(&wifi_cfg);
+            if (ret != ESP_OK && ret != ESP_ERR_WIFI_INIT_STATE) {
+                ESP_LOGE(TAG, "[ERROR] Failed to init WiFi: %s", esp_err_to_name(ret));
+                return;
+            }
+
+            // Create AP network interface if it doesn't exist
+            esp_netif_t *ap_netif = esp_netif_get_handle_from_ifkey("WIFI_AP_DEF");
+            if (ap_netif == NULL) {
+                ap_netif = esp_netif_create_default_wifi_ap();
+                ESP_LOGI(TAG, "[WEB] Created AP network interface");
+            }
+
+            // Set WiFi mode to AP only
+            ret = esp_wifi_set_mode(WIFI_MODE_AP);
+            if (ret != ESP_OK) {
+                ESP_LOGE(TAG, "[ERROR] Failed to set WiFi AP mode: %s", esp_err_to_name(ret));
+                return;
+            }
+
+            // Configure the SoftAP
+            wifi_config_t ap_config = {
+                .ap = {
+                    .ssid = "ModbusIoT-Config",
+                    .ssid_len = strlen("ModbusIoT-Config"),
+                    .channel = 6,
+                    .password = "config123",
+                    .max_connection = 4,
+                    .authmode = WIFI_AUTH_WPA_WPA2_PSK,
+                },
+            };
+            ret = esp_wifi_set_config(WIFI_IF_AP, &ap_config);
+            if (ret != ESP_OK) {
+                ESP_LOGE(TAG, "[ERROR] Failed to configure AP: %s", esp_err_to_name(ret));
+                return;
+            }
+
+            // Start WiFi
+            ret = esp_wifi_start();
+            if (ret != ESP_OK && ret != ESP_ERR_WIFI_STATE) {
+                ESP_LOGE(TAG, "[ERROR] Failed to start WiFi: %s", esp_err_to_name(ret));
+                return;
+            }
+
+            wifi_initialized_for_sim_mode = true;
+            ESP_LOGI(TAG, "[WEB] WiFi AP initialized successfully for SIM mode");
+        }
+
         esp_err_t ret = web_config_start_server_only();
         if (ret == ESP_OK) {
             web_server_running = true;
@@ -1825,6 +1906,17 @@ static void stop_web_server(void)
         web_config_stop();
         web_server_running = false;
         update_led_status();  // Update LED to show web server is stopped
+
+        // In SIM mode, stop WiFi to free up memory
+        system_config_t *config = get_system_config();
+        if (config && config->network_mode == NETWORK_MODE_SIM && wifi_initialized_for_sim_mode) {
+            ESP_LOGI(TAG, "[WEB] SIM mode - stopping WiFi to free memory...");
+            esp_wifi_stop();
+            esp_wifi_deinit();
+            wifi_initialized_for_sim_mode = false;
+            ESP_LOGI(TAG, "[WEB] WiFi stopped and deinitialized");
+        }
+
         ESP_LOGI(TAG, "[WEB] Web server stopped - returning to operation mode");
     } else {
         ESP_LOGI(TAG, "[WEB] Web server not running - ignoring trigger");
@@ -2508,8 +2600,7 @@ void app_main(void) {
         if (rtc_ret == ESP_OK) {
             ESP_LOGI(TAG, "[RTC] ✅ RTC initialized successfully");
 
-            // Sync system time FROM RTC immediately (before network connects)
-            // This ensures timestamps are accurate even if network fails
+            // Sync system time FROM RTC only if RTC has valid time (year >= 2024)
             rtc_ret = ds3231_sync_system_time();
             if (rtc_ret == ESP_OK) {
                 time_t now = time(NULL);
@@ -2517,9 +2608,18 @@ void app_main(void) {
                 gmtime_r(&now, &timeinfo);
                 char time_str[32];
                 strftime(time_str, sizeof(time_str), "%Y-%m-%d %H:%M:%S", &timeinfo);
-                ESP_LOGI(TAG, "[RTC] ✅ System time synced from RTC: %s UTC", time_str);
+
+                // Only accept RTC time if it's valid (year >= 2024)
+                if (timeinfo.tm_year >= (2024 - 1900)) {
+                    ESP_LOGI(TAG, "[RTC] ✅ System time synced from RTC: %s UTC", time_str);
+                } else {
+                    ESP_LOGW(TAG, "[RTC] ⚠️ RTC has invalid time (%s) - will sync from NTP", time_str);
+                    // Reset system time to epoch so NTP will try to sync
+                    struct timeval tv = { .tv_sec = 0, .tv_usec = 0 };
+                    settimeofday(&tv, NULL);
+                }
             } else {
-                ESP_LOGW(TAG, "[RTC] ⚠️ Could not sync system time from RTC");
+                ESP_LOGW(TAG, "[RTC] ⚠️ Could not read time from RTC");
             }
         } else {
             ESP_LOGW(TAG, "[RTC] ⚠️ RTC initialization failed: %s (optional feature - continuing)",
@@ -2720,14 +2820,23 @@ void app_main(void) {
     ESP_LOGI(TAG, "[TIME] 🕐 Initializing SNTP time synchronization...");
     initialize_time();
 
-    // If RTC is enabled, sync it with NTP time
+    // If RTC is enabled, sync it with NTP time ONLY if NTP succeeded (time is valid)
     if (config->rtc_config.enabled && is_network_connected()) {
-        ESP_LOGI(TAG, "[RTC] 🔄 Syncing RTC with NTP time...");
-        esp_err_t sync_ret = ds3231_update_from_system_time();
-        if (sync_ret == ESP_OK) {
-            ESP_LOGI(TAG, "[RTC] ✅ RTC synchronized with NTP");
+        time_t now = time(NULL);
+        struct tm timeinfo;
+        gmtime_r(&now, &timeinfo);
+
+        // Only update RTC if system time is valid (NTP succeeded)
+        if (timeinfo.tm_year >= (2024 - 1900)) {
+            ESP_LOGI(TAG, "[RTC] 🔄 Syncing RTC with NTP time...");
+            esp_err_t sync_ret = ds3231_update_from_system_time();
+            if (sync_ret == ESP_OK) {
+                ESP_LOGI(TAG, "[RTC] ✅ RTC synchronized with NTP");
+            } else {
+                ESP_LOGW(TAG, "[RTC] ⚠️ Failed to sync RTC: %s", esp_err_to_name(sync_ret));
+            }
         } else {
-            ESP_LOGW(TAG, "[RTC] ⚠️ Failed to sync RTC: %s", esp_err_to_name(sync_ret));
+            ESP_LOGW(TAG, "[RTC] ⚠️ NTP sync failed - NOT updating RTC with invalid time");
         }
     }
 
