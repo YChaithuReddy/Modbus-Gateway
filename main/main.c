@@ -105,6 +105,11 @@ static char telemetry_topic[256];
 static char telemetry_payload[8192];  // Increased to support up to 20 sensors
 static char c2d_topic[256];
 
+// Static buffers for telemetry to prevent heap fragmentation
+// These replace malloc/free calls that were causing memory exhaustion
+static sensor_reading_t telemetry_readings[20];  // Pre-allocated sensor readings
+static char telemetry_temp_json[MAX_JSON_PAYLOAD_SIZE];  // Pre-allocated JSON buffer
+
 // GPIO interrupt flag for web server toggle
 static volatile bool web_server_toggle_requested = false;
 static volatile bool system_shutdown_requested = false;
@@ -1370,17 +1375,12 @@ static void create_telemetry_payload(char* payload, size_t payload_size) {
         strncpy(net_stats.network_type, "Offline", sizeof(net_stats.network_type));
     }
 
-    // Dynamically allocate memory for sensor readings to avoid stack overflow
-    sensor_reading_t* readings = (sensor_reading_t*)malloc(20 * sizeof(sensor_reading_t));
-    char* temp_json = (char*)malloc(MAX_JSON_PAYLOAD_SIZE);
-
-    if (!readings || !temp_json) {
-        ESP_LOGE(TAG, "[ERROR] Failed to allocate memory for sensor readings");
-        if (readings) free(readings);
-        if (temp_json) free(temp_json);
-        payload[0] = '\0';
-        return;
-    }
+    // Use pre-allocated static buffers to prevent heap fragmentation
+    // (malloc/free pattern was causing memory exhaustion when web server is active)
+    sensor_reading_t* readings = telemetry_readings;
+    char* temp_json = telemetry_temp_json;
+    memset(readings, 0, sizeof(telemetry_readings));
+    memset(temp_json, 0, sizeof(telemetry_temp_json));
 
     int actual_count = 0;
     esp_err_t ret = sensor_read_all_configured(readings, 20, &actual_count);
@@ -1477,10 +1477,7 @@ static void create_telemetry_payload(char* payload, size_t payload_size) {
         ESP_LOGW(TAG, "[WARN] No valid sensor data available, skipping telemetry");
         payload[0] = '\0'; // Empty payload to indicate no data
     }
-    
-    // Free dynamically allocated memory
-    free(readings);
-    free(temp_json);
+    // No free() needed - using static buffers
 }
 
 static esp_err_t read_configured_sensors_data(void) {
@@ -2242,15 +2239,13 @@ static void telemetry_task(void *pvParameters)
 }
 
 static bool send_telemetry(void) {
-    static TickType_t last_actual_send_time = 0;
     static uint32_t call_counter = 0;
     static bool send_in_progress = false;
-    TickType_t current_time = xTaskGetTickCount();
     system_config_t* config = get_system_config();
 
     call_counter++;
-    ESP_LOGI(TAG, "[TRACK] send_telemetry() called #%lu, time=%lu, last_send=%lu, mqtt_connected=%d",
-             call_counter, current_time, last_actual_send_time, mqtt_connected);
+    ESP_LOGI(TAG, "[TRACK] send_telemetry() called #%lu, mqtt_connected=%d",
+             call_counter, mqtt_connected);
 
     // Check if a send is already in progress
     if (send_in_progress) {
@@ -2258,19 +2253,7 @@ static bool send_telemetry(void) {
         return false;
     }
 
-    // Check telemetry interval - respect configured interval for both online and offline caching
-    if (last_actual_send_time != 0) {
-        TickType_t elapsed_ticks = current_time - last_actual_send_time;
-        TickType_t interval_ticks = pdMS_TO_TICKS(config->telemetry_interval * 1000);
-
-        if (elapsed_ticks < interval_ticks) {
-            uint32_t elapsed_sec = elapsed_ticks * portTICK_PERIOD_MS / 1000;
-            ESP_LOGW(TAG, "[WARN] Telemetry interval not reached (%lu/%d sec), skipping call #%lu",
-                    elapsed_sec, config->telemetry_interval, call_counter);
-            return false;
-        }
-    }
-
+    // Note: Interval checking is handled by telemetry_task() - no duplicate check here
     send_in_progress = true;
 
     // Check network connectivity first
@@ -2300,7 +2283,6 @@ static bool send_telemetry(void) {
                 if (ret == ESP_OK) {
                     ESP_LOGI(TAG, "[SD] ✅ Telemetry cached to SD card - will replay when network reconnects");
                     send_in_progress = false;
-                    last_actual_send_time = current_time; // Update to respect telemetry interval
                     // Return FALSE to indicate not sent to cloud (only cached locally)
                     // Telemetry task will retry when network comes back online
                     return false;
@@ -2349,7 +2331,6 @@ static bool send_telemetry(void) {
                 if (ret == ESP_OK) {
                     ESP_LOGI(TAG, "[SD] ✅ Telemetry cached to SD card - will replay when MQTT reconnects");
                     send_in_progress = false;
-                    last_actual_send_time = current_time; // Update to respect telemetry interval
                     return false;
                 } else {
                     ESP_LOGE(TAG, "[SD] ❌ Failed to cache telemetry: %s", esp_err_to_name(ret));
@@ -2457,7 +2438,6 @@ static bool send_telemetry(void) {
         telemetry_send_count++;
         total_telemetry_sent++; // Increment counter for web interface (Azure IoT doesn't send PUBACK)
         last_telemetry_time = esp_timer_get_time() / 1000000; // Update last telemetry timestamp
-        last_actual_send_time = current_time; // Record successful send time
         last_successful_telemetry_time = esp_timer_get_time() / 1000000;  // For recovery timeout
         telemetry_failure_count = 0;  // Reset failure count on success
 
