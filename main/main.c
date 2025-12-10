@@ -159,6 +159,7 @@ static void perform_modem_reset(void);
 static void modem_reset_task(void *pvParameters);
 static void mqtt_task(void *pvParameters);
 static void telemetry_task(void *pvParameters);
+static void mqtt_event_handler(void *handler_args, esp_event_base_t base, int32_t event_id, void *event_data);
 
 // Function to add telemetry to history buffer
 static void add_telemetry_to_history(const char *payload, bool success) {
@@ -430,7 +431,7 @@ static void check_ntp_resync(void) {
                 // Update RTC if enabled
                 system_config_t* config = get_system_config();
                 if (config->rtc_config.enabled && config->rtc_config.update_from_ntp) {
-                    ds3231_set_time(&timeinfo);
+                    ds3231_set_time_tm(&timeinfo);
                     ESP_LOGI(TAG, "[NTP] ✅ RTC updated from NTP");
                 }
                 return;
