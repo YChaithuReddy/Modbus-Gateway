@@ -8286,6 +8286,21 @@ static void wifi_event_handler(void* arg, esp_event_base_t event_base,
     }
 }
 
+// Trigger WiFi reconnection attempt (called periodically from telemetry task)
+// Returns true if reconnection was initiated, false if already connected
+bool wifi_trigger_reconnect(void) {
+    wifi_ap_record_t ap_info;
+    if (esp_wifi_sta_get_ap_info(&ap_info) == ESP_OK) {
+        // Already connected, no need to reconnect
+        return false;
+    }
+
+    ESP_LOGI(TAG, "[WIFI] Triggering periodic WiFi reconnection attempt...");
+    s_wifi_retry_count = 0;  // Reset retry counter for new attempt
+    esp_wifi_connect();
+    return true;
+}
+
 // System status API handler
 static esp_err_t system_status_handler(httpd_req_t *req)
 {

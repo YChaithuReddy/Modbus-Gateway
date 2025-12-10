@@ -299,6 +299,44 @@ esp_err_t sd_card_check_space(uint64_t required_bytes) {
     return ESP_OK;
 }
 
+// Delete oldest messages to free up space
+static esp_err_t sd_card_cleanup_oldest_messages(uint32_t count_to_delete) {
+    if (count_to_delete == 0) return ESP_OK;
+
+    ESP_LOGI(TAG, "🧹 Cleaning up %lu oldest messages to free space...", count_to_delete);
+
+    FILE *file = fopen(pending_messages_file, "r");
+    if (file == NULL) {
+        return ESP_OK;  // No file means no messages to delete
+    }
+
+    // Find the oldest message IDs
+    char line[700];
+    uint32_t deleted = 0;
+
+    while (fgets(line, sizeof(line), file) != NULL && deleted < count_to_delete) {
+        line[strcspn(line, "\r\n")] = 0;
+        if (strlen(line) < 10) continue;
+
+        char *id_str = strtok(line, "|");
+        if (id_str != NULL) {
+            uint32_t msg_id = atoi(id_str);
+            fclose(file);
+            sd_card_remove_message(msg_id);
+            ESP_LOGI(TAG, "🗑️ Deleted old message ID %lu to free space", msg_id);
+            deleted++;
+
+            // Reopen file for next iteration
+            file = fopen(pending_messages_file, "r");
+            if (file == NULL) break;
+        }
+    }
+
+    if (file != NULL) fclose(file);
+    ESP_LOGI(TAG, "✅ Cleaned up %lu messages", deleted);
+    return ESP_OK;
+}
+
 // Save message to SD card (matching Arduino approach with added reliability)
 esp_err_t sd_card_save_message(const char* topic, const char* payload, const char* timestamp) {
     if (!sd_available) {
@@ -315,6 +353,21 @@ esp_err_t sd_card_save_message(const char* topic, const char* payload, const cha
     if (strlen(topic) > 128 || strlen(payload) > 512) {
         ESP_LOGE(TAG, "Message too large to save");
         return ESP_ERR_INVALID_SIZE;
+    }
+
+    // Check available space and cleanup if needed
+    uint64_t estimated_msg_size = strlen(topic) + strlen(payload) + 64;  // Extra for ID, timestamp, delimiters
+    if (sd_card_check_space(estimated_msg_size) != ESP_OK) {
+        ESP_LOGW(TAG, "⚠️ SD card low on space - cleaning up old messages...");
+
+        // Delete 10 oldest messages to make room
+        sd_card_cleanup_oldest_messages(10);
+
+        // Check again after cleanup
+        if (sd_card_check_space(estimated_msg_size) != ESP_OK) {
+            ESP_LOGE(TAG, "❌ SD card still full after cleanup - cannot save message");
+            return ESP_ERR_NO_MEM;
+        }
     }
 
     // Quick filesystem health check (verify mount point exists)
@@ -507,15 +560,33 @@ esp_err_t sd_card_replay_messages(void (*publish_callback)(const pending_message
             continue;
         }
 
-        // Validate timestamp - skip messages from 1970 (invalid RTC time)
+        // Validate timestamp - delete messages from 1970 (invalid RTC time)
         if (strncmp(timestamp, "1970-", 5) == 0) {
-            ESP_LOGW(TAG, "⏭️ Skipping message ID %s - invalid timestamp from 1970 (RTC was not set)", id_str);
+            uint32_t invalid_msg_id = atoi(id_str);
+            ESP_LOGW(TAG, "🗑️ Deleting message ID %s - invalid timestamp from 1970 (RTC was not set)", id_str);
+            // Close file, delete invalid message, reopen and continue
+            fclose(file);
+            sd_card_remove_message(invalid_msg_id);
+            // Reopen file and restart from beginning
+            file = fopen(pending_messages_file, "r");
+            if (file == NULL) {
+                ESP_LOGI(TAG, "No more pending messages after cleanup");
+                return ESP_OK;
+            }
             continue;
         }
 
-        // Validate topic - skip messages with placeholder device IDs
+        // Validate topic - delete messages with placeholder device IDs
         if (strstr(topic, "your-device-id") != NULL) {
-            ESP_LOGW(TAG, "⏭️ Skipping message ID %s - invalid topic with placeholder device ID", id_str);
+            uint32_t invalid_msg_id = atoi(id_str);
+            ESP_LOGW(TAG, "🗑️ Deleting message ID %s - invalid topic with placeholder device ID", id_str);
+            fclose(file);
+            sd_card_remove_message(invalid_msg_id);
+            file = fopen(pending_messages_file, "r");
+            if (file == NULL) {
+                ESP_LOGI(TAG, "No more pending messages after cleanup");
+                return ESP_OK;
+            }
             continue;
         }
 

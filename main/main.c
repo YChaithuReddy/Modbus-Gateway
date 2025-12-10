@@ -92,6 +92,15 @@ static uint32_t system_uptime_start = 0;
 int64_t mqtt_connect_time = 0;  // Timestamp when MQTT connected
 int64_t last_telemetry_time = 0;  // Timestamp of last telemetry sent
 
+// SAS Token management for auto-refresh
+static int64_t sas_token_generated_time = 0;  // When token was created (epoch seconds)
+static uint32_t sas_token_expiry_seconds = 3600;  // Token validity (1 hour)
+#define SAS_TOKEN_REFRESH_MARGIN_SEC 300  // Refresh 5 minutes before expiry
+
+// NTP periodic sync management
+static int64_t last_ntp_sync_time = 0;  // Last successful NTP sync (epoch seconds)
+#define NTP_RESYNC_INTERVAL_SEC (24 * 60 * 60)  // Re-sync every 24 hours
+
 // Recovery and monitoring variables
 static int64_t last_successful_telemetry_time = 0;  // For auto-recovery timeout
 static int64_t last_heartbeat_time = 0;             // For SD card heartbeat logging
@@ -376,10 +385,62 @@ static void initialize_time(void) {
 
     if (timeinfo.tm_year >= (2024 - 1900)) {
         ESP_LOGI(TAG, "[TIME] ✅ NTP sync successful - year %d", timeinfo.tm_year + 1900);
+        last_ntp_sync_time = time(NULL);  // Track sync time for periodic re-sync
     } else {
         ESP_LOGW(TAG, "[TIME] ⚠️ NTP sync failed - system time may be incorrect");
     }
     ESP_LOGI(TAG, "Time initialized");
+}
+
+// Check and perform periodic NTP re-sync (every 24 hours)
+static void check_ntp_resync(void) {
+    // Skip if not connected to network
+    if (!is_network_connected()) {
+        return;
+    }
+
+    time_t now = time(NULL);
+
+    // If last sync time not set, use current time (assume synced at boot)
+    if (last_ntp_sync_time == 0) {
+        last_ntp_sync_time = now;
+        return;
+    }
+
+    int64_t time_since_sync = now - last_ntp_sync_time;
+
+    // Re-sync if more than 24 hours since last sync
+    if (time_since_sync >= NTP_RESYNC_INTERVAL_SEC) {
+        ESP_LOGI(TAG, "[NTP] 🔄 Periodic NTP re-sync (last sync %lld hours ago)...",
+                 time_since_sync / 3600);
+
+        // Force SNTP to re-sync
+        esp_sntp_restart();
+
+        // Wait for sync (max 10 seconds)
+        struct tm timeinfo;
+        for (int i = 0; i < 10; i++) {
+            vTaskDelay(pdMS_TO_TICKS(1000));
+            time(&now);
+            localtime_r(&now, &timeinfo);
+            if (timeinfo.tm_year >= (2024 - 1900)) {
+                last_ntp_sync_time = now;
+                ESP_LOGI(TAG, "[NTP] ✅ NTP re-sync successful");
+
+                // Update RTC if enabled
+                system_config_t* config = get_system_config();
+                if (config->rtc_config.enabled && config->rtc_config.update_from_ntp) {
+                    ds3231_set_time(&timeinfo);
+                    ESP_LOGI(TAG, "[NTP] ✅ RTC updated from NTP");
+                }
+                return;
+            }
+        }
+
+        ESP_LOGW(TAG, "[NTP] ⚠️ NTP re-sync timeout - will retry later");
+        // Update sync time anyway to prevent repeated attempts
+        last_ntp_sync_time = now;
+    }
 }
 
 // URL encode function
@@ -505,9 +566,107 @@ static int generate_sas_token(char* token, size_t token_size, uint32_t expiry_se
     snprintf(token, token_size,
              "SharedAccessSignature sr=%s&sig=%s&se=%" PRIu32,
              encoded_uri, url_encoded_signature, expiry);
-    
+
+    // Track token generation time for auto-refresh
+    sas_token_generated_time = now;
+    sas_token_expiry_seconds = expiry_seconds;
+
     ESP_LOGI(TAG, "Generated SAS token: %.100s...", token);
+    ESP_LOGI(TAG, "[SAS] Token valid for %lu seconds (expires at %lu)", expiry_seconds, expiry);
     return 0;
+}
+
+// Check if SAS token needs refresh (returns true if token will expire soon)
+static bool sas_token_needs_refresh(void) {
+    if (sas_token_generated_time == 0) {
+        return false;  // Token not generated yet
+    }
+
+    time_t now = time(NULL);
+    int64_t token_age = now - sas_token_generated_time;
+    int64_t time_until_expiry = sas_token_expiry_seconds - token_age;
+
+    // Refresh if less than 5 minutes until expiry
+    if (time_until_expiry <= SAS_TOKEN_REFRESH_MARGIN_SEC) {
+        ESP_LOGW(TAG, "[SAS] Token expires in %lld seconds - refresh needed", time_until_expiry);
+        return true;
+    }
+
+    return false;
+}
+
+// Refresh SAS token and reconnect MQTT client
+static esp_err_t refresh_sas_token_and_reconnect(void) {
+    ESP_LOGI(TAG, "[SAS] 🔄 Refreshing SAS token...");
+
+    // Generate new SAS token (valid for 1 hour)
+    if (generate_sas_token(sas_token, sizeof(sas_token), 3600) != 0) {
+        ESP_LOGE(TAG, "[SAS] ❌ Failed to generate new SAS token");
+        return ESP_FAIL;
+    }
+
+    ESP_LOGI(TAG, "[SAS] ✅ New SAS token generated");
+
+    // Stop existing MQTT client
+    if (mqtt_client != NULL) {
+        ESP_LOGI(TAG, "[SAS] Stopping existing MQTT client...");
+        esp_mqtt_client_stop(mqtt_client);
+        vTaskDelay(pdMS_TO_TICKS(1000));
+        esp_mqtt_client_destroy(mqtt_client);
+        mqtt_client = NULL;
+        mqtt_connected = false;
+    }
+
+    // Reinitialize MQTT client with new token
+    ESP_LOGI(TAG, "[SAS] Reinitializing MQTT client with new token...");
+
+    system_config_t* config = get_system_config();
+
+    // Recreate MQTT username (same format as initialize_mqtt_client)
+    snprintf(mqtt_username, sizeof(mqtt_username), "%s/%s/?api-version=2018-06-30",
+             IOT_CONFIG_IOTHUB_FQDN, config->azure_device_id);
+
+    esp_mqtt_client_config_t mqtt_config = {
+        .broker.address.uri = mqtt_broker_uri,
+        .broker.address.port = 8883,
+        .credentials.client_id = config->azure_device_id,
+        .credentials.username = mqtt_username,
+        .credentials.authentication.password = sas_token,
+        .session.keepalive = 30,
+        .session.disable_clean_session = 0,
+        .session.protocol_ver = MQTT_PROTOCOL_V_3_1_1,
+        .network.disable_auto_reconnect = false,
+        .broker.verification.crt_bundle_attach = esp_crt_bundle_attach,
+    };
+
+    mqtt_client = esp_mqtt_client_init(&mqtt_config);
+    if (mqtt_client == NULL) {
+        ESP_LOGE(TAG, "[SAS] ❌ Failed to reinitialize MQTT client");
+        return ESP_FAIL;
+    }
+
+    ESP_ERROR_CHECK(esp_mqtt_client_register_event(mqtt_client, ESP_EVENT_ANY_ID, mqtt_event_handler, NULL));
+
+    esp_err_t start_result = esp_mqtt_client_start(mqtt_client);
+    if (start_result != ESP_OK) {
+        ESP_LOGE(TAG, "[SAS] ❌ Failed to start MQTT client: %s", esp_err_to_name(start_result));
+        return ESP_FAIL;
+    }
+
+    ESP_LOGI(TAG, "[SAS] ✅ MQTT client restarted with new SAS token");
+    ESP_LOGI(TAG, "[SAS] Waiting for MQTT reconnection...");
+
+    // Wait for connection (max 10 seconds)
+    for (int i = 0; i < 10; i++) {
+        vTaskDelay(pdMS_TO_TICKS(1000));
+        if (mqtt_connected) {
+            ESP_LOGI(TAG, "[SAS] ✅ MQTT reconnected successfully after token refresh!");
+            return ESP_OK;
+        }
+    }
+
+    ESP_LOGW(TAG, "[SAS] ⚠️ MQTT not reconnected yet - will continue trying in background");
+    return ESP_OK;  // MQTT client will auto-reconnect
 }
 
 // Callback function for replaying cached SD card messages to MQTT
@@ -2092,22 +2251,49 @@ static void mqtt_task(void *pvParameters)
         return;
     }
 
-    // Initialize MQTT client
-    if (initialize_mqtt_client() != 0) {
-        ESP_LOGE(TAG, "[ERROR] Failed to initialize MQTT client");
-        vTaskDelete(NULL);
-        return;
+    // Initialize MQTT client (may fail if network not ready at startup)
+    bool mqtt_initialized = (initialize_mqtt_client() == 0);
+    if (!mqtt_initialized) {
+        ESP_LOGW(TAG, "[WARN] MQTT initialization failed - will retry when network available");
     }
-    
+
     while (1) {
         // Check for shutdown request only (web server toggle doesn't affect MQTT)
         if (system_shutdown_requested) {
             ESP_LOGI(TAG, "[NET] MQTT task exiting due to shutdown request");
             break;
         }
-        
+
+        // If MQTT not initialized yet, try to initialize when network becomes available
+        if (!mqtt_initialized && is_network_connected()) {
+            ESP_LOGI(TAG, "[MQTT] Network available - attempting MQTT initialization...");
+            mqtt_initialized = (initialize_mqtt_client() == 0);
+            if (mqtt_initialized) {
+                ESP_LOGI(TAG, "[MQTT] ✅ MQTT client initialized successfully after network reconnect");
+            } else {
+                ESP_LOGW(TAG, "[MQTT] ⚠️ MQTT initialization still failing - will retry in 30 seconds");
+                vTaskDelay(pdMS_TO_TICKS(30000));  // Wait before retry
+                continue;
+            }
+        }
+
+        // Check SAS token expiry and refresh if needed (before it expires)
+        // This prevents MQTT disconnection due to expired authentication
+        if (mqtt_initialized && is_network_connected() && sas_token_needs_refresh()) {
+            ESP_LOGI(TAG, "[SAS] 🔄 SAS token expiring soon - initiating refresh...");
+            if (refresh_sas_token_and_reconnect() == ESP_OK) {
+                ESP_LOGI(TAG, "[SAS] ✅ SAS token refreshed successfully - MQTT will reconnect");
+            } else {
+                ESP_LOGE(TAG, "[SAS] ❌ SAS token refresh failed - will retry next cycle");
+            }
+        }
+
+        // Check for periodic NTP re-sync (every 24 hours)
+        // This ensures time stays accurate for TLS certificate validation and timestamps
+        check_ntp_resync();
+
         // Handle MQTT events and maintain connection
-        if (!mqtt_connected) {
+        if (mqtt_initialized && !mqtt_connected) {
             ESP_LOGW(TAG, "[WARN] MQTT disconnected, checking connection...");
         }
 
@@ -2156,16 +2342,16 @@ static void telemetry_task(void *pvParameters)
     system_config_t* config = get_system_config();
     TickType_t last_send_time = 0;
     bool first_telemetry_sent = false;
-    
+
     while (1) {
         // Check for shutdown request only (web server toggle doesn't affect telemetry)
         if (system_shutdown_requested) {
             ESP_LOGI(TAG, "[DATA] Telemetry task exiting due to shutdown request");
             break;
         }
-        
+
         TickType_t current_time = xTaskGetTickCount();
-        
+
         // For first telemetry: wait for valid sensor data, then send immediately
         // For subsequent telemetry: follow normal interval
         bool should_send_telemetry = false;
@@ -2208,6 +2394,70 @@ static void telemetry_task(void *pvParameters)
         }
         
         if (should_send_telemetry) {
+            // Check network connection before sending telemetry
+            // If disconnected, try to reconnect before sending
+            if (!is_network_connected()) {
+                if (config->network_mode == NETWORK_MODE_WIFI) {
+                    // WiFi mode: trigger WiFi reconnection
+                    ESP_LOGI(TAG, "[WIFI] Network disconnected - attempting reconnection before telemetry...");
+                    wifi_trigger_reconnect();
+
+                    // Wait for connection to establish (max 15 seconds)
+                    for (int i = 0; i < 15; i++) {
+                        vTaskDelay(pdMS_TO_TICKS(1000));
+                        if (is_network_connected()) {
+                            ESP_LOGI(TAG, "[WIFI] ✅ WiFi reconnected successfully!");
+                            break;
+                        }
+                    }
+
+                    if (!is_network_connected()) {
+                        ESP_LOGW(TAG, "[WIFI] ⚠️ WiFi reconnection failed - will cache to SD card");
+                    }
+                } else if (config->network_mode == NETWORK_MODE_SIM) {
+                    // SIM mode: trigger PPP reconnection
+                    ESP_LOGI(TAG, "[SIM] PPP disconnected - attempting reconnection before telemetry...");
+
+                    // Try to reconnect PPP
+                    esp_err_t ppp_ret = a7670c_ppp_connect();
+                    if (ppp_ret == ESP_OK) {
+                        // Wait for PPP connection to establish (max 30 seconds)
+                        for (int i = 0; i < 30; i++) {
+                            vTaskDelay(pdMS_TO_TICKS(1000));
+                            if (is_network_connected()) {
+                                ESP_LOGI(TAG, "[SIM] ✅ PPP reconnected successfully!");
+                                break;
+                            }
+                            if (i % 10 == 9) {
+                                ESP_LOGI(TAG, "[SIM] Still waiting for PPP... (%d/30)", i + 1);
+                            }
+                        }
+                    }
+
+                    if (!is_network_connected()) {
+                        ESP_LOGW(TAG, "[SIM] ⚠️ PPP reconnection failed - will cache to SD card");
+                    }
+                }
+            }
+
+            // If network is connected, verify internet connectivity (WiFi connected but no internet scenario)
+            // Only check occasionally to avoid overhead (every 10th telemetry or when MQTT is disconnected)
+            static uint8_t internet_check_counter = 0;
+            internet_check_counter++;
+            if (is_network_connected() && !mqtt_connected && (internet_check_counter % 5 == 0)) {
+                ESP_LOGI(TAG, "[NET] Verifying internet connectivity...");
+                if (test_internet_connectivity() != ESP_OK) {
+                    ESP_LOGW(TAG, "[NET] ⚠️ WiFi connected but no internet - triggering reconnection");
+                    if (config->network_mode == NETWORK_MODE_WIFI) {
+                        // WiFi connected but no internet - disconnect and reconnect
+                        esp_wifi_disconnect();
+                        vTaskDelay(pdMS_TO_TICKS(2000));
+                        wifi_trigger_reconnect();
+                        vTaskDelay(pdMS_TO_TICKS(10000));  // Wait for reconnection
+                    }
+                }
+            }
+
             // Always call send_telemetry() - it will handle SD caching if MQTT is disconnected
             bool telemetry_success = send_telemetry();
 
