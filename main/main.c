@@ -2158,49 +2158,26 @@ static void modbus_task(void *pvParameters)
     }
 
     ESP_LOGI(TAG, "╔══════════════════════════════════════════════════════════╗");
-    ESP_LOGI(TAG, "║         🔌 MODBUS READER TASK STARTED 🔌                 ║");
+    ESP_LOGI(TAG, "║         🔌 MODBUS MONITOR TASK STARTED 🔌                ║");
     ESP_LOGI(TAG, "╚══════════════════════════════════════════════════════════╝");
     ESP_LOGI(TAG, "[CONFIG] Modbus task started on core %d", xPortGetCoreID());
     ESP_LOGI(TAG, "[CONFIG] Stack: 8192 bytes | Priority: 5");
+    ESP_LOGI(TAG, "[CONFIG] Sensor reading handled by Telemetry Task");
 
     if (startup_log_mutex != NULL) {
         xSemaphoreGive(startup_log_mutex);
     }
-    
+
+    // NOTE: Sensor reading is now done in telemetry_task -> create_telemetry_payload()
+    // This task only monitors for shutdown/toggle requests and keeps the task handle alive
+
     while (1) {
-        if (read_configured_sensors_data() == ESP_OK) {
-            // Mark sensors as responding for LED status
-            sensors_responding = true;
-            
-            // Send data to telemetry task via queue
-            if (sensor_data_queue != NULL) {
-                BaseType_t result = xQueueSend(sensor_data_queue, &current_flow_data, pdMS_TO_TICKS(100));
-                if (result != pdTRUE) {
-                    // Clear the queue if it's full and try again
-                    ESP_LOGW(TAG, "[WARN] Queue full, clearing old data and retrying...");
-                    xQueueReset(sensor_data_queue);
-                    result = xQueueSend(sensor_data_queue, &current_flow_data, 0);
-                    if (result != pdTRUE) {
-                        ESP_LOGW(TAG, "[WARN] Still failed to send sensor data to queue");
-                    } else {
-                        ESP_LOGI(TAG, "[OK] Sensor data sent to queue after clearing");
-                    }
-                } else {
-                    ESP_LOGI(TAG, "[OK] Sensor data sent to queue successfully");
-                }
-            }
-        } else {
-            // Mark sensors as not responding if read failed
-            sensors_responding = false;
-        }
-        
         // Check for web server toggle request (handled by main monitoring loop)
         if (web_server_toggle_requested) {
             ESP_LOGI(TAG, "[WEB] Web server toggle requested via GPIO - signaling main loop");
             // Just set the flag, main loop will handle the transition
-            // Don't break - continue operation while web server toggles
         }
-        
+
         // Check for shutdown request
         if (system_shutdown_requested) {
             ESP_LOGI(TAG, "[CONFIG] Modbus task exiting due to shutdown request");
@@ -2208,10 +2185,11 @@ static void modbus_task(void *pvParameters)
             vTaskDelete(NULL);
             return;
         }
-        
-        vTaskDelay(pdMS_TO_TICKS(120000)); // Read every 2 minutes (120 seconds)
+
+        // Sleep for a long time - this task is just a monitor now
+        vTaskDelay(pdMS_TO_TICKS(30000)); // Check every 30 seconds
     }
-    
+
     // Task exiting normally (due to config mode request)
     ESP_LOGI(TAG, "[CONFIG] Modbus task exiting normally");
     modbus_task_handle = NULL;
@@ -2342,7 +2320,10 @@ static void telemetry_task(void *pvParameters)
     
     system_config_t* config = get_system_config();
     TickType_t last_send_time = 0;
-    bool first_telemetry_sent = false;
+
+    // Wait a bit before first telemetry to let system stabilize
+    ESP_LOGI(TAG, "[DATA] Waiting 10 seconds before first telemetry...");
+    vTaskDelay(pdMS_TO_TICKS(10000));
 
     while (1) {
         // Check for shutdown request only (web server toggle doesn't affect telemetry)
@@ -2353,46 +2334,8 @@ static void telemetry_task(void *pvParameters)
 
         TickType_t current_time = xTaskGetTickCount();
 
-        // For first telemetry: wait for valid sensor data, then send immediately
-        // For subsequent telemetry: follow normal interval
-        bool should_send_telemetry = false;
-        
-        if (!first_telemetry_sent) {
-            // First telemetry: check if we have valid sensor data from modbus task
-            flow_meter_data_t received_data;
-            if (xQueueReceive(sensor_data_queue, &received_data, pdMS_TO_TICKS(100)) == pdTRUE) {
-                current_flow_data = received_data;
-                ESP_LOGI(TAG, "[RECV] Received first sensor data from queue - sending immediate telemetry");
-                should_send_telemetry = true;
-                first_telemetry_sent = true;
-                last_send_time = current_time;
-            }
-        } else {
-            // Subsequent telemetry: follow normal interval
-            // Check if enough time has passed since last successful send
-            bool interval_ready = (current_time - last_send_time) >= pdMS_TO_TICKS(config->telemetry_interval * 1000);
-            
-            if (interval_ready) {
-                // Try to receive fresh sensor data from queue (get the latest data)
-                flow_meter_data_t received_data;
-                bool got_fresh_data = false;
-                
-                // Clear all old data from queue and get the most recent
-                while (xQueueReceive(sensor_data_queue, &received_data, 0) == pdTRUE) {
-                    current_flow_data = received_data;
-                    got_fresh_data = true;
-                }
-                
-                if (got_fresh_data) {
-                    ESP_LOGI(TAG, "[RECV] Received fresh sensor data from queue (cleared old data)");
-                } else {
-                    ESP_LOGI(TAG, "[RECV] No new sensor data, using previous data for telemetry");
-                }
-                
-                should_send_telemetry = true;
-                // DON'T update last_send_time here - wait for successful transmission
-            }
-        }
+        // Check if enough time has passed since last send (based on telemetry_interval)
+        bool should_send_telemetry = (current_time - last_send_time) >= pdMS_TO_TICKS(config->telemetry_interval * 1000);
         
         if (should_send_telemetry) {
             // Check network connection before sending telemetry
