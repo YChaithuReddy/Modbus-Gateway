@@ -2210,11 +2210,14 @@ static void telemetry_task(void *pvParameters)
         if (should_send_telemetry) {
             // Always call send_telemetry() - it will handle SD caching if MQTT is disconnected
             bool telemetry_success = send_telemetry();
-            // Update last_send_time AFTER successful telemetry call
-            if (telemetry_success && first_telemetry_sent) {
-                // For subsequent telemetries, only update timestamp after successful send
-                last_send_time = current_time;
-                ESP_LOGI(TAG, "[OK] Telemetry timestamp updated after successful send");
+
+            // ALWAYS update last_send_time after attempting telemetry
+            // This ensures we respect the interval even when caching to SD card
+            // Otherwise we'd cache every 5 seconds instead of every 300 seconds
+            last_send_time = current_time;
+
+            if (telemetry_success) {
+                ESP_LOGI(TAG, "[OK] Telemetry sent to MQTT successfully");
 
                 // Mark OTA firmware as valid after first successful telemetry
                 // This prevents automatic rollback once system is confirmed working
@@ -2224,8 +2227,8 @@ static void telemetry_task(void *pvParameters)
                     ESP_LOGI(TAG, "[OTA] Firmware marked as valid after successful telemetry");
                     ota_marked_valid = true;
                 }
-            } else if (!telemetry_success) {
-                ESP_LOGW(TAG, "[WARN] Telemetry failed - timestamp not updated, will retry on next interval");
+            } else {
+                ESP_LOGW(TAG, "[WARN] Telemetry not sent to MQTT (cached to SD or skipped) - next attempt in %d seconds", config->telemetry_interval);
             }
         }
         
