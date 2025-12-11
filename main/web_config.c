@@ -2060,7 +2060,7 @@ static esp_err_t config_page_handler(httpd_req_t *req)
         "</div>");  // Close wifi section and wifi_panel wrapper
     httpd_resp_sendstr_chunk(req, chunk);
 
-    // SIM Configuration Panel (shown when SIM mode selected)
+    // SIM Configuration Panel - Part 1: Cellular Network Settings
     snprintf(chunk, sizeof(chunk),
         "<div id='sim_panel' style='display:%s'>"
         "<div>"
@@ -2086,7 +2086,15 @@ static esp_err_t config_page_handler(httpd_req_t *req)
         "<small style='color:#888;display:block;margin-top:5px;font-size:13px'>Leave blank if not required by carrier</small>"
         "</div>"
         "</div>"
-        "</div>"
+        "</div>",
+        g_system_config.network_mode == 1 ? "block" : "none",
+        g_system_config.sim_config.apn,
+        g_system_config.sim_config.apn_user,
+        g_system_config.sim_config.apn_pass);
+    httpd_resp_sendstr_chunk(req, chunk);
+
+    // SIM Configuration Panel - Part 2: Hardware Configuration
+    snprintf(chunk, sizeof(chunk),
         "<div class='sensor-card' style='padding:25px'>"
         "<h3 style='text-align:center;margin-bottom:20px;color:#17a2b8'>Hardware Configuration</h3>"
         "<div style='display:grid;grid-template-columns:120px 1fr;gap:20px;align-items:start;margin-bottom:20px'>"
@@ -2139,10 +2147,6 @@ static esp_err_t config_page_handler(httpd_req_t *req)
         "</form>"
         "</div>"
         "</div>",
-        g_system_config.network_mode == 1 ? "block" : "none",
-        g_system_config.sim_config.apn,
-        g_system_config.sim_config.apn_user,
-        g_system_config.sim_config.apn_pass,
         g_system_config.sim_config.uart_num == 1 ? "selected" : "",
         g_system_config.sim_config.uart_num == 2 ? "selected" : "",
         g_system_config.sim_config.uart_tx_pin,
