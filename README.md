@@ -1,14 +1,14 @@
-# Fluxgen ESP32 Modbus IoT Gateway - Stable Release
+# Fluxgen ESP32 Modbus IoT Gateway - Production Release
 
-[![Stable Release](https://img.shields.io/badge/Status-STABLE-brightgreen.svg)](PRODUCTION_GUIDE.md)
-[![Version](https://img.shields.io/badge/Version-1.1.0-blue.svg)](VERSION.md)
-[![ESP-IDF](https://img.shields.io/badge/ESP--IDF-v5.4-orange.svg)](https://docs.espressif.com/projects/esp-idf/en/v5.4/)
+[![Production Ready](https://img.shields.io/badge/Status-PRODUCTION-brightgreen.svg)](PRODUCTION_GUIDE.md)
+[![Version](https://img.shields.io/badge/Version-1.2.0-blue.svg)](VERSION.md)
+[![ESP-IDF](https://img.shields.io/badge/ESP--IDF-v5.5.1-orange.svg)](https://docs.espressif.com/projects/esp-idf/en/v5.5.1/)
 [![64-bit Support](https://img.shields.io/badge/64--bit-Complete-purple.svg)](#)
 [![License](https://img.shields.io/badge/License-Industrial-yellow.svg)](#)
 
 ## Professional Industrial IoT Gateway
 
-A production-ready ESP32-based Modbus IoT gateway designed for industrial environments. Features real-time RS485 Modbus communication, comprehensive ScadaCore data format support, SD card offline caching, and seamless Azure IoT Hub integration.
+A production-ready ESP32-based Modbus IoT gateway designed for **unattended remote deployment**. Features real-time RS485 Modbus communication, comprehensive ScadaCore data format support, SD card offline caching, autonomous recovery, and seamless Azure IoT Hub integration.
 
 ## Key Features
 
@@ -29,14 +29,23 @@ A production-ready ESP32-based Modbus IoT gateway designed for industrial enviro
 ### Enterprise Cloud Integration
 - **Azure IoT Hub connectivity** with secure MQTT communication
 - **Configurable telemetry intervals** (30-3600 seconds)
-- **Automatic reconnection** and error recovery
+- **Automatic reconnection** with exponential backoff (up to 20 retries)
 - **Persistent configuration** in flash memory
 - **SD Card offline caching** with chronological replay
 
 ### Dual Connectivity Modes
-- **WiFi Mode** - Connect to existing WiFi networks
+- **WiFi Mode** - Connect to existing WiFi networks (with USB dongle support)
 - **SIM/4G Mode** - A7670C cellular modem with PPP support
 - **Automatic failover** and recovery
+
+### Autonomous Recovery (v1.2.0)
+- **No system restarts** on network errors - caches data instead
+- **WiFi dongle power cycling** with 5-minute cooldown
+- **Automatic MQTT reconnection** with exponential backoff
+- **SD card caching** during network outages
+- **First telemetry** sent immediately after boot (~10-20 seconds)
+- **Watchdog protection** - 2-minute timeout if main loop stuck
+- **Telemetry timeout** - Force restart if no successful send for 30 minutes
 
 ## Supported Sensor Types
 
@@ -101,36 +110,88 @@ A production-ready ESP32-based Modbus IoT gateway designed for industrial enviro
 - **BOOL** - Boolean
 - **PDU** - Protocol Data Unit
 
-## Quick Start
+## Hardware Connections
 
-### 1. Hardware Setup
+### ESP32 Pin Configuration
 ```
 ESP32 Connections:
-├── GPIO 16 (RX2)  → RS485 RO (Receive)
-├── GPIO 17 (TX2)  → RS485 DI (Transmit)
-├── GPIO 18 (RTS)  → RS485 DE/RE (Direction)
-├── GPIO 23 (MOSI) → SD Card MOSI
-├── GPIO 19 (MISO) → SD Card MISO
-├── GPIO 5  (CLK)  → SD Card CLK
-├── GPIO 15 (CS)   → SD Card CS
-└── GND            → Common Ground
+├── RS485 Module
+│   ├── GPIO 16 (RX2)  → RS485 RO (Receive)
+│   ├── GPIO 17 (TX2)  → RS485 DI (Transmit)
+│   └── GPIO 18 (RTS)  → RS485 DE/RE (Direction)
+│
+├── SD Card Module (SPI)
+│   ├── GPIO 15 (CS)   → SD Card CS
+│   ├── GPIO 13 (MOSI) → SD Card MOSI
+│   ├── GPIO 12 (MISO) → SD Card MISO
+│   └── GPIO 14 (CLK)  → SD Card CLK
+│
+├── A7670C SIM Module (Optional)
+│   ├── GPIO 26 (TX)   → SIM Module RX
+│   ├── GPIO 27 (RX)   → SIM Module TX
+│   └── GPIO 4  (PWR)  → SIM Module Power Control
+│
+├── WiFi USB Dongle (Optional)
+│   └── GPIO 2  (PWR)  → Dongle Power Control (via relay/MOSFET)
+│
+└── GND                → Common Ground
 ```
 
-### 2. Build and Flash
+### Important GPIO Notes
+- **GPIO 15** is used by SD Card CS - Do NOT use for SIM reset pin
+- **GPIO 2** controls WiFi dongle power cycling (if enabled)
+- **GPIO 4** controls SIM module power cycling
+
+## Quick Start
+
+### 1. Build and Flash
 ```bash
-git clone <repository-url>
+git clone https://github.com/YChaithuReddy/Modbus-Gateway.git
 cd modbus_iot_gateway
 idf.py build
-idf.py -p /dev/ttyUSB0 flash monitor
+idf.py -p COM3 flash monitor      # Windows
+idf.py -p /dev/ttyUSB0 flash monitor  # Linux
 ```
 
-### 3. Configure via Web Interface
+### 2. Configure via Web Interface
 1. Connect to WiFi: `FluxGen-Gateway` (password: `fluxgen123`)
 2. Open browser: `http://192.168.4.1`
 3. Configure WiFi or SIM settings
 4. Configure Azure IoT Hub credentials
 5. Add sensors with appropriate type selection
 6. Test each sensor using Test RS485 feature
+
+### 3. Deploy to Field
+1. Power on the gateway
+2. First telemetry sends within ~20 seconds
+3. System automatically recovers from network issues
+4. Data cached to SD card during outages
+
+## Production Configuration
+
+### Configuration Constants (iot_configs.h)
+
+| Parameter | Value | Description |
+|-----------|-------|-------------|
+| `TELEMETRY_FREQUENCY_MILLISECS` | 300000 | 5 minutes between telemetry |
+| `MAX_MQTT_RECONNECT_ATTEMPTS` | 20 | Retries before giving up |
+| `SYSTEM_RESTART_ON_CRITICAL_ERROR` | false | Cache to SD instead of restart |
+| `WATCHDOG_TIMEOUT_SEC` | 120 | 2 minutes - restart if stuck |
+| `TELEMETRY_TIMEOUT_SEC` | 1800 | 30 minutes - force restart if no telemetry |
+| `HEARTBEAT_LOG_INTERVAL_SEC` | 300 | 5 minutes - log to SD card |
+| `MODEM_RESET_COOLDOWN_SEC` | 300 | 5 minutes between dongle resets |
+
+### Autonomous Recovery Behavior
+
+| Scenario | System Behavior |
+|----------|-----------------|
+| WiFi disconnects | Retries 20 times with backoff, caches to SD |
+| MQTT fails | Reconnects with exponential backoff |
+| Network down >5 min | Power cycles WiFi dongle (once per 5 min) |
+| Network restored | Sends cached data FIRST, then live data |
+| Sensor read fails | Logs error, continues with other sensors |
+| SD card missing | Warning logged, telemetry still sent when online |
+| Main loop stuck | Watchdog restarts system after 2 minutes |
 
 ## SD Card Offline Caching
 
@@ -171,10 +232,11 @@ For flow meters and totalizers, data must be sent in chronological order:
 
 ### Settings
 - WiFi configuration with network scanning
-- SIM/4G modem settings
+- SIM/4G modem settings (Reset pin defaults to -1, disabled)
 - Azure IoT Hub credentials
 - Telemetry interval configuration
 - SD Card enable/disable
+- Modem reset GPIO configuration
 
 ## Project Structure
 
@@ -182,7 +244,7 @@ For flow meters and totalizers, data must be sent in chronological order:
 modbus_iot_gateway/
 ├── main/
 │   ├── main.c              # Main application and task management
-│   ├── web_config.c        # Web interface (609KB - handle with care!)
+│   ├── web_config.c        # Web interface (687KB - handle with care!)
 │   ├── web_config.h        # Configuration structures
 │   ├── sensor_manager.c    # Sensor data processing
 │   ├── modbus.c            # RS485 Modbus RTU implementation
@@ -193,46 +255,69 @@ modbus_iot_gateway/
 │   └── gpio_map.h          # GPIO pin definitions
 ├── CLAUDE.md               # Development guidelines
 ├── README.md               # This file
+├── HARDWARE_CONNECTIONS.md # Detailed wiring guide
 └── sdkconfig               # ESP-IDF configuration
 ```
 
-## Recent Updates (v1.1.0)
+## Version History
 
-### New Sensor Types
-- **Panda EMF** - INT32_BE + FLOAT32_BE totalizer format
-- **Panda Level** - UINT16 with percentage calculation
-- **Clampon** - UINT32_BADC + FLOAT32_BADC format
-- **Dailian EMF** - UINT32 word-swapped totalizer
+### v1.2.0 (Current) - Production Autonomous Release
+**Autonomous Recovery Features:**
+- System no longer restarts on network errors (caches to SD instead)
+- Added 5-minute cooldown between WiFi dongle resets
+- First telemetry sends immediately after boot (~10-20 seconds)
+- Fixed GPIO 15 conflict between SD card CS and SIM reset pin
+- SIM reset pin now defaults to -1 (disabled)
+- Increased MQTT reconnect attempts from 5 to 20
+- Split large web_config.c sections to prevent buffer overflow
 
-### Bug Fixes
-- Fixed Test RS485 display for all flow meter types (was showing incorrect values)
-- Fixed ScadaCore table header visibility (missing white text color)
-- Fixed success page styling to match main theme
+**Bug Fixes:**
+- Fixed modem reset cycling continuously
+- Fixed first telemetry waiting full interval instead of sending after boot
+- Fixed SD card initialization failure (GPIO conflict)
+
+### v1.1.0 - Stable Release
+**New Sensor Types:**
+- Panda EMF - INT32_BE + FLOAT32_BE totalizer format
+- Panda Level - UINT16 with percentage calculation
+- Clampon - UINT32_BADC + FLOAT32_BADC format
+- Dailian EMF - UINT32 word-swapped totalizer
+
+**Bug Fixes:**
+- Fixed Test RS485 display for all flow meter types
+- Fixed ScadaCore table header visibility
+- Fixed success page styling
 - Fixed buffer overflow in success page
 
-### Improvements
-- **Offline data priority** - Cached data sent BEFORE live data when network resumes
-- **Memory optimization** - Skip MQTT/telemetry tasks in setup mode
-- **PPP recovery** - Better handling of modem reset on reboot
-- **TLS certificates** - Added certificate bundle for SIM mode
+**Improvements:**
+- Offline data priority - Cached data sent BEFORE live data
+- Memory optimization - Skip MQTT/telemetry tasks in setup mode
+- PPP recovery - Better handling of modem reset on reboot
 
-## Production Deployment
+### v1.0.0 - Initial Release
+- RS485 Modbus RTU communication
+- Azure IoT Hub integration
+- WiFi and SIM connectivity
+- Web configuration interface
+- SD card offline caching
 
-### System Requirements
-- **Hardware**: ESP32-WROOM-32 with 4MB flash
-- **Power**: 3.3V regulated, 500mA minimum
-- **Communication**: RS485 transceiver (MAX485/SP485)
-- **Storage**: MicroSD card (FAT32, 2GB-16GB recommended)
-- **Network**: WiFi 802.11b/g/n or 4G SIM card
+## Future Roadmap
 
-### Deployment Checklist
-- [ ] Hardware properly wired and tested
-- [ ] RS485 network with proper termination
-- [ ] SD card formatted as FAT32 and inserted
-- [ ] WiFi or SIM credentials configured
-- [ ] Azure IoT Hub device provisioned
-- [ ] All sensors configured and tested
-- [ ] Offline caching verified
+### Stage 2: Remote Management (Planned)
+- OTA firmware updates via Azure
+- Device Twin for remote configuration
+- Cloud-to-Device (C2D) commands
+
+### Stage 3: Monitoring & Alerts (Planned)
+- Threshold-based alerts
+- Health monitoring dashboard
+- Remote diagnostic logs
+
+### Stage 4: Advanced Features (Planned)
+- Multi-device fleet management
+- Power BI integration
+- Edge processing/local rules
+- Secure boot
 
 ## Troubleshooting
 
@@ -245,14 +330,33 @@ modbus_iot_gateway/
 ### SD Card Issues
 1. Format as FAT32 (not exFAT)
 2. Use 2GB-16GB card (Class 4 or 10)
-3. Check wiring: MOSI=23, MISO=19, CLK=5, CS=15
-4. Try SanDisk, Samsung, or Kingston brand
+3. Check wiring: CS=15, MOSI=13, MISO=12, CLK=14
+4. Ensure SIM reset pin is set to -1 (GPIO 15 conflict)
 
 ### MQTT Connection Issues
 1. Verify Azure IoT Hub credentials
 2. Check network connectivity
 3. Verify DNS resolution for azure-devices.net
 4. Check SAS token expiration
+5. System will retry 20 times before caching to SD
+
+### WiFi Dongle Not Recovering
+1. Check GPIO 2 is connected to dongle power
+2. Verify modem reset is enabled in web interface
+3. Wait 5 minutes (cooldown between resets)
+4. Check logs for "Modem reset cooldown active"
+
+## Deployment Checklist
+
+- [ ] Hardware properly wired and tested
+- [ ] RS485 network with proper termination
+- [ ] SD card formatted as FAT32 and inserted
+- [ ] WiFi or SIM credentials configured
+- [ ] Azure IoT Hub device provisioned
+- [ ] All sensors configured and tested
+- [ ] Offline caching verified
+- [ ] First telemetry confirmed (within 20 seconds of boot)
+- [ ] Network recovery tested (disconnect/reconnect WiFi)
 
 ## Support
 
@@ -265,6 +369,7 @@ modbus_iot_gateway/
 - **Web Interface** - Built-in help and diagnostics
 - **Serial Monitor** - Detailed debug logging
 - **CLAUDE.md** - Development guidelines and known issues
+- **GitHub Issues** - Bug reports and feature requests
 
 ## About Fluxgen
 
@@ -272,6 +377,6 @@ modbus_iot_gateway/
 
 ---
 
-**Status: PRODUCTION READY v1.1.0**
+**Status: PRODUCTION READY v1.2.0**
 
-*This system is ready for industrial deployment with comprehensive monitoring, offline caching, and professional support capabilities.*
+*Designed for unattended remote deployment with autonomous recovery capabilities.*
