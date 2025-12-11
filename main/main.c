@@ -2320,6 +2320,7 @@ static void telemetry_task(void *pvParameters)
     
     system_config_t* config = get_system_config();
     TickType_t last_send_time = 0;
+    bool first_telemetry = true;  // Flag to send first telemetry immediately after startup
 
     // Wait a bit before first telemetry to let system stabilize
     ESP_LOGI(TAG, "[DATA] Waiting 10 seconds before first telemetry...");
@@ -2335,9 +2336,12 @@ static void telemetry_task(void *pvParameters)
         TickType_t current_time = xTaskGetTickCount();
 
         // Check if enough time has passed since last send (based on telemetry_interval)
-        bool should_send_telemetry = (current_time - last_send_time) >= pdMS_TO_TICKS(config->telemetry_interval * 1000);
-        
+        // First telemetry is sent immediately after startup delay
+        bool should_send_telemetry = first_telemetry ||
+            ((current_time - last_send_time) >= pdMS_TO_TICKS(config->telemetry_interval * 1000));
+
         if (should_send_telemetry) {
+            first_telemetry = false;  // Clear flag after first send
             // Check network connection before sending telemetry
             // If disconnected, try to reconnect before sending
             if (!is_network_connected()) {
