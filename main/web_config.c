@@ -2115,7 +2115,7 @@ static esp_err_t config_page_handler(httpd_req_t *req)
         "<label style='font-weight:600;padding-top:10px'>Reset Pin:</label>"
         "<div>"
         "<input type='number' id='sim_reset_pin' name='sim_reset_pin' value='%d' min='-1' max='39' style='width:100%%;padding:10px;border:1px solid #e0e0e0;border-radius:6px;font-size:15px'>"
-        "<small style='color:#888;display:block;margin-top:5px;font-size:13px'>-1 to disable</small>"
+        "<small style='color:#888;display:block;margin-top:5px;font-size:13px'>-1 to disable (recommended - Power Pin is sufficient). Note: GPIO 15 used by SD card.</small>"
         "</div>"
         "<label style='font-weight:600;padding-top:10px'>Baud Rate:</label>"
         "<select id='sim_baud' name='sim_baud' style='width:100%%;padding:10px;border:1px solid #e0e0e0;border-radius:6px;font-size:15px;background:white'>"
