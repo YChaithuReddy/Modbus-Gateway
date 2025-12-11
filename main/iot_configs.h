@@ -20,9 +20,9 @@
 #define TELEMETRY_FREQUENCY_MILLISECS 300000  // 5 minutes (300 seconds)
 
 // Production Configuration
-#define MAX_MQTT_RECONNECT_ATTEMPTS 5
+#define MAX_MQTT_RECONNECT_ATTEMPTS 20       // Increased - don't give up quickly on network issues
 #define MAX_MODBUS_READ_FAILURES 10
-#define SYSTEM_RESTART_ON_CRITICAL_ERROR true
+#define SYSTEM_RESTART_ON_CRITICAL_ERROR false  // Disabled - cache to SD card instead of restarting
 
 // Watchdog and Recovery Configuration
 #define WATCHDOG_TIMEOUT_SEC 120          // 2 minutes - system restarts if main loop stuck
