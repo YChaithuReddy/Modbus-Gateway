@@ -11088,7 +11088,7 @@ esp_err_t config_reset_to_defaults(void)
     g_system_config.sim_config.uart_tx_pin = GPIO_NUM_33;
     g_system_config.sim_config.uart_rx_pin = GPIO_NUM_32;
     g_system_config.sim_config.pwr_pin = GPIO_NUM_4;
-    g_system_config.sim_config.reset_pin = GPIO_NUM_15;
+    g_system_config.sim_config.reset_pin = -1;  // Disabled by default - GPIO 15 used by SD card CS
     g_system_config.sim_config.uart_num = UART_NUM_1;
     g_system_config.sim_config.uart_baud_rate = 115200;
 
