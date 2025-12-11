@@ -129,6 +129,8 @@ static volatile bool wifi_initialized_for_sim_mode = false;  // Track if WiFi wa
 static bool modem_reset_enabled = false;
 static int modem_reset_gpio_pin = 2; // Default GPIO pin, configurable via web interface
 static TaskHandle_t modem_reset_task_handle = NULL;
+static int64_t last_modem_reset_time = 0;  // Track last reset to prevent rapid cycling
+#define MODEM_RESET_COOLDOWN_SEC 300  // 5 minutes between reset attempts
 
 // LED status variables
 static volatile bool sensors_responding = false;
@@ -915,21 +917,33 @@ static void mqtt_event_handler(void *handler_args, esp_event_base_t base, int32_
 
                 // Trigger network recovery if needed and not already running
                 if (need_network_recovery && modem_reset_task_handle == NULL) {
-                    ESP_LOGI(TAG, "[NET] Network disconnected, triggering recovery...");
+                    // Check cooldown to prevent rapid reset cycling
+                    time_t now = time(NULL);
+                    int64_t time_since_last_reset = now - last_modem_reset_time;
 
-                    // Create modem reset task (handles both WiFi and SIM modes)
-                    BaseType_t result = xTaskCreate(
-                        modem_reset_task,
-                        "modem_reset",
-                        4096,  // Increased stack for SIM mode operations
-                        NULL,
-                        2,  // Low priority
-                        &modem_reset_task_handle
-                    );
+                    if (last_modem_reset_time == 0 || time_since_last_reset >= MODEM_RESET_COOLDOWN_SEC) {
+                        ESP_LOGI(TAG, "[NET] Network disconnected, triggering recovery...");
 
-                    if (result != pdPASS) {
-                        ESP_LOGE(TAG, "[NET] Failed to create network recovery task");
-                        modem_reset_task_handle = NULL;
+                        // Create modem reset task (handles both WiFi and SIM modes)
+                        BaseType_t result = xTaskCreate(
+                            modem_reset_task,
+                            "modem_reset",
+                            4096,  // Increased stack for SIM mode operations
+                            NULL,
+                            2,  // Low priority
+                            &modem_reset_task_handle
+                        );
+
+                        if (result != pdPASS) {
+                            ESP_LOGE(TAG, "[NET] Failed to create network recovery task");
+                            modem_reset_task_handle = NULL;
+                        } else {
+                            last_modem_reset_time = now;  // Update last reset time
+                        }
+                    } else {
+                        int64_t remaining = MODEM_RESET_COOLDOWN_SEC - time_since_last_reset;
+                        ESP_LOGW(TAG, "[NET] Modem reset cooldown active - %lld seconds remaining", (long long)remaining);
+                        ESP_LOGI(TAG, "[NET] System will cache to SD card and retry later");
                     }
                 }
             }
