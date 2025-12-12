@@ -118,6 +118,7 @@ static char c2d_topic[256];
 // These replace malloc/free calls that were causing memory exhaustion
 static sensor_reading_t telemetry_readings[20];  // Pre-allocated sensor readings
 static char telemetry_temp_json[MAX_JSON_PAYLOAD_SIZE];  // Pre-allocated JSON buffer
+static int sensors_already_published = 0;  // Track sensors published in create_telemetry_payload
 
 // GPIO interrupt flag for web server toggle
 static volatile bool web_server_toggle_requested = false;
@@ -1551,6 +1552,9 @@ static void create_telemetry_payload(char* payload, size_t payload_size) {
 
     // Use pre-allocated static buffers to prevent heap fragmentation
     // (malloc/free pattern was causing memory exhaustion when web server is active)
+    // Reset the published sensors counter
+    sensors_already_published = 0;
+
     sensor_reading_t* readings = telemetry_readings;
     char* temp_json = telemetry_temp_json;
     memset(readings, 0, sizeof(telemetry_readings));
@@ -1623,20 +1627,37 @@ static void create_telemetry_payload(char* payload, size_t payload_size) {
                 }
                 
                 if (json_result == ESP_OK) {
-                    // For first sensor, use its JSON directly (no array wrapper)
-                    // For multiple sensors, would need different strategy
-                    if (valid_sensors == 0) {
-                        int remaining_space = payload_size - payload_pos;
-                        if (remaining_space > strlen(temp_json) + 10) {
-                            payload_pos += snprintf(payload + payload_pos, remaining_space, "%s", temp_json);
+                    // Send each sensor as a separate MQTT message
+                    if (mqtt_connected && mqtt_client != NULL) {
+                        char sensor_topic[256];
+                        snprintf(sensor_topic, sizeof(sensor_topic),
+                                 "devices/%s/messages/events/", config->azure_device_id);
+
+                        int msg_id = esp_mqtt_client_publish(
+                            mqtt_client,
+                            sensor_topic,
+                            temp_json,
+                            strlen(temp_json),
+                            0,  // QoS 0
+                            0   // No retain
+                        );
+
+                        if (msg_id >= 0) {
+                            ESP_LOGI(TAG, "[MQTT] Sent sensor %d/%d: %s (msg_id=%d)",
+                                     valid_sensors + 1, actual_count, matching_sensor->unit_id, msg_id);
                             valid_sensors++;
+
+                            // Small delay between messages to avoid flooding
+                            vTaskDelay(pdMS_TO_TICKS(100));
                         } else {
-                            ESP_LOGW(TAG, "[WARN] Payload buffer too small for sensor %d", i);
-                            break;
+                            ESP_LOGW(TAG, "[WARN] Failed to publish sensor %s", matching_sensor->unit_id);
                         }
-                    } else {
-                        ESP_LOGW(TAG, "[WARN] Multiple sensors not supported in this JSON format - only first sensor sent");
-                        break;
+                    }
+
+                    // Store last sensor's JSON in payload for backward compatibility
+                    int remaining_space = payload_size - payload_pos;
+                    if (remaining_space > strlen(temp_json) + 10) {
+                        payload_pos = snprintf(payload, payload_size, "%s", temp_json);
                     }
                 } else {
                     ESP_LOGW(TAG, "[WARN] Failed to generate JSON for sensor %d", i);
@@ -1644,9 +1665,8 @@ static void create_telemetry_payload(char* payload, size_t payload_size) {
             }
         }
 
-        // No closing bracket needed - single JSON object
-        
-        ESP_LOGI(TAG, "[OK] Merged JSON created with %d sensors (%d bytes)", valid_sensors, payload_pos);
+        ESP_LOGI(TAG, "[OK] Sent telemetry for %d/%d sensors", valid_sensors, actual_count);
+        sensors_already_published = valid_sensors;  // Track how many were already sent via MQTT
     } else {
         ESP_LOGW(TAG, "[WARN] No valid sensor data available, skipping telemetry");
         payload[0] = '\0'; // Empty payload to indicate no data
@@ -2607,6 +2627,27 @@ static bool send_telemetry(void) {
         return false;
     }
 
+    // Check if sensors were already published in create_telemetry_payload
+    if (sensors_already_published > 0) {
+        ESP_LOGI(TAG, "[OK] %d sensors already sent via MQTT in create_telemetry_payload", sensors_already_published);
+        ESP_LOGI(TAG, "[SEND] Published to Azure IoT Hub:");
+        ESP_LOGI(TAG, "   Topic: %s", telemetry_topic);
+        ESP_LOGI(TAG, "   Sensors sent: %d", sensors_already_published);
+        ESP_LOGI(TAG, "   Last payload: %s", telemetry_payload);
+
+        telemetry_send_count++;
+        total_telemetry_sent += sensors_already_published;
+        last_telemetry_time = esp_timer_get_time() / 1000000;
+        last_successful_telemetry_time = esp_timer_get_time() / 1000000;
+        telemetry_failure_count = 0;
+
+        ESP_LOGI(TAG, "[OK] Telemetry sent to MQTT successfully");
+        send_in_progress = false;
+        return true;
+    }
+
+    // If no sensors were published yet (e.g., MQTT was not connected during create_telemetry_payload)
+    // Fall back to publishing the single payload
     ESP_LOGI(TAG, "[LOC] Topic: %s", telemetry_topic);
     ESP_LOGI(TAG, "[PKG] Payload: %s", telemetry_payload);
     ESP_LOGI(TAG, "[PKG] Payload Length: %d bytes", strlen(telemetry_payload));
@@ -2614,14 +2655,14 @@ static bool send_telemetry(void) {
     ESP_LOGI(TAG, "[NET] Device ID: %s", config->azure_device_id);
     ESP_LOGI(TAG, "[HUB] IoT Hub: %s", IOT_CONFIG_IOTHUB_FQDN);
     ESP_LOGI(TAG, "[LINK] MQTT Connected: %s", mqtt_connected ? "YES" : "NO");
-    
+
     // Check payload size limit (Azure IoT Hub has 256KB limit)
     if (strlen(telemetry_payload) > 262144) {
         ESP_LOGE(TAG, "[ERROR] Payload too large: %d bytes (max 256KB)", strlen(telemetry_payload));
         send_in_progress = false;
         return false;
     }
-    
+
     // Try QoS 0 for compatibility with Arduino 1.0.6
     int msg_id = esp_mqtt_client_publish(
         mqtt_client,
@@ -2638,7 +2679,7 @@ static bool send_telemetry(void) {
         ESP_LOGE(TAG, "   Topic: %s", telemetry_topic);
         ESP_LOGE(TAG, "   Payload size: %d bytes", strlen(telemetry_payload));
         ESP_LOGE(TAG, "   MQTT connected: %s", mqtt_connected ? "YES" : "NO");
-        
+
         // Try to reconnect MQTT if disconnected
         if (!mqtt_connected && mqtt_client != NULL) {
             ESP_LOGW(TAG, "[WARN] Attempting MQTT reconnection...");
