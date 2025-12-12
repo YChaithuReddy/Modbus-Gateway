@@ -3427,67 +3427,81 @@ static esp_err_t config_page_handler(httpd_req_t *req)
         "formHtml += '<p style=\"color:#28a745;font-size:13px;margin:15px 0;padding:10px;background:#f0fff4;border:1px solid #28a745;border-radius:4px\"><strong>Fixed format - UINT16_HI (16-bit) - no data type selection needed</strong></p>';"
         "}"
 
-        // ========== CALCULATION ENGINE UI (User-Friendly) ==========
-        "formHtml += '<div style=\"margin-top:20px;border:2px solid #17a2b8;border-radius:8px;overflow:hidden\">';"
-        "formHtml += '<div onclick=\"toggleCalcSection(this)\" style=\"background:linear-gradient(135deg,#17a2b8,#138496);padding:12px 15px;cursor:pointer;display:flex;justify-content:space-between;align-items:center\">';"
-        "formHtml += '<span style=\"font-weight:600;color:white\">📊 Calculation Settings (Click to expand)</span>';"
-        "formHtml += '<span class=\"calc-toggle-icon\" style=\"color:white;transition:transform 0.3s\">▼</span></div>';"
-        "formHtml += '<div class=\"calc-section-content\" style=\"display:none;padding:15px;background:#f8fcfd\">';"
+        // ========== CALCULATION ENGINE UI (Modern Design) ==========
+        "formHtml += '<div style=\"margin-top:25px;border-radius:12px;overflow:hidden;box-shadow:0 4px 15px rgba(0,0,0,0.1)\">';"
 
-        // Question-based UI
-        "formHtml += '<p style=\"font-weight:600;color:#495057;margin-bottom:15px\">What type of reading does this sensor provide?</p>';"
+        // Header with gradient and icon
+        "formHtml += '<div onclick=\"toggleCalcSection(this)\" style=\"background:linear-gradient(135deg,#667eea 0%,#764ba2 100%);padding:16px 20px;cursor:pointer;display:flex;justify-content:space-between;align-items:center\">';"
+        "formHtml += '<div style=\"display:flex;align-items:center;gap:12px\">';"
+        "formHtml += '<div style=\"width:40px;height:40px;background:rgba(255,255,255,0.2);border-radius:10px;display:flex;align-items:center;justify-content:center;font-size:20px\">⚙️</div>';"
+        "formHtml += '<div><span style=\"font-weight:700;color:white;font-size:16px;display:block\">Calculation Settings</span>';"
+        "formHtml += '<span style=\"color:rgba(255,255,255,0.8);font-size:12px\">Transform raw sensor values</span></div></div>';"
+        "formHtml += '<span class=\"calc-toggle-icon\" style=\"color:white;font-size:20px;transition:transform 0.3s ease\">▼</span></div>';"
+
+        // Content area
+        "formHtml += '<div class=\"calc-section-content\" style=\"display:none;padding:20px;background:linear-gradient(180deg,#f8f9ff 0%,#ffffff 100%)\">';"
+
+        // Question header
+        "formHtml += '<div style=\"margin-bottom:20px;padding-bottom:15px;border-bottom:2px solid #e8ecf4\">';"
+        "formHtml += '<p style=\"font-weight:600;color:#2d3748;margin:0;font-size:15px\">Select calculation type for this sensor:</p>';"
+        "formHtml += '</div>';"
+
+        // Options grid - 2 columns
+        "formHtml += '<div style=\"display:grid;grid-template-columns:repeat(2,1fr);gap:12px\">';"
 
         // Option 0: Direct Value (default)
-        "formHtml += '<label style=\"display:block;padding:12px;margin-bottom:8px;background:white;border:2px solid #e0e0e0;border-radius:8px;cursor:pointer\" onmouseover=\"this.style.borderColor=\\\"#17a2b8\\\"\" onmouseout=\"this.style.borderColor=this.querySelector(\\\"input\\\").checked?\\\"#17a2b8\\\":\\\"#e0e0e0\\\"\">';"
-        "formHtml += '<input type=\"radio\" name=\"sensor_' + sensorId + '_calc_type\" value=\"0\" checked onchange=\"showCalcFields(this,' + sensorId + ')\" style=\"margin-right:10px\">';"
-        "formHtml += '<strong>Direct Value</strong> - No calculation needed';"
-        "formHtml += '<div style=\"color:#666;font-size:13px;margin:5px 0 0 25px\">Use the raw sensor value as-is (with scale factor if set)</div>';"
-        "formHtml += '</label>';"
+        "formHtml += '<label class=\"calc-option\" style=\"display:flex;align-items:flex-start;padding:15px;background:white;border:2px solid #e2e8f0;border-radius:10px;cursor:pointer;transition:all 0.2s ease\" onmouseover=\"this.style.transform=\\'translateY(-2px)\\';this.style.boxShadow=\\'0 4px 12px rgba(102,126,234,0.15)\\'\" onmouseout=\"this.style.transform=\\'\\';this.style.boxShadow=\\'\\'\">';"
+        "formHtml += '<input type=\"radio\" name=\"sensor_' + sensorId + '_calc_type\" value=\"0\" checked onchange=\"showCalcFields(this,' + sensorId + ');highlightCalcOption(this)\" style=\"margin-top:3px;accent-color:#667eea\">';"
+        "formHtml += '<div style=\"margin-left:10px\"><div style=\"display:flex;align-items:center;gap:8px\">';"
+        "formHtml += '<span style=\"font-size:18px\">📥</span><strong style=\"color:#2d3748\">Direct Value</strong></div>';"
+        "formHtml += '<div style=\"color:#718096;font-size:12px;margin-top:4px\">Raw value as-is (with scale factor)</div></div></label>';"
 
-        // Option 10: Flow Meter Integer + Decimal (NEW - simpler)
-        "formHtml += '<label style=\"display:block;padding:12px;margin-bottom:8px;background:white;border:2px solid #e0e0e0;border-radius:8px;cursor:pointer\" onmouseover=\"this.style.borderColor=\\\"#17a2b8\\\"\" onmouseout=\"this.style.borderColor=this.querySelector(\\\"input\\\").checked?\\\"#17a2b8\\\":\\\"#e0e0e0\\\"\">';"
-        "formHtml += '<input type=\"radio\" name=\"sensor_' + sensorId + '_calc_type\" value=\"10\" onchange=\"showCalcFields(this,' + sensorId + ')\" style=\"margin-right:10px\">';"
-        "formHtml += '<strong>📊 Flow Meter</strong> - Integer + Decimal combined';"
-        "formHtml += '<div style=\"color:#666;font-size:13px;margin:5px 0 0 25px\">Total = Integer part + Decimal part<br><span style=\"color:#17a2b8\">Example: 12345 + 0.678 = 12345.678 m³</span></div>';"
-        "formHtml += '</label>';"
+        // Option 10: Flow Meter Integer + Decimal
+        "formHtml += '<label class=\"calc-option\" style=\"display:flex;align-items:flex-start;padding:15px;background:white;border:2px solid #e2e8f0;border-radius:10px;cursor:pointer;transition:all 0.2s ease\" onmouseover=\"this.style.transform=\\'translateY(-2px)\\';this.style.boxShadow=\\'0 4px 12px rgba(102,126,234,0.15)\\'\" onmouseout=\"this.style.transform=\\'\\';this.style.boxShadow=\\'\\'\">';"
+        "formHtml += '<input type=\"radio\" name=\"sensor_' + sensorId + '_calc_type\" value=\"10\" onchange=\"showCalcFields(this,' + sensorId + ');highlightCalcOption(this)\" style=\"margin-top:3px;accent-color:#667eea\">';"
+        "formHtml += '<div style=\"margin-left:10px\"><div style=\"display:flex;align-items:center;gap:8px\">';"
+        "formHtml += '<span style=\"font-size:18px\">🔢</span><strong style=\"color:#2d3748\">Flow Int+Dec</strong></div>';"
+        "formHtml += '<div style=\"color:#718096;font-size:12px;margin-top:4px\">12345 + 0.678 = 12345.678</div></div></label>';"
 
-        // Option 1: Vortex style (HIGH × N + LOW)
-        "formHtml += '<label style=\"display:block;padding:12px;margin-bottom:8px;background:white;border:2px solid #e0e0e0;border-radius:8px;cursor:pointer\" onmouseover=\"this.style.borderColor=\\\"#17a2b8\\\"\" onmouseout=\"this.style.borderColor=this.querySelector(\\\"input\\\").checked?\\\"#17a2b8\\\":\\\"#e0e0e0\\\"\">';"
-        "formHtml += '<input type=\"radio\" name=\"sensor_' + sensorId + '_calc_type\" value=\"1\" onchange=\"showCalcFields(this,' + sensorId + ')\" style=\"margin-right:10px\">';"
-        "formHtml += '<strong>📊 Flow Meter (Vortex style)</strong> - HIGH × 100 + LOW';"
-        "formHtml += '<div style=\"color:#666;font-size:13px;margin:5px 0 0 25px\">For extended precision: Total = (HIGH × multiplier) + LOW<br><span style=\"color:#17a2b8\">Example: 1234 × 100 + 87.89 = 123487.89 m³</span></div>';"
-        "formHtml += '</label>';"
+        // Option 1: Vortex style
+        "formHtml += '<label class=\"calc-option\" style=\"display:flex;align-items:flex-start;padding:15px;background:white;border:2px solid #e2e8f0;border-radius:10px;cursor:pointer;transition:all 0.2s ease\" onmouseover=\"this.style.transform=\\'translateY(-2px)\\';this.style.boxShadow=\\'0 4px 12px rgba(102,126,234,0.15)\\'\" onmouseout=\"this.style.transform=\\'\\';this.style.boxShadow=\\'\\'\">';"
+        "formHtml += '<input type=\"radio\" name=\"sensor_' + sensorId + '_calc_type\" value=\"1\" onchange=\"showCalcFields(this,' + sensorId + ');highlightCalcOption(this)\" style=\"margin-top:3px;accent-color:#667eea\">';"
+        "formHtml += '<div style=\"margin-left:10px\"><div style=\"display:flex;align-items:center;gap:8px\">';"
+        "formHtml += '<span style=\"font-size:18px\">🌀</span><strong style=\"color:#2d3748\">Vortex Flow</strong></div>';"
+        "formHtml += '<div style=\"color:#718096;font-size:12px;margin-top:4px\">HIGH×100 + LOW registers</div></div></label>';"
 
         // Option 3: Level to Percentage
-        "formHtml += '<label style=\"display:block;padding:12px;margin-bottom:8px;background:white;border:2px solid #e0e0e0;border-radius:8px;cursor:pointer\" onmouseover=\"this.style.borderColor=\\\"#17a2b8\\\"\" onmouseout=\"this.style.borderColor=this.querySelector(\\\"input\\\").checked?\\\"#17a2b8\\\":\\\"#e0e0e0\\\"\">';"
-        "formHtml += '<input type=\"radio\" name=\"sensor_' + sensorId + '_calc_type\" value=\"3\" onchange=\"showCalcFields(this,' + sensorId + ')\" style=\"margin-right:10px\">';"
-        "formHtml += '<strong>📏 Level Sensor</strong> - Convert to percentage (0-100%)';"
-        "formHtml += '<div style=\"color:#666;font-size:13px;margin:5px 0 0 25px\">Calculate tank fill level as percentage</div>';"
-        "formHtml += '</label>';"
+        "formHtml += '<label class=\"calc-option\" style=\"display:flex;align-items:flex-start;padding:15px;background:white;border:2px solid #e2e8f0;border-radius:10px;cursor:pointer;transition:all 0.2s ease\" onmouseover=\"this.style.transform=\\'translateY(-2px)\\';this.style.boxShadow=\\'0 4px 12px rgba(102,126,234,0.15)\\'\" onmouseout=\"this.style.transform=\\'\\';this.style.boxShadow=\\'\\'\">';"
+        "formHtml += '<input type=\"radio\" name=\"sensor_' + sensorId + '_calc_type\" value=\"3\" onchange=\"showCalcFields(this,' + sensorId + ');highlightCalcOption(this)\" style=\"margin-top:3px;accent-color:#667eea\">';"
+        "formHtml += '<div style=\"margin-left:10px\"><div style=\"display:flex;align-items:center;gap:8px\">';"
+        "formHtml += '<span style=\"font-size:18px\">📊</span><strong style=\"color:#2d3748\">Level %</strong></div>';"
+        "formHtml += '<div style=\"color:#718096;font-size:12px;margin-top:4px\">Tank fill level 0-100%</div></div></label>';"
 
         // Option 2: Scale Value
-        "formHtml += '<label style=\"display:block;padding:12px;margin-bottom:8px;background:white;border:2px solid #e0e0e0;border-radius:8px;cursor:pointer\" onmouseover=\"this.style.borderColor=\\\"#17a2b8\\\"\" onmouseout=\"this.style.borderColor=this.querySelector(\\\"input\\\").checked?\\\"#17a2b8\\\":\\\"#e0e0e0\\\"\">';"
-        "formHtml += '<input type=\"radio\" name=\"sensor_' + sensorId + '_calc_type\" value=\"2\" onchange=\"showCalcFields(this,' + sensorId + ')\" style=\"margin-right:10px\">';"
-        "formHtml += '<strong>✖️ Scale Value</strong> - Multiply and/or add offset';"
-        "formHtml += '<div style=\"color:#666;font-size:13px;margin:5px 0 0 25px\">Result = (Raw × Scale) + Offset<br><span style=\"color:#17a2b8\">Example: 1234 × 0.001 = 1.234</span></div>';"
-        "formHtml += '</label>';"
+        "formHtml += '<label class=\"calc-option\" style=\"display:flex;align-items:flex-start;padding:15px;background:white;border:2px solid #e2e8f0;border-radius:10px;cursor:pointer;transition:all 0.2s ease\" onmouseover=\"this.style.transform=\\'translateY(-2px)\\';this.style.boxShadow=\\'0 4px 12px rgba(102,126,234,0.15)\\'\" onmouseout=\"this.style.transform=\\'\\';this.style.boxShadow=\\'\\'\">';"
+        "formHtml += '<input type=\"radio\" name=\"sensor_' + sensorId + '_calc_type\" value=\"2\" onchange=\"showCalcFields(this,' + sensorId + ');highlightCalcOption(this)\" style=\"margin-top:3px;accent-color:#667eea\">';"
+        "formHtml += '<div style=\"margin-left:10px\"><div style=\"display:flex;align-items:center;gap:8px\">';"
+        "formHtml += '<span style=\"font-size:18px\">✖️</span><strong style=\"color:#2d3748\">Scale + Offset</strong></div>';"
+        "formHtml += '<div style=\"color:#718096;font-size:12px;margin-top:4px\">(Raw × Scale) + Offset</div></div></label>';"
 
-        // Option 4/5: Tank Volume
-        "formHtml += '<label style=\"display:block;padding:12px;margin-bottom:8px;background:white;border:2px solid #e0e0e0;border-radius:8px;cursor:pointer\" onmouseover=\"this.style.borderColor=\\\"#17a2b8\\\"\" onmouseout=\"this.style.borderColor=this.querySelector(\\\"input\\\").checked?\\\"#17a2b8\\\":\\\"#e0e0e0\\\"\">';"
-        "formHtml += '<input type=\"radio\" name=\"sensor_' + sensorId + '_calc_type\" value=\"4\" onchange=\"showCalcFields(this,' + sensorId + ')\" style=\"margin-right:10px\">';"
-        "formHtml += '<strong>🛢️ Tank Volume</strong> - Calculate liters from level';"
-        "formHtml += '<div style=\"color:#666;font-size:13px;margin:5px 0 0 25px\">Convert level reading to actual volume (liters/m³)</div>';"
-        "formHtml += '</label>';"
+        // Option 4: Tank Volume
+        "formHtml += '<label class=\"calc-option\" style=\"display:flex;align-items:flex-start;padding:15px;background:white;border:2px solid #e2e8f0;border-radius:10px;cursor:pointer;transition:all 0.2s ease\" onmouseover=\"this.style.transform=\\'translateY(-2px)\\';this.style.boxShadow=\\'0 4px 12px rgba(102,126,234,0.15)\\'\" onmouseout=\"this.style.transform=\\'\\';this.style.boxShadow=\\'\\'\">';"
+        "formHtml += '<input type=\"radio\" name=\"sensor_' + sensorId + '_calc_type\" value=\"4\" onchange=\"showCalcFields(this,' + sensorId + ');highlightCalcOption(this)\" style=\"margin-top:3px;accent-color:#667eea\">';"
+        "formHtml += '<div style=\"margin-left:10px\"><div style=\"display:flex;align-items:center;gap:8px\">';"
+        "formHtml += '<span style=\"font-size:18px\">🛢️</span><strong style=\"color:#2d3748\">Tank Volume</strong></div>';"
+        "formHtml += '<div style=\"color:#718096;font-size:12px;margin-top:4px\">Level to liters/m³</div></div></label>';"
 
         // Option 8: 4-20mA
-        "formHtml += '<label style=\"display:block;padding:12px;margin-bottom:8px;background:white;border:2px solid #e0e0e0;border-radius:8px;cursor:pointer\" onmouseover=\"this.style.borderColor=\\\"#17a2b8\\\"\" onmouseout=\"this.style.borderColor=this.querySelector(\\\"input\\\").checked?\\\"#17a2b8\\\":\\\"#e0e0e0\\\"\">';"
-        "formHtml += '<input type=\"radio\" name=\"sensor_' + sensorId + '_calc_type\" value=\"8\" onchange=\"showCalcFields(this,' + sensorId + ')\" style=\"margin-right:10px\">';"
-        "formHtml += '<strong>📈 4-20mA Sensor</strong> - Map range to output';"
-        "formHtml += '<div style=\"color:#666;font-size:13px;margin:5px 0 0 25px\">Convert 4-20mA signal to your desired range<br><span style=\"color:#17a2b8\">Example: 4mA=0%, 20mA=100%</span></div>';"
-        "formHtml += '</label>';"
+        "formHtml += '<label class=\"calc-option\" style=\"display:flex;align-items:flex-start;padding:15px;background:white;border:2px solid #e2e8f0;border-radius:10px;cursor:pointer;transition:all 0.2s ease\" onmouseover=\"this.style.transform=\\'translateY(-2px)\\';this.style.boxShadow=\\'0 4px 12px rgba(102,126,234,0.15)\\'\" onmouseout=\"this.style.transform=\\'\\';this.style.boxShadow=\\'\\'\">';"
+        "formHtml += '<input type=\"radio\" name=\"sensor_' + sensorId + '_calc_type\" value=\"8\" onchange=\"showCalcFields(this,' + sensorId + ');highlightCalcOption(this)\" style=\"margin-top:3px;accent-color:#667eea\">';"
+        "formHtml += '<div style=\"margin-left:10px\"><div style=\"display:flex;align-items:center;gap:8px\">';"
+        "formHtml += '<span style=\"font-size:18px\">📈</span><strong style=\"color:#2d3748\">4-20mA Range</strong></div>';"
+        "formHtml += '<div style=\"color:#718096;font-size:12px;margin-top:4px\">Map signal to output range</div></div></label>';"
 
-        // Dynamic fields container
-        "formHtml += '<div id=\"calc-fields-' + sensorId + '\" style=\"margin-top:15px\"></div>';"
+        "formHtml += '</div>';" // Close grid
+
+        // Dynamic fields container with styling
+        "formHtml += '<div id=\"calc-fields-' + sensorId + '\" style=\"margin-top:20px\"></div>';"
 
         "formHtml += '</div></div>';"
         // ========== END CALCULATION ENGINE UI ==========
@@ -3672,17 +3686,34 @@ static esp_err_t config_page_handler(httpd_req_t *req)
         "}"
         "}"
 
+        // Highlight selected calculation option
+        "function highlightCalcOption(radio) {"
+        "const allLabels = radio.closest('.calc-section-content').querySelectorAll('.calc-option');"
+        "allLabels.forEach(function(label) {"
+        "const inp = label.querySelector('input[type=radio]');"
+        "if (inp && inp.checked) {"
+        "label.style.borderColor = '#667eea';"
+        "label.style.background = 'linear-gradient(135deg,#f8f9ff 0%,#eef1ff 100%)';"
+        "} else {"
+        "label.style.borderColor = '#e2e8f0';"
+        "label.style.background = 'white';"
+        "}"
+        "});"
+        "}"
+
         "function showCalcFields(select, sensorId) {"
         "const container = document.getElementById('calc-fields-' + sensorId);"
         "const calcType = parseInt(select.value);"
         "let fieldsHtml = '';"
-        "const inputStyle = 'width:100%;padding:8px;border:1px solid #e0e0e0;border-radius:4px;font-size:14px';"
-        "const labelStyle = 'font-size:13px;color:#495057;display:block;margin-bottom:3px';"
+        "const inputStyle = 'width:100%;padding:10px;border:2px solid #e2e8f0;border-radius:8px;font-size:14px;transition:border-color 0.2s;outline:none';"
+        "const labelStyle = 'font-size:13px;color:#4a5568;display:block;margin-bottom:5px;font-weight:500';"
+        "const boxStyle = 'background:linear-gradient(135deg,#f8f9ff 0%,#ffffff 100%);padding:16px;border-radius:10px;margin-top:12px;border:1px solid #e8ecf4';"
+        "const titleStyle = 'margin:0 0 12px 0;font-weight:600;color:#667eea;font-size:14px;display:flex;align-items:center;gap:8px';"
 
         // CALC_COMBINE_REGISTERS (1) - Vortex Flowmeter
         "if (calcType === 1) {"
-        "fieldsHtml = '<div style=\"background:#e8f4fc;padding:12px;border-radius:6px;margin-top:10px\">';"
-        "fieldsHtml += '<p style=\"margin:0 0 10px 0;font-weight:600;color:#0066cc\">Combine Two Registers: Total = (HIGH × Multiplier) + LOW</p>';"
+        "fieldsHtml = '<div style=\"' + boxStyle + '\">';"
+        "fieldsHtml += '<p style=\"' + titleStyle + '\"><span>🌀</span> Combine Two Registers: Total = (HIGH × Multiplier) + LOW</p>';"
         "fieldsHtml += '<p style=\"font-size:12px;color:#666;margin-bottom:10px\">For Vortex flowmeter: Cumulative = (Reg[8-9] × 100) + Reg[10-11]</p>';"
         "fieldsHtml += '<div style=\"display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px\">';"
         "fieldsHtml += '<div><label style=\"' + labelStyle + '\">HIGH Register Offset:</label>';"
@@ -3699,8 +3730,8 @@ static esp_err_t config_page_handler(httpd_req_t *req)
 
         // CALC_SCALE_OFFSET (2)
         "else if (calcType === 2) {"
-        "fieldsHtml = '<div style=\"background:#f0f9f0;padding:12px;border-radius:6px;margin-top:10px\">';"
-        "fieldsHtml += '<p style=\"margin:0 0 10px 0;font-weight:600;color:#28a745\">Scale and Offset: Result = (Raw × Scale) + Offset</p>';"
+        "fieldsHtml = '<div style=\"' + boxStyle + '\">';"
+        "fieldsHtml += '<p style=\"' + titleStyle + '\"><span>✖️</span> Scale and Offset: Result = (Raw × Scale) + Offset</p>';"
         "fieldsHtml += '<div style=\"display:grid;grid-template-columns:1fr 1fr;gap:10px\">';"
         "fieldsHtml += '<div><label style=\"' + labelStyle + '\">Scale (Multiplier):</label>';"
         "fieldsHtml += '<input type=\"number\" name=\"sensor_' + sensorId + '_calc_scale\" value=\"1.0\" step=\"any\" style=\"' + inputStyle + '\"></div>';"
@@ -3711,8 +3742,8 @@ static esp_err_t config_page_handler(httpd_req_t *req)
 
         // CALC_LEVEL_PERCENTAGE (3)
         "else if (calcType === 3) {"
-        "fieldsHtml = '<div style=\"background:#fff8e6;padding:12px;border-radius:6px;margin-top:10px\">';"
-        "fieldsHtml += '<p style=\"margin:0 0 10px 0;font-weight:600;color:#cc8800\">Level to Percentage (0-100%)</p>';"
+        "fieldsHtml = '<div style=\"' + boxStyle + '\">';"
+        "fieldsHtml += '<p style=\"' + titleStyle + '\"><span>📊</span> Level to Percentage (0-100%)</p>';"
         "fieldsHtml += '<div style=\"display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px\">';"
         "fieldsHtml += '<div><label style=\"' + labelStyle + '\">Empty Tank Value:</label>';"
         "fieldsHtml += '<input type=\"number\" name=\"sensor_' + sensorId + '_calc_empty_val\" value=\"0\" step=\"any\" style=\"' + inputStyle + '\">';"
@@ -3730,8 +3761,8 @@ static esp_err_t config_page_handler(httpd_req_t *req)
 
         // CALC_CYLINDER_VOLUME (4)
         "else if (calcType === 4) {"
-        "fieldsHtml = '<div style=\"background:#f5f0ff;padding:12px;border-radius:6px;margin-top:10px\">';"
-        "fieldsHtml += '<p style=\"margin:0 0 10px 0;font-weight:600;color:#6600cc\">Cylinder Tank Volume: V = π × r² × h</p>';"
+        "fieldsHtml = '<div style=\"' + boxStyle + '\">';"
+        "fieldsHtml += '<p style=\"' + titleStyle + '\"><span>🛢️</span> Cylinder Tank Volume: V = π × r² × h</p>';"
         "fieldsHtml += '<div style=\"display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px\">';"
         "fieldsHtml += '<div><label style=\"' + labelStyle + '\">Tank Diameter (m):</label>';"
         "fieldsHtml += '<input type=\"number\" name=\"sensor_' + sensorId + '_calc_tank_dia\" value=\"1.0\" step=\"any\" style=\"' + inputStyle + '\"></div>';"
@@ -3747,8 +3778,8 @@ static esp_err_t config_page_handler(httpd_req_t *req)
 
         // CALC_RECTANGLE_VOLUME (5)
         "else if (calcType === 5) {"
-        "fieldsHtml = '<div style=\"background:#f5f0ff;padding:12px;border-radius:6px;margin-top:10px\">';"
-        "fieldsHtml += '<p style=\"margin:0 0 10px 0;font-weight:600;color:#6600cc\">Rectangle Tank Volume: V = L × W × h</p>';"
+        "fieldsHtml = '<div style=\"' + boxStyle + '\">';"
+        "fieldsHtml += '<p style=\"' + titleStyle + '\"><span>📦</span> Rectangle Tank Volume: V = L × W × h</p>';"
         "fieldsHtml += '<div style=\"display:grid;grid-template-columns:1fr 1fr 1fr 1fr;gap:10px\">';"
         "fieldsHtml += '<div><label style=\"' + labelStyle + '\">Length (m):</label>';"
         "fieldsHtml += '<input type=\"number\" name=\"sensor_' + sensorId + '_calc_tank_len\" value=\"2.0\" step=\"any\" style=\"' + inputStyle + '\"></div>';"
@@ -3766,8 +3797,8 @@ static esp_err_t config_page_handler(httpd_req_t *req)
 
         // CALC_FLOW_RATE_PULSE (7)
         "else if (calcType === 7) {"
-        "fieldsHtml = '<div style=\"background:#e6f7ff;padding:12px;border-radius:6px;margin-top:10px\">';"
-        "fieldsHtml += '<p style=\"margin:0 0 10px 0;font-weight:600;color:#0099cc\">Flow Rate from Pulses: Flow = Pulses ÷ Pulses_per_unit</p>';"
+        "fieldsHtml = '<div style=\"' + boxStyle + '\">';"
+        "fieldsHtml += '<p style=\"' + titleStyle + '\"><span>💧</span> Flow Rate from Pulses: Flow = Pulses ÷ Pulses_per_unit</p>';"
         "fieldsHtml += '<div><label style=\"' + labelStyle + '\">Pulses per Unit (e.g., pulses per liter):</label>';"
         "fieldsHtml += '<input type=\"number\" name=\"sensor_' + sensorId + '_calc_pulses\" value=\"100\" step=\"any\" style=\"' + inputStyle + '\">';"
         "fieldsHtml += '<small style=\"color:#888;font-size:11px\">Example: 100 pulses = 1 liter</small></div>';"
@@ -3776,8 +3807,8 @@ static esp_err_t config_page_handler(httpd_req_t *req)
 
         // CALC_LINEAR_INTERPOLATION (8)
         "else if (calcType === 8) {"
-        "fieldsHtml = '<div style=\"background:#fff0f5;padding:12px;border-radius:6px;margin-top:10px\">';"
-        "fieldsHtml += '<p style=\"margin:0 0 10px 0;font-weight:600;color:#cc0066\">Linear Interpolation: Map input range to output range</p>';"
+        "fieldsHtml = '<div style=\"' + boxStyle + '\">';"
+        "fieldsHtml += '<p style=\"' + titleStyle + '\"><span>📈</span> Linear Interpolation: Map input range to output range</p>';"
         "fieldsHtml += '<p style=\"font-size:12px;color:#666;margin-bottom:10px\">Example: 4-20mA sensor → 0-100% output</p>';"
         "fieldsHtml += '<div style=\"display:grid;grid-template-columns:1fr 1fr 1fr 1fr;gap:10px\">';"
         "fieldsHtml += '<div><label style=\"' + labelStyle + '\">Input Min:</label>';"
@@ -3793,8 +3824,8 @@ static esp_err_t config_page_handler(httpd_req_t *req)
 
         // CALC_FLOW_INT_DECIMAL (10) - Integer + Decimal combined
         "else if (calcType === 10) {"
-        "fieldsHtml = '<div style=\"background:#e8f4fc;padding:12px;border-radius:6px;margin-top:10px\">';"
-        "fieldsHtml += '<p style=\"margin:0 0 10px 0;font-weight:600;color:#0066cc\">Flow Meter: Integer + Decimal</p>';"
+        "fieldsHtml = '<div style=\"' + boxStyle + '\">';"
+        "fieldsHtml += '<p style=\"' + titleStyle + '\"><span>🔢</span> Flow Meter: Integer + Decimal</p>';"
         "fieldsHtml += '<p style=\"font-size:12px;color:#666;margin-bottom:10px\">Total = Integer part + (Decimal part × Scale)<br>Example: 12345 + (678 × 0.001) = 12345.678 m³</p>';"
         "fieldsHtml += '<div style=\"display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px\">';"
         "fieldsHtml += '<div><label style=\"' + labelStyle + '\">Integer Register Offset:</label>';"
