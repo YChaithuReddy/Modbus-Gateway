@@ -3417,6 +3417,72 @@ static esp_err_t config_page_handler(httpd_req_t *req)
         "formHtml += '<small style=\"color:#888;display:block;margin-top:5px;font-size:13px\">0.01 for 2 implicit decimals: 14542 = 145.42</small></div></div>';"
         "formHtml += '<p style=\"color:#28a745;font-size:13px;margin:15px 0;padding:10px;background:#f0fff4;border:1px solid #28a745;border-radius:4px\"><strong>Fixed format - UINT16_HI (16-bit) - no data type selection needed</strong></p>';"
         "}"
+
+        // ========== CALCULATION ENGINE UI (User-Friendly) ==========
+        "formHtml += '<div style=\"margin-top:20px;border:2px solid #17a2b8;border-radius:8px;overflow:hidden\">';"
+        "formHtml += '<div onclick=\"toggleCalcSection(this)\" style=\"background:linear-gradient(135deg,#17a2b8,#138496);padding:12px 15px;cursor:pointer;display:flex;justify-content:space-between;align-items:center\">';"
+        "formHtml += '<span style=\"font-weight:600;color:white\">📊 Calculation Settings (Click to expand)</span>';"
+        "formHtml += '<span class=\"calc-toggle-icon\" style=\"color:white;transition:transform 0.3s\">▼</span></div>';"
+        "formHtml += '<div class=\"calc-section-content\" style=\"display:none;padding:15px;background:#f8fcfd\">';"
+
+        // Question-based UI
+        "formHtml += '<p style=\"font-weight:600;color:#495057;margin-bottom:15px\">What type of reading does this sensor provide?</p>';"
+
+        // Option 0: Direct Value (default)
+        "formHtml += '<label style=\"display:block;padding:12px;margin-bottom:8px;background:white;border:2px solid #e0e0e0;border-radius:8px;cursor:pointer\" onmouseover=\"this.style.borderColor=\\\"#17a2b8\\\"\" onmouseout=\"this.style.borderColor=this.querySelector(\\\"input\\\").checked?\\\"#17a2b8\\\":\\\"#e0e0e0\\\"\">';"
+        "formHtml += '<input type=\"radio\" name=\"sensor_' + sensorId + '_calc_type\" value=\"0\" checked onchange=\"showCalcFields(this,' + sensorId + ')\" style=\"margin-right:10px\">';"
+        "formHtml += '<strong>Direct Value</strong> - No calculation needed';"
+        "formHtml += '<div style=\"color:#666;font-size:13px;margin:5px 0 0 25px\">Use the raw sensor value as-is (with scale factor if set)</div>';"
+        "formHtml += '</label>';"
+
+        // Option 10: Flow Meter Integer + Decimal (NEW - simpler)
+        "formHtml += '<label style=\"display:block;padding:12px;margin-bottom:8px;background:white;border:2px solid #e0e0e0;border-radius:8px;cursor:pointer\" onmouseover=\"this.style.borderColor=\\\"#17a2b8\\\"\" onmouseout=\"this.style.borderColor=this.querySelector(\\\"input\\\").checked?\\\"#17a2b8\\\":\\\"#e0e0e0\\\"\">';"
+        "formHtml += '<input type=\"radio\" name=\"sensor_' + sensorId + '_calc_type\" value=\"10\" onchange=\"showCalcFields(this,' + sensorId + ')\" style=\"margin-right:10px\">';"
+        "formHtml += '<strong>📊 Flow Meter</strong> - Integer + Decimal combined';"
+        "formHtml += '<div style=\"color:#666;font-size:13px;margin:5px 0 0 25px\">Total = Integer part + Decimal part<br><span style=\"color:#17a2b8\">Example: 12345 + 0.678 = 12345.678 m³</span></div>';"
+        "formHtml += '</label>';"
+
+        // Option 1: Vortex style (HIGH × N + LOW)
+        "formHtml += '<label style=\"display:block;padding:12px;margin-bottom:8px;background:white;border:2px solid #e0e0e0;border-radius:8px;cursor:pointer\" onmouseover=\"this.style.borderColor=\\\"#17a2b8\\\"\" onmouseout=\"this.style.borderColor=this.querySelector(\\\"input\\\").checked?\\\"#17a2b8\\\":\\\"#e0e0e0\\\"\">';"
+        "formHtml += '<input type=\"radio\" name=\"sensor_' + sensorId + '_calc_type\" value=\"1\" onchange=\"showCalcFields(this,' + sensorId + ')\" style=\"margin-right:10px\">';"
+        "formHtml += '<strong>📊 Flow Meter (Vortex style)</strong> - HIGH × 100 + LOW';"
+        "formHtml += '<div style=\"color:#666;font-size:13px;margin:5px 0 0 25px\">For extended precision: Total = (HIGH × multiplier) + LOW<br><span style=\"color:#17a2b8\">Example: 1234 × 100 + 87.89 = 123487.89 m³</span></div>';"
+        "formHtml += '</label>';"
+
+        // Option 3: Level to Percentage
+        "formHtml += '<label style=\"display:block;padding:12px;margin-bottom:8px;background:white;border:2px solid #e0e0e0;border-radius:8px;cursor:pointer\" onmouseover=\"this.style.borderColor=\\\"#17a2b8\\\"\" onmouseout=\"this.style.borderColor=this.querySelector(\\\"input\\\").checked?\\\"#17a2b8\\\":\\\"#e0e0e0\\\"\">';"
+        "formHtml += '<input type=\"radio\" name=\"sensor_' + sensorId + '_calc_type\" value=\"3\" onchange=\"showCalcFields(this,' + sensorId + ')\" style=\"margin-right:10px\">';"
+        "formHtml += '<strong>📏 Level Sensor</strong> - Convert to percentage (0-100%)';"
+        "formHtml += '<div style=\"color:#666;font-size:13px;margin:5px 0 0 25px\">Calculate tank fill level as percentage</div>';"
+        "formHtml += '</label>';"
+
+        // Option 2: Scale Value
+        "formHtml += '<label style=\"display:block;padding:12px;margin-bottom:8px;background:white;border:2px solid #e0e0e0;border-radius:8px;cursor:pointer\" onmouseover=\"this.style.borderColor=\\\"#17a2b8\\\"\" onmouseout=\"this.style.borderColor=this.querySelector(\\\"input\\\").checked?\\\"#17a2b8\\\":\\\"#e0e0e0\\\"\">';"
+        "formHtml += '<input type=\"radio\" name=\"sensor_' + sensorId + '_calc_type\" value=\"2\" onchange=\"showCalcFields(this,' + sensorId + ')\" style=\"margin-right:10px\">';"
+        "formHtml += '<strong>✖️ Scale Value</strong> - Multiply and/or add offset';"
+        "formHtml += '<div style=\"color:#666;font-size:13px;margin:5px 0 0 25px\">Result = (Raw × Scale) + Offset<br><span style=\"color:#17a2b8\">Example: 1234 × 0.001 = 1.234</span></div>';"
+        "formHtml += '</label>';"
+
+        // Option 4/5: Tank Volume
+        "formHtml += '<label style=\"display:block;padding:12px;margin-bottom:8px;background:white;border:2px solid #e0e0e0;border-radius:8px;cursor:pointer\" onmouseover=\"this.style.borderColor=\\\"#17a2b8\\\"\" onmouseout=\"this.style.borderColor=this.querySelector(\\\"input\\\").checked?\\\"#17a2b8\\\":\\\"#e0e0e0\\\"\">';"
+        "formHtml += '<input type=\"radio\" name=\"sensor_' + sensorId + '_calc_type\" value=\"4\" onchange=\"showCalcFields(this,' + sensorId + ')\" style=\"margin-right:10px\">';"
+        "formHtml += '<strong>🛢️ Tank Volume</strong> - Calculate liters from level';"
+        "formHtml += '<div style=\"color:#666;font-size:13px;margin:5px 0 0 25px\">Convert level reading to actual volume (liters/m³)</div>';"
+        "formHtml += '</label>';"
+
+        // Option 8: 4-20mA
+        "formHtml += '<label style=\"display:block;padding:12px;margin-bottom:8px;background:white;border:2px solid #e0e0e0;border-radius:8px;cursor:pointer\" onmouseover=\"this.style.borderColor=\\\"#17a2b8\\\"\" onmouseout=\"this.style.borderColor=this.querySelector(\\\"input\\\").checked?\\\"#17a2b8\\\":\\\"#e0e0e0\\\"\">';"
+        "formHtml += '<input type=\"radio\" name=\"sensor_' + sensorId + '_calc_type\" value=\"8\" onchange=\"showCalcFields(this,' + sensorId + ')\" style=\"margin-right:10px\">';"
+        "formHtml += '<strong>📈 4-20mA Sensor</strong> - Map range to output';"
+        "formHtml += '<div style=\"color:#666;font-size:13px;margin:5px 0 0 25px\">Convert 4-20mA signal to your desired range<br><span style=\"color:#17a2b8\">Example: 4mA=0%, 20mA=100%</span></div>';"
+        "formHtml += '</label>';"
+
+        // Dynamic fields container
+        "formHtml += '<div id=\"calc-fields-' + sensorId + '\" style=\"margin-top:15px\"></div>';"
+
+        "formHtml += '</div></div>';"
+        // ========== END CALCULATION ENGINE UI ==========
+
         "formHtml += '<br><p style=\"color:#dc3545;font-size:12px;margin:5px 0\"><strong>* Required fields</strong> - Name and Unit ID must be filled</p>';"
         "formDiv.innerHTML = formHtml;"
         "formDiv.style.display = 'block';"
@@ -3583,7 +3649,161 @@ static esp_err_t config_page_handler(httpd_req_t *req)
         "}"
         "}"
         "}"
-        
+
+        // ========== CALCULATION ENGINE JAVASCRIPT FUNCTIONS ==========
+        "function toggleCalcSection(header) {"
+        "const content = header.nextElementSibling;"
+        "const icon = header.querySelector('.calc-toggle-icon');"
+        "if (content.style.display === 'none') {"
+        "content.style.display = 'block';"
+        "icon.style.transform = 'rotate(180deg)';"
+        "} else {"
+        "content.style.display = 'none';"
+        "icon.style.transform = 'rotate(0deg)';"
+        "}"
+        "}"
+
+        "function showCalcFields(select, sensorId) {"
+        "const container = document.getElementById('calc-fields-' + sensorId);"
+        "const calcType = parseInt(select.value);"
+        "let fieldsHtml = '';"
+        "const inputStyle = 'width:100%;padding:8px;border:1px solid #e0e0e0;border-radius:4px;font-size:14px';"
+        "const labelStyle = 'font-size:13px;color:#495057;display:block;margin-bottom:3px';"
+
+        // CALC_COMBINE_REGISTERS (1) - Vortex Flowmeter
+        "if (calcType === 1) {"
+        "fieldsHtml = '<div style=\"background:#e8f4fc;padding:12px;border-radius:6px;margin-top:10px\">';"
+        "fieldsHtml += '<p style=\"margin:0 0 10px 0;font-weight:600;color:#0066cc\">Combine Two Registers: Total = (HIGH × Multiplier) + LOW</p>';"
+        "fieldsHtml += '<p style=\"font-size:12px;color:#666;margin-bottom:10px\">For Vortex flowmeter: Cumulative = (Reg[8-9] × 100) + Reg[10-11]</p>';"
+        "fieldsHtml += '<div style=\"display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px\">';"
+        "fieldsHtml += '<div><label style=\"' + labelStyle + '\">HIGH Register Offset:</label>';"
+        "fieldsHtml += '<input type=\"number\" name=\"sensor_' + sensorId + '_calc_high_reg\" value=\"8\" style=\"' + inputStyle + '\">';"
+        "fieldsHtml += '<small style=\"color:#888;font-size:11px\">Offset from start register</small></div>';"
+        "fieldsHtml += '<div><label style=\"' + labelStyle + '\">LOW Register Offset:</label>';"
+        "fieldsHtml += '<input type=\"number\" name=\"sensor_' + sensorId + '_calc_low_reg\" value=\"10\" style=\"' + inputStyle + '\">';"
+        "fieldsHtml += '<small style=\"color:#888;font-size:11px\">Offset from start register</small></div>';"
+        "fieldsHtml += '<div><label style=\"' + labelStyle + '\">Multiplier:</label>';"
+        "fieldsHtml += '<input type=\"number\" name=\"sensor_' + sensorId + '_calc_multiplier\" value=\"100\" step=\"any\" style=\"' + inputStyle + '\">';"
+        "fieldsHtml += '<small style=\"color:#888;font-size:11px\">HIGH value multiplier</small></div>';"
+        "fieldsHtml += '</div></div>';"
+        "}"
+
+        // CALC_SCALE_OFFSET (2)
+        "else if (calcType === 2) {"
+        "fieldsHtml = '<div style=\"background:#f0f9f0;padding:12px;border-radius:6px;margin-top:10px\">';"
+        "fieldsHtml += '<p style=\"margin:0 0 10px 0;font-weight:600;color:#28a745\">Scale and Offset: Result = (Raw × Scale) + Offset</p>';"
+        "fieldsHtml += '<div style=\"display:grid;grid-template-columns:1fr 1fr;gap:10px\">';"
+        "fieldsHtml += '<div><label style=\"' + labelStyle + '\">Scale (Multiplier):</label>';"
+        "fieldsHtml += '<input type=\"number\" name=\"sensor_' + sensorId + '_calc_scale\" value=\"1.0\" step=\"any\" style=\"' + inputStyle + '\"></div>';"
+        "fieldsHtml += '<div><label style=\"' + labelStyle + '\">Offset (Add):</label>';"
+        "fieldsHtml += '<input type=\"number\" name=\"sensor_' + sensorId + '_calc_offset\" value=\"0\" step=\"any\" style=\"' + inputStyle + '\"></div>';"
+        "fieldsHtml += '</div></div>';"
+        "}"
+
+        // CALC_LEVEL_PERCENTAGE (3)
+        "else if (calcType === 3) {"
+        "fieldsHtml = '<div style=\"background:#fff8e6;padding:12px;border-radius:6px;margin-top:10px\">';"
+        "fieldsHtml += '<p style=\"margin:0 0 10px 0;font-weight:600;color:#cc8800\">Level to Percentage (0-100%)</p>';"
+        "fieldsHtml += '<div style=\"display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px\">';"
+        "fieldsHtml += '<div><label style=\"' + labelStyle + '\">Empty Tank Value:</label>';"
+        "fieldsHtml += '<input type=\"number\" name=\"sensor_' + sensorId + '_calc_empty_val\" value=\"0\" step=\"any\" style=\"' + inputStyle + '\">';"
+        "fieldsHtml += '<small style=\"color:#888;font-size:11px\">Sensor reading when empty</small></div>';"
+        "fieldsHtml += '<div><label style=\"' + labelStyle + '\">Full Tank Value:</label>';"
+        "fieldsHtml += '<input type=\"number\" name=\"sensor_' + sensorId + '_calc_full_val\" value=\"100\" step=\"any\" style=\"' + inputStyle + '\">';"
+        "fieldsHtml += '<small style=\"color:#888;font-size:11px\">Sensor reading when full</small></div>';"
+        "fieldsHtml += '<div><label style=\"' + labelStyle + '\">Invert Level:</label>';"
+        "fieldsHtml += '<select name=\"sensor_' + sensorId + '_calc_invert\" style=\"' + inputStyle + '\">';"
+        "fieldsHtml += '<option value=\"0\">No (higher = fuller)</option>';"
+        "fieldsHtml += '<option value=\"1\">Yes (higher = emptier)</option></select>';"
+        "fieldsHtml += '<small style=\"color:#888;font-size:11px\">For ultrasonic distance</small></div>';"
+        "fieldsHtml += '</div></div>';"
+        "}"
+
+        // CALC_CYLINDER_VOLUME (4)
+        "else if (calcType === 4) {"
+        "fieldsHtml = '<div style=\"background:#f5f0ff;padding:12px;border-radius:6px;margin-top:10px\">';"
+        "fieldsHtml += '<p style=\"margin:0 0 10px 0;font-weight:600;color:#6600cc\">Cylinder Tank Volume: V = π × r² × h</p>';"
+        "fieldsHtml += '<div style=\"display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px\">';"
+        "fieldsHtml += '<div><label style=\"' + labelStyle + '\">Tank Diameter (m):</label>';"
+        "fieldsHtml += '<input type=\"number\" name=\"sensor_' + sensorId + '_calc_tank_dia\" value=\"1.0\" step=\"any\" style=\"' + inputStyle + '\"></div>';"
+        "fieldsHtml += '<div><label style=\"' + labelStyle + '\">Tank Height (m):</label>';"
+        "fieldsHtml += '<input type=\"number\" name=\"sensor_' + sensorId + '_calc_tank_hgt\" value=\"2.0\" step=\"any\" style=\"' + inputStyle + '\"></div>';"
+        "fieldsHtml += '<div><label style=\"' + labelStyle + '\">Volume Unit:</label>';"
+        "fieldsHtml += '<select name=\"sensor_' + sensorId + '_calc_vol_unit\" style=\"' + inputStyle + '\">';"
+        "fieldsHtml += '<option value=\"0\">Liters</option>';"
+        "fieldsHtml += '<option value=\"1\">Cubic Meters (m³)</option>';"
+        "fieldsHtml += '<option value=\"2\">US Gallons</option></select></div>';"
+        "fieldsHtml += '</div></div>';"
+        "}"
+
+        // CALC_RECTANGLE_VOLUME (5)
+        "else if (calcType === 5) {"
+        "fieldsHtml = '<div style=\"background:#f5f0ff;padding:12px;border-radius:6px;margin-top:10px\">';"
+        "fieldsHtml += '<p style=\"margin:0 0 10px 0;font-weight:600;color:#6600cc\">Rectangle Tank Volume: V = L × W × h</p>';"
+        "fieldsHtml += '<div style=\"display:grid;grid-template-columns:1fr 1fr 1fr 1fr;gap:10px\">';"
+        "fieldsHtml += '<div><label style=\"' + labelStyle + '\">Length (m):</label>';"
+        "fieldsHtml += '<input type=\"number\" name=\"sensor_' + sensorId + '_calc_tank_len\" value=\"2.0\" step=\"any\" style=\"' + inputStyle + '\"></div>';"
+        "fieldsHtml += '<div><label style=\"' + labelStyle + '\">Width (m):</label>';"
+        "fieldsHtml += '<input type=\"number\" name=\"sensor_' + sensorId + '_calc_tank_wid\" value=\"1.0\" step=\"any\" style=\"' + inputStyle + '\"></div>';"
+        "fieldsHtml += '<div><label style=\"' + labelStyle + '\">Height (m):</label>';"
+        "fieldsHtml += '<input type=\"number\" name=\"sensor_' + sensorId + '_calc_tank_hgt\" value=\"1.5\" step=\"any\" style=\"' + inputStyle + '\"></div>';"
+        "fieldsHtml += '<div><label style=\"' + labelStyle + '\">Volume Unit:</label>';"
+        "fieldsHtml += '<select name=\"sensor_' + sensorId + '_calc_vol_unit\" style=\"' + inputStyle + '\">';"
+        "fieldsHtml += '<option value=\"0\">Liters</option>';"
+        "fieldsHtml += '<option value=\"1\">Cubic Meters (m³)</option>';"
+        "fieldsHtml += '<option value=\"2\">US Gallons</option></select></div>';"
+        "fieldsHtml += '</div></div>';"
+        "}"
+
+        // CALC_FLOW_RATE_PULSE (7)
+        "else if (calcType === 7) {"
+        "fieldsHtml = '<div style=\"background:#e6f7ff;padding:12px;border-radius:6px;margin-top:10px\">';"
+        "fieldsHtml += '<p style=\"margin:0 0 10px 0;font-weight:600;color:#0099cc\">Flow Rate from Pulses: Flow = Pulses ÷ Pulses_per_unit</p>';"
+        "fieldsHtml += '<div><label style=\"' + labelStyle + '\">Pulses per Unit (e.g., pulses per liter):</label>';"
+        "fieldsHtml += '<input type=\"number\" name=\"sensor_' + sensorId + '_calc_pulses\" value=\"100\" step=\"any\" style=\"' + inputStyle + '\">';"
+        "fieldsHtml += '<small style=\"color:#888;font-size:11px\">Example: 100 pulses = 1 liter</small></div>';"
+        "fieldsHtml += '</div>';"
+        "}"
+
+        // CALC_LINEAR_INTERPOLATION (8)
+        "else if (calcType === 8) {"
+        "fieldsHtml = '<div style=\"background:#fff0f5;padding:12px;border-radius:6px;margin-top:10px\">';"
+        "fieldsHtml += '<p style=\"margin:0 0 10px 0;font-weight:600;color:#cc0066\">Linear Interpolation: Map input range to output range</p>';"
+        "fieldsHtml += '<p style=\"font-size:12px;color:#666;margin-bottom:10px\">Example: 4-20mA sensor → 0-100% output</p>';"
+        "fieldsHtml += '<div style=\"display:grid;grid-template-columns:1fr 1fr 1fr 1fr;gap:10px\">';"
+        "fieldsHtml += '<div><label style=\"' + labelStyle + '\">Input Min:</label>';"
+        "fieldsHtml += '<input type=\"number\" name=\"sensor_' + sensorId + '_calc_in_min\" value=\"4\" step=\"any\" style=\"' + inputStyle + '\"></div>';"
+        "fieldsHtml += '<div><label style=\"' + labelStyle + '\">Input Max:</label>';"
+        "fieldsHtml += '<input type=\"number\" name=\"sensor_' + sensorId + '_calc_in_max\" value=\"20\" step=\"any\" style=\"' + inputStyle + '\"></div>';"
+        "fieldsHtml += '<div><label style=\"' + labelStyle + '\">Output Min:</label>';"
+        "fieldsHtml += '<input type=\"number\" name=\"sensor_' + sensorId + '_calc_out_min\" value=\"0\" step=\"any\" style=\"' + inputStyle + '\"></div>';"
+        "fieldsHtml += '<div><label style=\"' + labelStyle + '\">Output Max:</label>';"
+        "fieldsHtml += '<input type=\"number\" name=\"sensor_' + sensorId + '_calc_out_max\" value=\"100\" step=\"any\" style=\"' + inputStyle + '\"></div>';"
+        "fieldsHtml += '</div></div>';"
+        "}"
+
+        // CALC_FLOW_INT_DECIMAL (10) - Integer + Decimal combined
+        "else if (calcType === 10) {"
+        "fieldsHtml = '<div style=\"background:#e8f4fc;padding:12px;border-radius:6px;margin-top:10px\">';"
+        "fieldsHtml += '<p style=\"margin:0 0 10px 0;font-weight:600;color:#0066cc\">Flow Meter: Integer + Decimal</p>';"
+        "fieldsHtml += '<p style=\"font-size:12px;color:#666;margin-bottom:10px\">Total = Integer part + (Decimal part × Scale)<br>Example: 12345 + (678 × 0.001) = 12345.678 m³</p>';"
+        "fieldsHtml += '<div style=\"display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px\">';"
+        "fieldsHtml += '<div><label style=\"' + labelStyle + '\">Integer Register Offset:</label>';"
+        "fieldsHtml += '<input type=\"number\" name=\"sensor_' + sensorId + '_calc_high_reg\" value=\"0\" style=\"' + inputStyle + '\">';"
+        "fieldsHtml += '<small style=\"color:#888;font-size:11px\">Register for whole number</small></div>';"
+        "fieldsHtml += '<div><label style=\"' + labelStyle + '\">Decimal Register Offset:</label>';"
+        "fieldsHtml += '<input type=\"number\" name=\"sensor_' + sensorId + '_calc_low_reg\" value=\"2\" style=\"' + inputStyle + '\">';"
+        "fieldsHtml += '<small style=\"color:#888;font-size:11px\">Register for decimal part</small></div>';"
+        "fieldsHtml += '<div><label style=\"' + labelStyle + '\">Decimal Scale:</label>';"
+        "fieldsHtml += '<input type=\"number\" name=\"sensor_' + sensorId + '_calc_scale\" value=\"0.001\" step=\"any\" style=\"' + inputStyle + '\">';"
+        "fieldsHtml += '<small style=\"color:#888;font-size:11px\">0.001 for 3 decimals</small></div>';"
+        "fieldsHtml += '</div></div>';"
+        "}"
+
+        "container.innerHTML = fieldsHtml;"
+        "}"
+        // ========== END CALCULATION ENGINE JAVASCRIPT ==========
+
         "function saveSingleSensor(sensorId) {"
         "console.log('Saving sensor:', sensorId);"
         "const nameField = document.querySelector('input[name=\"sensor_' + sensorId + '_name\"]');"
@@ -6750,12 +6970,66 @@ static esp_err_t save_single_sensor_handler(httpd_req_t *req)
                             strncpy(g_system_config.sensors[current_sensor_idx].meter_type, decoded_value, sizeof(g_system_config.sensors[current_sensor_idx].meter_type) - 1);
                             g_system_config.sensors[current_sensor_idx].meter_type[sizeof(g_system_config.sensors[current_sensor_idx].meter_type) - 1] = '\0';
                         }
+                        // ========== CALCULATION ENGINE PARAMETERS ==========
+                        else if (strcmp(param_type, "calc_type") == 0) {
+                            g_system_config.sensors[current_sensor_idx].calculation.calc_type = (calculation_type_t)atoi(decoded_value);
+                            ESP_LOGI(TAG, "Save_single: calc_type=%d for sensor %d",
+                                     g_system_config.sensors[current_sensor_idx].calculation.calc_type, current_sensor_idx);
+                        } else if (strcmp(param_type, "calc_high_reg") == 0) {
+                            g_system_config.sensors[current_sensor_idx].calculation.high_register_offset = atoi(decoded_value);
+                        } else if (strcmp(param_type, "calc_low_reg") == 0) {
+                            g_system_config.sensors[current_sensor_idx].calculation.low_register_offset = atoi(decoded_value);
+                        } else if (strcmp(param_type, "calc_multiplier") == 0) {
+                            g_system_config.sensors[current_sensor_idx].calculation.combine_multiplier = atof(decoded_value);
+                        } else if (strcmp(param_type, "calc_scale") == 0) {
+                            g_system_config.sensors[current_sensor_idx].calculation.scale = atof(decoded_value);
+                        } else if (strcmp(param_type, "calc_offset") == 0) {
+                            g_system_config.sensors[current_sensor_idx].calculation.offset = atof(decoded_value);
+                        } else if (strcmp(param_type, "calc_empty_val") == 0) {
+                            g_system_config.sensors[current_sensor_idx].calculation.tank_empty_value = atof(decoded_value);
+                        } else if (strcmp(param_type, "calc_full_val") == 0) {
+                            g_system_config.sensors[current_sensor_idx].calculation.tank_full_value = atof(decoded_value);
+                        } else if (strcmp(param_type, "calc_invert") == 0) {
+                            g_system_config.sensors[current_sensor_idx].calculation.invert_level = (atoi(decoded_value) == 1);
+                        } else if (strcmp(param_type, "calc_tank_dia") == 0) {
+                            g_system_config.sensors[current_sensor_idx].calculation.tank_diameter = atof(decoded_value);
+                        } else if (strcmp(param_type, "calc_tank_len") == 0) {
+                            g_system_config.sensors[current_sensor_idx].calculation.tank_length = atof(decoded_value);
+                        } else if (strcmp(param_type, "calc_tank_wid") == 0) {
+                            g_system_config.sensors[current_sensor_idx].calculation.tank_width = atof(decoded_value);
+                        } else if (strcmp(param_type, "calc_tank_hgt") == 0) {
+                            g_system_config.sensors[current_sensor_idx].calculation.tank_height = atof(decoded_value);
+                        } else if (strcmp(param_type, "calc_vol_unit") == 0) {
+                            g_system_config.sensors[current_sensor_idx].calculation.volume_unit = atoi(decoded_value);
+                        } else if (strcmp(param_type, "calc_pulses") == 0) {
+                            g_system_config.sensors[current_sensor_idx].calculation.pulses_per_unit = atof(decoded_value);
+                        } else if (strcmp(param_type, "calc_in_min") == 0) {
+                            g_system_config.sensors[current_sensor_idx].calculation.input_min = atof(decoded_value);
+                        } else if (strcmp(param_type, "calc_in_max") == 0) {
+                            g_system_config.sensors[current_sensor_idx].calculation.input_max = atof(decoded_value);
+                        } else if (strcmp(param_type, "calc_out_min") == 0) {
+                            g_system_config.sensors[current_sensor_idx].calculation.output_min = atof(decoded_value);
+                        } else if (strcmp(param_type, "calc_out_max") == 0) {
+                            g_system_config.sensors[current_sensor_idx].calculation.output_max = atof(decoded_value);
+                        } else if (strcmp(param_type, "calc_poly_a") == 0) {
+                            g_system_config.sensors[current_sensor_idx].calculation.poly_a = atof(decoded_value);
+                        } else if (strcmp(param_type, "calc_poly_b") == 0) {
+                            g_system_config.sensors[current_sensor_idx].calculation.poly_b = atof(decoded_value);
+                        } else if (strcmp(param_type, "calc_poly_c") == 0) {
+                            g_system_config.sensors[current_sensor_idx].calculation.poly_c = atof(decoded_value);
+                        } else if (strcmp(param_type, "calc_decimals") == 0) {
+                            g_system_config.sensors[current_sensor_idx].calculation.decimal_places = atoi(decoded_value);
+                        } else if (strcmp(param_type, "calc_unit") == 0) {
+                            strncpy(g_system_config.sensors[current_sensor_idx].calculation.output_unit, decoded_value,
+                                    sizeof(g_system_config.sensors[current_sensor_idx].calculation.output_unit) - 1);
+                        }
+                        // ========== END CALCULATION ENGINE PARAMETERS ==========
                         }
                     }
                 }
             }
         }
-        
+
         if (param_end) {
             param_start = param_end + 1;
         } else {
@@ -7265,31 +7539,134 @@ static esp_err_t test_rs485_handler(httpd_req_t *req)
             uint64_t raw_val64 = 0;
             if (strstr(data_type, "12345678")) {
                 // FLOAT64_12345678 (ABCDEFGH) - Standard big endian
-                raw_val64 = ((uint64_t)registers[0] << 48) | ((uint64_t)registers[1] << 32) | 
+                raw_val64 = ((uint64_t)registers[0] << 48) | ((uint64_t)registers[1] << 32) |
                            ((uint64_t)registers[2] << 16) | registers[3];
             } else if (strstr(data_type, "87654321")) {
                 // FLOAT64_87654321 (HGFEDCBA) - Full little endian
-                raw_val64 = ((uint64_t)registers[3] << 48) | ((uint64_t)registers[2] << 32) | 
+                raw_val64 = ((uint64_t)registers[3] << 48) | ((uint64_t)registers[2] << 32) |
                            ((uint64_t)registers[1] << 16) | registers[0];
+            } else if (strstr(data_type, "21436587")) {
+                // FLOAT64_21436587 (BADCFEHG) - Word-swapped
+                raw_val64 = ((uint64_t)(((registers[0] & 0xFF) << 8) | ((registers[0] >> 8) & 0xFF)) << 48) |
+                           ((uint64_t)(((registers[1] & 0xFF) << 8) | ((registers[1] >> 8) & 0xFF)) << 32) |
+                           ((uint64_t)(((registers[2] & 0xFF) << 8) | ((registers[2] >> 8) & 0xFF)) << 16) |
+                           (((registers[3] & 0xFF) << 8) | ((registers[3] >> 8) & 0xFF));
+            } else if (strstr(data_type, "78563412")) {
+                // FLOAT64_78563412 (GHEFCDAB) - Swapped word pairs
+                raw_val64 = ((uint64_t)(((registers[3] & 0xFF) << 8) | ((registers[3] >> 8) & 0xFF)) << 48) |
+                           ((uint64_t)(((registers[2] & 0xFF) << 8) | ((registers[2] >> 8) & 0xFF)) << 32) |
+                           ((uint64_t)(((registers[1] & 0xFF) << 8) | ((registers[1] >> 8) & 0xFF)) << 16) |
+                           (((registers[0] & 0xFF) << 8) | ((registers[0] >> 8) & 0xFF));
             } else {
                 // Default to standard big endian if specific order not found
-                raw_val64 = ((uint64_t)registers[0] << 48) | ((uint64_t)registers[1] << 32) | 
+                raw_val64 = ((uint64_t)registers[0] << 48) | ((uint64_t)registers[1] << 32) |
                            ((uint64_t)registers[2] << 16) | registers[3];
             }
             union { uint64_t i; double d; } conv64;
             conv64.i = raw_val64;
             primary_value = conv64.d * scale_factor;
         } else if (reg_count >= 2 && strstr(data_type, "FLOAT32")) {
-            uint32_t raw_val = strstr(data_type, "4321") ? 
-                ((uint32_t)registers[1] << 16) | registers[0] :
-                ((uint32_t)registers[0] << 16) | registers[1];
+            uint32_t raw_val;
+            if (strstr(data_type, "4321")) {
+                raw_val = ((uint32_t)registers[1] << 16) | registers[0];
+            } else if (strstr(data_type, "2143")) {
+                raw_val = ((uint32_t)(((registers[0] & 0xFF) << 8) | ((registers[0] >> 8) & 0xFF)) << 16) |
+                         (((registers[1] & 0xFF) << 8) | ((registers[1] >> 8) & 0xFF));
+            } else if (strstr(data_type, "3412")) {
+                raw_val = ((uint32_t)(((registers[1] & 0xFF) << 8) | ((registers[1] >> 8) & 0xFF)) << 16) |
+                         (((registers[0] & 0xFF) << 8) | ((registers[0] >> 8) & 0xFF));
+            } else {
+                raw_val = ((uint32_t)registers[0] << 16) | registers[1];
+            }
             union { uint32_t i; float f; } conv;
             conv.i = raw_val;
             primary_value = (double)conv.f * scale_factor;
         } else if (reg_count >= 2 && strstr(data_type, "UINT32")) {
-            primary_value = (double)(strstr(data_type, "4321") ?
-                (((uint32_t)registers[1] << 16) | registers[0]) :
-                (((uint32_t)registers[0] << 16) | registers[1])) * scale_factor;
+            uint32_t raw_val;
+            if (strstr(data_type, "4321")) {
+                raw_val = ((uint32_t)registers[1] << 16) | registers[0];
+            } else if (strstr(data_type, "2143")) {
+                raw_val = ((uint32_t)(((registers[0] & 0xFF) << 8) | ((registers[0] >> 8) & 0xFF)) << 16) |
+                         (((registers[1] & 0xFF) << 8) | ((registers[1] >> 8) & 0xFF));
+            } else if (strstr(data_type, "3412")) {
+                raw_val = ((uint32_t)(((registers[1] & 0xFF) << 8) | ((registers[1] >> 8) & 0xFF)) << 16) |
+                         (((registers[0] & 0xFF) << 8) | ((registers[0] >> 8) & 0xFF));
+            } else {
+                raw_val = ((uint32_t)registers[0] << 16) | registers[1];
+            }
+            primary_value = (double)raw_val * scale_factor;
+        } else if (reg_count >= 2 && strstr(data_type, "INT32")) {
+            uint32_t raw_val;
+            if (strstr(data_type, "4321")) {
+                raw_val = ((uint32_t)registers[1] << 16) | registers[0];
+            } else if (strstr(data_type, "2143")) {
+                raw_val = ((uint32_t)(((registers[0] & 0xFF) << 8) | ((registers[0] >> 8) & 0xFF)) << 16) |
+                         (((registers[1] & 0xFF) << 8) | ((registers[1] >> 8) & 0xFF));
+            } else if (strstr(data_type, "3412")) {
+                raw_val = ((uint32_t)(((registers[1] & 0xFF) << 8) | ((registers[1] >> 8) & 0xFF)) << 16) |
+                         (((registers[0] & 0xFF) << 8) | ((registers[0] >> 8) & 0xFF));
+            } else {
+                raw_val = ((uint32_t)registers[0] << 16) | registers[1];
+            }
+            primary_value = (double)((int32_t)raw_val) * scale_factor;
+        } else if (reg_count >= 1 && strstr(data_type, "INT16")) {
+            uint16_t raw_val = registers[0];
+            if (strstr(data_type, "_LO")) {
+                raw_val = ((raw_val & 0xFF) << 8) | ((raw_val >> 8) & 0xFF);
+            }
+            primary_value = (double)((int16_t)raw_val) * scale_factor;
+        } else if (reg_count >= 1 && strstr(data_type, "UINT16")) {
+            uint16_t raw_val = registers[0];
+            if (strstr(data_type, "_LO")) {
+                raw_val = ((raw_val & 0xFF) << 8) | ((raw_val >> 8) & 0xFF);
+            }
+            primary_value = (double)raw_val * scale_factor;
+        } else if (reg_count >= 4 && strstr(data_type, "INT64")) {
+            uint64_t raw_val64 = 0;
+            if (strstr(data_type, "12345678")) {
+                raw_val64 = ((uint64_t)registers[0] << 48) | ((uint64_t)registers[1] << 32) |
+                           ((uint64_t)registers[2] << 16) | registers[3];
+            } else if (strstr(data_type, "87654321")) {
+                raw_val64 = ((uint64_t)registers[3] << 48) | ((uint64_t)registers[2] << 32) |
+                           ((uint64_t)registers[1] << 16) | registers[0];
+            } else if (strstr(data_type, "21436587")) {
+                raw_val64 = ((uint64_t)(((registers[0] & 0xFF) << 8) | ((registers[0] >> 8) & 0xFF)) << 48) |
+                           ((uint64_t)(((registers[1] & 0xFF) << 8) | ((registers[1] >> 8) & 0xFF)) << 32) |
+                           ((uint64_t)(((registers[2] & 0xFF) << 8) | ((registers[2] >> 8) & 0xFF)) << 16) |
+                           (((registers[3] & 0xFF) << 8) | ((registers[3] >> 8) & 0xFF));
+            } else if (strstr(data_type, "78563412")) {
+                raw_val64 = ((uint64_t)(((registers[3] & 0xFF) << 8) | ((registers[3] >> 8) & 0xFF)) << 48) |
+                           ((uint64_t)(((registers[2] & 0xFF) << 8) | ((registers[2] >> 8) & 0xFF)) << 32) |
+                           ((uint64_t)(((registers[1] & 0xFF) << 8) | ((registers[1] >> 8) & 0xFF)) << 16) |
+                           (((registers[0] & 0xFF) << 8) | ((registers[0] >> 8) & 0xFF));
+            } else {
+                raw_val64 = ((uint64_t)registers[0] << 48) | ((uint64_t)registers[1] << 32) |
+                           ((uint64_t)registers[2] << 16) | registers[3];
+            }
+            primary_value = (double)((int64_t)raw_val64) * scale_factor;
+        } else if (reg_count >= 4 && strstr(data_type, "UINT64")) {
+            uint64_t raw_val64 = 0;
+            if (strstr(data_type, "12345678")) {
+                raw_val64 = ((uint64_t)registers[0] << 48) | ((uint64_t)registers[1] << 32) |
+                           ((uint64_t)registers[2] << 16) | registers[3];
+            } else if (strstr(data_type, "87654321")) {
+                raw_val64 = ((uint64_t)registers[3] << 48) | ((uint64_t)registers[2] << 32) |
+                           ((uint64_t)registers[1] << 16) | registers[0];
+            } else if (strstr(data_type, "21436587")) {
+                raw_val64 = ((uint64_t)(((registers[0] & 0xFF) << 8) | ((registers[0] >> 8) & 0xFF)) << 48) |
+                           ((uint64_t)(((registers[1] & 0xFF) << 8) | ((registers[1] >> 8) & 0xFF)) << 32) |
+                           ((uint64_t)(((registers[2] & 0xFF) << 8) | ((registers[2] >> 8) & 0xFF)) << 16) |
+                           (((registers[3] & 0xFF) << 8) | ((registers[3] >> 8) & 0xFF));
+            } else if (strstr(data_type, "78563412")) {
+                raw_val64 = ((uint64_t)(((registers[3] & 0xFF) << 8) | ((registers[3] >> 8) & 0xFF)) << 48) |
+                           ((uint64_t)(((registers[2] & 0xFF) << 8) | ((registers[2] >> 8) & 0xFF)) << 32) |
+                           ((uint64_t)(((registers[1] & 0xFF) << 8) | ((registers[1] >> 8) & 0xFF)) << 16) |
+                           (((registers[0] & 0xFF) << 8) | ((registers[0] >> 8) & 0xFF));
+            } else {
+                raw_val64 = ((uint64_t)registers[0] << 48) | ((uint64_t)registers[1] << 32) |
+                           ((uint64_t)registers[2] << 16) | registers[3];
+            }
+            primary_value = (double)raw_val64 * scale_factor;
         } else if (reg_count >= 4 && strstr(data_type, "PANDA_EMF_FIXED")) {
             // PANDA_EMF_FIXED: INT32_BE (Integer) + FLOAT32_BE (Decimal)
             int32_t integer_part = (int32_t)(((uint32_t)registers[0] << 16) | registers[1]);
@@ -9658,7 +10035,7 @@ esp_err_t web_config_start_sta_mode(void)
         ESP_LOGE(TAG, "Failed to start WiFi: %s", esp_err_to_name(ret));
         return ret;
     }
-    
+
     ESP_LOGI(TAG, "SUCCESS: WiFi AP started successfully!");
     ESP_LOGI(TAG, "[MOBILE] SSID: MenuTest");
     ESP_LOGI(TAG, "[KEY] Password: config123");
@@ -11121,8 +11498,8 @@ esp_err_t config_reset_to_defaults(void)
     g_system_config.telegram_config.startup_notification = true;
     g_system_config.telegram_config.poll_interval = 10;
 
-    // Initialize all sensors with default values
-    for (int i = 0; i < 8; i++) {
+    // Initialize all sensors with default values (20 sensors supported)
+    for (int i = 0; i < 20; i++) {
         g_system_config.sensors[i].enabled = false;
         strcpy(g_system_config.sensors[i].data_type, "UINT16_HI");
         strcpy(g_system_config.sensors[i].register_type, "HOLDING");
@@ -11131,7 +11508,10 @@ esp_err_t config_reset_to_defaults(void)
         g_system_config.sensors[i].quantity = 1;
         g_system_config.sensors[i].baud_rate = 9600;
         g_system_config.sensors[i].sub_sensor_count = 0;
-        
+
+        // Initialize calculation parameters with defaults
+        init_default_calculation_params(&g_system_config.sensors[i].calculation);
+
         // Initialize sub-sensors with defaults
         for (int j = 0; j < 8; j++) {
             g_system_config.sensors[i].sub_sensors[j].enabled = false;
@@ -11382,7 +11762,7 @@ esp_err_t web_config_start_server_only(void)
         ESP_LOGE(TAG, "Failed to start WiFi: %s", esp_err_to_name(ret));
         return ret;
     }
-    
+
     ESP_LOGI(TAG, "SoftAP started: SSID='ModbusIoT-Config', Password='config123'");
     ESP_LOGI(TAG, "Web server will be available at: http://192.168.4.1");
     

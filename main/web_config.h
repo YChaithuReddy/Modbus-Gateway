@@ -21,6 +21,79 @@ typedef enum {
     NETWORK_MODE_SIM         // Use SIM module (A7670C) connectivity
 } network_mode_t;
 
+// ============================================================================
+// CALCULATION ENGINE - User-friendly calculated fields for complex sensors
+// ============================================================================
+
+// Calculation types - user selects from dropdown, no coding required
+typedef enum {
+    CALC_NONE = 0,                    // Direct value, no calculation
+    CALC_COMBINE_REGISTERS,           // HIGH × multiplier + LOW (e.g., Vortex flowmeter)
+    CALC_SCALE_OFFSET,                // (value × scale) + offset
+    CALC_LEVEL_PERCENTAGE,            // ((max - value) / range) × 100
+    CALC_CYLINDER_VOLUME,             // π × r² × level (cylindrical tank)
+    CALC_RECTANGLE_VOLUME,            // L × W × level (rectangular tank)
+    CALC_DIFFERENCE,                  // value1 - value2 (differential)
+    CALC_FLOW_RATE_PULSE,             // pulses × factor / time
+    CALC_LINEAR_INTERPOLATION,        // Map input range to output range
+    CALC_POLYNOMIAL,                  // ax² + bx + c (for non-linear sensors)
+    CALC_FLOW_INT_DECIMAL,            // Integer + Decimal from two registers (flow meters)
+    CALC_TYPE_MAX
+} calculation_type_t;
+
+// Human-readable names for calculation types (for web UI)
+// Defined in sensor_manager.c
+extern const char* CALC_TYPE_NAMES[];
+extern const char* CALC_TYPE_DESCRIPTIONS[];
+
+// Calculation parameters structure - fields used depend on calc_type
+typedef struct {
+    calculation_type_t calc_type;     // Type of calculation to apply
+
+    // For CALC_COMBINE_REGISTERS (e.g., Vortex: cumulative = HIGH×100 + LOW)
+    int high_register_offset;         // Offset from base register for HIGH value
+    int low_register_offset;          // Offset from base register for LOW value
+    float combine_multiplier;         // Multiplier for HIGH value (default: 100)
+
+    // For CALC_SCALE_OFFSET
+    float scale;                      // Multiplier
+    float offset;                     // Added after scaling
+
+    // For CALC_LEVEL_PERCENTAGE
+    float tank_empty_value;           // Sensor reading when tank is empty
+    float tank_full_value;            // Sensor reading when tank is full
+    bool invert_level;                // true if sensor reads higher when empty
+
+    // For CALC_CYLINDER_VOLUME / CALC_RECTANGLE_VOLUME
+    float tank_diameter;              // Diameter in meters (cylinder)
+    float tank_length;                // Length in meters (rectangle)
+    float tank_width;                 // Width in meters (rectangle)
+    float tank_height;                // Total tank height in meters
+    int volume_unit;                  // 0=liters, 1=m³, 2=gallons
+
+    // For CALC_DIFFERENCE
+    int secondary_sensor_index;       // Index of second sensor for difference calc
+
+    // For CALC_FLOW_RATE_PULSE
+    float pulses_per_unit;            // Pulses per liter/m³
+
+    // For CALC_LINEAR_INTERPOLATION
+    float input_min;                  // Input range minimum
+    float input_max;                  // Input range maximum
+    float output_min;                 // Output range minimum
+    float output_max;                 // Output range maximum
+
+    // For CALC_POLYNOMIAL (y = ax² + bx + c)
+    float poly_a;                     // Quadratic coefficient
+    float poly_b;                     // Linear coefficient
+    float poly_c;                     // Constant
+
+    // Output configuration
+    char output_unit[16];             // Unit for display (m³, L, %, etc.)
+    int decimal_places;               // Number of decimal places (0-6)
+
+} calculation_params_t;
+
 // Sub-sensor for water quality parameters
 typedef struct {
     bool enabled;
@@ -61,6 +134,9 @@ typedef struct {
     // Sub-sensors for water quality sensors only
     sub_sensor_t sub_sensors[8]; // Up to 8 sub-sensors per water quality sensor
     int sub_sensor_count;
+
+    // Calculation engine - user-friendly calculations without coding
+    calculation_params_t calculation;  // Calculation settings for this sensor
 } sensor_config_t;
 
 // SIM module configuration (A7670C)
@@ -165,6 +241,13 @@ system_config_t* get_system_config(void);
 config_state_t get_config_state(void);
 void set_config_state(config_state_t state);
 bool web_config_needs_auto_start(void);
+
+// Calculation engine functions (defined in sensor_manager.c)
+double apply_calculation(const sensor_config_t *sensor, double raw_value,
+                        const uint16_t *all_registers, int register_count);
+const char* get_calculation_type_name(calculation_type_t type);
+const char* get_calculation_type_description(calculation_type_t type);
+void init_default_calculation_params(calculation_params_t *params);
 
 // Modem GPIO control
 esp_err_t update_modem_gpio_pin(int new_gpio_pin);

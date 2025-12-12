@@ -489,8 +489,17 @@ esp_err_t sensor_test_live(const sensor_config_t *sensor, sensor_test_result_t *
         }
     }
 
+    // Apply calculation engine if configured
+    if (sensor->calculation.calc_type != CALC_NONE) {
+        double pre_calc_value = result->scaled_value;
+        result->scaled_value = apply_calculation(sensor, pre_calc_value, registers, reg_count);
+        ESP_LOGI(TAG, "Calculation applied: %.6f -> %.6f (type: %s)",
+                 pre_calc_value, result->scaled_value,
+                 get_calculation_type_name(sensor->calculation.calc_type));
+    }
+
     result->success = true;
-    ESP_LOGI(TAG, "Test successful: %.6f (Response: %lu ms)", 
+    ESP_LOGI(TAG, "Test successful: %.6f (Response: %lu ms)",
              result->scaled_value, result->response_time_ms);
 
     return ESP_OK;
@@ -779,4 +788,325 @@ const char* get_byte_order_description(const char* byte_order)
     if (strcmp(byte_order, "MIXED_BADC") == 0) return "Mixed Byte Swap (BADC)";
     if (strcmp(byte_order, "MIXED_DCBA") == 0) return "Mixed Full Reverse (DCBA)";
     return "Unknown";
+}
+
+// ============================================================================
+// CALCULATION ENGINE - User-friendly calculated fields for complex sensors
+// ============================================================================
+
+// Human-readable names for calculation types (for web UI dropdown)
+const char* CALC_TYPE_NAMES[] = {
+    "None (Direct Value)",                    // CALC_NONE
+    "Combine Two Registers (HIGH×N + LOW)",   // CALC_COMBINE_REGISTERS
+    "Scale and Offset",                       // CALC_SCALE_OFFSET
+    "Level to Percentage",                    // CALC_LEVEL_PERCENTAGE
+    "Cylinder Tank Volume",                   // CALC_CYLINDER_VOLUME
+    "Rectangle Tank Volume",                  // CALC_RECTANGLE_VOLUME
+    "Difference (A - B)",                     // CALC_DIFFERENCE
+    "Flow Rate from Pulses",                  // CALC_FLOW_RATE_PULSE
+    "Linear Interpolation",                   // CALC_LINEAR_INTERPOLATION
+    "Polynomial (ax² + bx + c)",              // CALC_POLYNOMIAL
+    "Integer + Decimal (Flow Meter)"          // CALC_FLOW_INT_DECIMAL
+};
+
+// Descriptions for each calculation type (for web UI help text)
+const char* CALC_TYPE_DESCRIPTIONS[] = {
+    "Use the raw sensor value without any calculation",
+    "For sensors like Vortex flowmeter: Total = (HIGH register × multiplier) + LOW register",
+    "Apply linear transformation: Result = (Raw × Scale) + Offset",
+    "Convert sensor reading to tank fill percentage (0-100%)",
+    "Calculate volume in a cylindrical tank from level reading",
+    "Calculate volume in a rectangular tank from level reading",
+    "Subtract one sensor value from another (e.g., inlet - outlet)",
+    "Calculate flow rate from pulse count: Flow = Pulses / Pulses_per_unit",
+    "Map input range to output range (e.g., 4-20mA to 0-100%)",
+    "Apply quadratic formula for non-linear sensor calibration",
+    "Combine integer and decimal parts: Total = Integer + (Decimal × scale)"
+};
+
+// Get calculation type name for display
+const char* get_calculation_type_name(calculation_type_t type)
+{
+    if (type >= 0 && type < CALC_TYPE_MAX) {
+        return CALC_TYPE_NAMES[type];
+    }
+    return "Unknown";
+}
+
+// Get calculation type description
+const char* get_calculation_type_description(calculation_type_t type)
+{
+    if (type >= 0 && type < CALC_TYPE_MAX) {
+        return CALC_TYPE_DESCRIPTIONS[type];
+    }
+    return "";
+}
+
+// Initialize calculation parameters with sensible defaults
+void init_default_calculation_params(calculation_params_t *params)
+{
+    if (!params) return;
+
+    memset(params, 0, sizeof(calculation_params_t));
+
+    params->calc_type = CALC_NONE;
+
+    // CALC_COMBINE_REGISTERS defaults (for Vortex-style sensors)
+    params->high_register_offset = 0;
+    params->low_register_offset = 2;
+    params->combine_multiplier = 100.0f;
+
+    // CALC_SCALE_OFFSET defaults
+    params->scale = 1.0f;
+    params->offset = 0.0f;
+
+    // CALC_LEVEL_PERCENTAGE defaults
+    params->tank_empty_value = 0.0f;
+    params->tank_full_value = 100.0f;
+    params->invert_level = false;
+
+    // Tank volume defaults (1m x 1m x 1m = 1000 liters)
+    params->tank_diameter = 1.0f;
+    params->tank_length = 1.0f;
+    params->tank_width = 1.0f;
+    params->tank_height = 1.0f;
+    params->volume_unit = 0;  // liters
+
+    // CALC_DIFFERENCE default
+    params->secondary_sensor_index = -1;
+
+    // CALC_FLOW_RATE_PULSE default
+    params->pulses_per_unit = 1.0f;
+
+    // CALC_LINEAR_INTERPOLATION defaults (4-20mA to 0-100%)
+    params->input_min = 4.0f;
+    params->input_max = 20.0f;
+    params->output_min = 0.0f;
+    params->output_max = 100.0f;
+
+    // CALC_POLYNOMIAL defaults (y = x, no transformation)
+    params->poly_a = 0.0f;
+    params->poly_b = 1.0f;
+    params->poly_c = 0.0f;
+
+    // Output defaults
+    strcpy(params->output_unit, "");
+    params->decimal_places = 2;
+}
+
+// Helper function to extract float from registers with byte order support
+static float extract_float_from_registers(const uint16_t *registers, int offset, const char *byte_order)
+{
+    uint32_t combined;
+
+    if (strcmp(byte_order, "BIG_ENDIAN") == 0 || strcmp(byte_order, "1234") == 0) {
+        // ABCD - reg[0] is high word
+        combined = ((uint32_t)registers[offset] << 16) | registers[offset + 1];
+    } else if (strcmp(byte_order, "LITTLE_ENDIAN") == 0 || strcmp(byte_order, "4321") == 0) {
+        // DCBA - reg[1] is high word
+        combined = ((uint32_t)registers[offset + 1] << 16) | registers[offset];
+    } else if (strcmp(byte_order, "MIXED_BADC") == 0 || strcmp(byte_order, "2143") == 0) {
+        // BADC - byte swap within each register
+        uint16_t reg0_swapped = ((registers[offset] & 0xFF) << 8) | ((registers[offset] >> 8) & 0xFF);
+        uint16_t reg1_swapped = ((registers[offset + 1] & 0xFF) << 8) | ((registers[offset + 1] >> 8) & 0xFF);
+        combined = ((uint32_t)reg0_swapped << 16) | reg1_swapped;
+    } else if (strcmp(byte_order, "3412") == 0) {
+        // CDAB - word swap (common in many sensors like Vortex)
+        combined = ((uint32_t)registers[offset + 1] << 16) | registers[offset];
+    } else {
+        // Default to big endian
+        combined = ((uint32_t)registers[offset] << 16) | registers[offset + 1];
+    }
+
+    float result;
+    memcpy(&result, &combined, sizeof(float));
+    return result;
+}
+
+// Main calculation function - applies the configured calculation to raw sensor data
+double apply_calculation(const sensor_config_t *sensor, double raw_value,
+                        const uint16_t *all_registers, int register_count)
+{
+    if (!sensor) {
+        return raw_value;
+    }
+
+    const calculation_params_t *calc = &sensor->calculation;
+    double result = raw_value;
+
+    switch (calc->calc_type) {
+        case CALC_NONE:
+            // No calculation, return raw value (already scaled by convert_modbus_data)
+            result = raw_value;
+            break;
+
+        case CALC_COMBINE_REGISTERS:
+            // Combine two register values: HIGH × multiplier + LOW
+            // Example: Vortex flowmeter cumulative = (reg[8-9] × 100) + reg[10-11]
+            if (all_registers && register_count >= (calc->low_register_offset + 2)) {
+                float high_value = extract_float_from_registers(
+                    all_registers, calc->high_register_offset, sensor->byte_order);
+                float low_value = extract_float_from_registers(
+                    all_registers, calc->low_register_offset, sensor->byte_order);
+
+                result = (high_value * calc->combine_multiplier) + low_value;
+
+                ESP_LOGI(TAG, "CALC_COMBINE: HIGH[%d]=%.4f × %.1f + LOW[%d]=%.4f = %.4f",
+                         calc->high_register_offset, high_value, calc->combine_multiplier,
+                         calc->low_register_offset, low_value, result);
+            } else {
+                ESP_LOGW(TAG, "CALC_COMBINE: Insufficient registers (have %d, need %d)",
+                         register_count, calc->low_register_offset + 2);
+                result = raw_value;
+            }
+            break;
+
+        case CALC_SCALE_OFFSET:
+            // Linear transformation: (raw × scale) + offset
+            result = (raw_value * calc->scale) + calc->offset;
+            ESP_LOGI(TAG, "CALC_SCALE_OFFSET: %.4f × %.4f + %.4f = %.4f",
+                     raw_value, calc->scale, calc->offset, result);
+            break;
+
+        case CALC_LEVEL_PERCENTAGE:
+            // Convert level reading to percentage
+            // Handles both normal (full = high reading) and inverted (full = low reading) sensors
+            if (calc->tank_full_value != calc->tank_empty_value) {
+                if (calc->invert_level) {
+                    // Inverted: sensor reads higher when tank is empty (e.g., ultrasonic distance)
+                    result = ((calc->tank_empty_value - raw_value) /
+                              (calc->tank_empty_value - calc->tank_full_value)) * 100.0;
+                } else {
+                    // Normal: sensor reads higher when tank is full (e.g., pressure sensor)
+                    result = ((raw_value - calc->tank_empty_value) /
+                              (calc->tank_full_value - calc->tank_empty_value)) * 100.0;
+                }
+                // Clamp to 0-100%
+                if (result < 0) result = 0;
+                if (result > 100) result = 100;
+
+                ESP_LOGI(TAG, "CALC_LEVEL_PCT: raw=%.4f, empty=%.4f, full=%.4f, invert=%d -> %.2f%%",
+                         raw_value, calc->tank_empty_value, calc->tank_full_value,
+                         calc->invert_level, result);
+            }
+            break;
+
+        case CALC_CYLINDER_VOLUME:
+            // Volume = π × r² × level
+            // level is calculated from raw_value as percentage, then converted to actual height
+            {
+                double level_percent = raw_value;  // Assume raw_value is already percentage
+                double level_height = (level_percent / 100.0) * calc->tank_height;
+                double radius = calc->tank_diameter / 2.0;
+                double volume_m3 = M_PI * radius * radius * level_height;
+
+                // Convert to requested unit
+                switch (calc->volume_unit) {
+                    case 0: result = volume_m3 * 1000.0; break;  // liters
+                    case 1: result = volume_m3; break;           // m³
+                    case 2: result = volume_m3 * 264.172; break; // US gallons
+                    default: result = volume_m3 * 1000.0; break;
+                }
+
+                ESP_LOGI(TAG, "CALC_CYLINDER: level=%.2f%%, height=%.2fm, dia=%.2fm -> %.2f %s",
+                         level_percent, calc->tank_height, calc->tank_diameter, result,
+                         calc->volume_unit == 0 ? "L" : (calc->volume_unit == 1 ? "m³" : "gal"));
+            }
+            break;
+
+        case CALC_RECTANGLE_VOLUME:
+            // Volume = L × W × level
+            {
+                double level_percent = raw_value;  // Assume raw_value is already percentage
+                double level_height = (level_percent / 100.0) * calc->tank_height;
+                double volume_m3 = calc->tank_length * calc->tank_width * level_height;
+
+                // Convert to requested unit
+                switch (calc->volume_unit) {
+                    case 0: result = volume_m3 * 1000.0; break;  // liters
+                    case 1: result = volume_m3; break;           // m³
+                    case 2: result = volume_m3 * 264.172; break; // US gallons
+                    default: result = volume_m3 * 1000.0; break;
+                }
+
+                ESP_LOGI(TAG, "CALC_RECTANGLE: level=%.2f%%, L=%.2f, W=%.2f, H=%.2f -> %.2f %s",
+                         level_percent, calc->tank_length, calc->tank_width, calc->tank_height, result,
+                         calc->volume_unit == 0 ? "L" : (calc->volume_unit == 1 ? "m³" : "gal"));
+            }
+            break;
+
+        case CALC_DIFFERENCE:
+            // This requires access to another sensor's value
+            // For now, just return raw value - full implementation needs sensor array access
+            ESP_LOGW(TAG, "CALC_DIFFERENCE: Secondary sensor reference not implemented in this context");
+            result = raw_value;
+            break;
+
+        case CALC_FLOW_RATE_PULSE:
+            // Convert pulse count to flow units
+            if (calc->pulses_per_unit > 0) {
+                result = raw_value / calc->pulses_per_unit;
+                ESP_LOGI(TAG, "CALC_PULSE: %.4f pulses / %.4f = %.4f units",
+                         raw_value, calc->pulses_per_unit, result);
+            }
+            break;
+
+        case CALC_LINEAR_INTERPOLATION:
+            // Map input range to output range
+            // Example: 4-20mA -> 0-100%
+            if (calc->input_max != calc->input_min) {
+                double normalized = (raw_value - calc->input_min) / (calc->input_max - calc->input_min);
+                result = calc->output_min + normalized * (calc->output_max - calc->output_min);
+
+                ESP_LOGI(TAG, "CALC_LINEAR_INTERP: %.4f [%.1f-%.1f] -> %.4f [%.1f-%.1f]",
+                         raw_value, calc->input_min, calc->input_max,
+                         result, calc->output_min, calc->output_max);
+            }
+            break;
+
+        case CALC_POLYNOMIAL:
+            // Quadratic: y = ax² + bx + c
+            result = (calc->poly_a * raw_value * raw_value) +
+                     (calc->poly_b * raw_value) +
+                     calc->poly_c;
+            ESP_LOGI(TAG, "CALC_POLY: %.4f × %.4f² + %.4f × %.4f + %.4f = %.4f",
+                     calc->poly_a, raw_value, calc->poly_b, raw_value, calc->poly_c, result);
+            break;
+
+        case CALC_FLOW_INT_DECIMAL:
+            // Combine integer and decimal parts: Total = Integer + (Decimal × scale)
+            // Example: Integer=12345, Decimal=678, Scale=0.001 -> 12345 + 0.678 = 12345.678
+            if (all_registers && register_count >= (calc->low_register_offset + 2)) {
+                float int_value = extract_float_from_registers(
+                    all_registers, calc->high_register_offset, sensor->byte_order);
+                float dec_value = extract_float_from_registers(
+                    all_registers, calc->low_register_offset, sensor->byte_order);
+
+                // Scale defaults to 0.001 if not specified (to handle 3-digit decimals)
+                float dec_scale = (calc->scale > 0) ? calc->scale : 0.001;
+                result = int_value + (dec_value * dec_scale);
+
+                ESP_LOGI(TAG, "CALC_FLOW_INT_DEC: Int[%d]=%.0f + Dec[%d]=%.0f × %.6f = %.4f",
+                         calc->high_register_offset, int_value,
+                         calc->low_register_offset, dec_value, dec_scale, result);
+            } else {
+                ESP_LOGW(TAG, "CALC_FLOW_INT_DEC: Insufficient registers (have %d, need %d)",
+                         register_count, calc->low_register_offset + 2);
+                result = raw_value;
+            }
+            break;
+
+        default:
+            ESP_LOGW(TAG, "Unknown calculation type: %d", calc->calc_type);
+            result = raw_value;
+            break;
+    }
+
+    // Apply decimal places rounding if specified
+    if (calc->decimal_places >= 0 && calc->decimal_places <= 6) {
+        double multiplier = pow(10.0, calc->decimal_places);
+        result = round(result * multiplier) / multiplier;
+    }
+
+    return result;
 }
