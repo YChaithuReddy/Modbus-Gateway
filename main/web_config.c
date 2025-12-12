@@ -10460,7 +10460,7 @@ static esp_err_t api_modbus_poll_handler(httpd_req_t *req) {
     uint16_t start_reg = atoi(reg_str);
     uint16_t quantity = atoi(qty_str);
 
-    if (slave_id < 1 || slave_id > 247 || start_reg > 65535 || quantity < 1 || quantity > 20) {
+    if (slave_id < 1 || slave_id > 247 || quantity < 1 || quantity > 20) {
         httpd_resp_sendstr(req, "{\"status\":\"error\",\"message\":\"Parameter out of range\"}");
         return ESP_OK;
     }

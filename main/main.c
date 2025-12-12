@@ -1791,7 +1791,7 @@ static void create_telemetry_payload(char* payload, size_t payload_size) {
     // No free() needed - using static buffers
 }
 
-static esp_err_t read_configured_sensors_data(void) {
+__attribute__((unused)) static esp_err_t read_configured_sensors_data(void) {
     ESP_LOGI(TAG, "[FLOW] Reading configured sensors via Modbus RS485...");
     
     system_config_t *config = get_system_config();
