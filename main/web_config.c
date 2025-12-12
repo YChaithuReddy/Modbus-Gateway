@@ -3427,83 +3427,29 @@ static esp_err_t config_page_handler(httpd_req_t *req)
         "formHtml += '<p style=\"color:#28a745;font-size:13px;margin:15px 0;padding:10px;background:#f0fff4;border:1px solid #28a745;border-radius:4px\"><strong>Fixed format - UINT16_HI (16-bit) - no data type selection needed</strong></p>';"
         "}"
 
-        // ========== CALCULATION ENGINE UI (Modern Design) ==========
-        "formHtml += '<div style=\"margin-top:25px;border-radius:12px;overflow:hidden;box-shadow:0 4px 15px rgba(0,0,0,0.1)\">';"
+        // ========== CALCULATION ENGINE UI (Dropdown Design) ==========
+        "formHtml += '<div style=\"margin-top:20px;padding:15px;background:#f8f9fa;border:1px solid #dee2e6;border-radius:8px\">';"
 
-        // Header with gradient and icon
-        "formHtml += '<div onclick=\"toggleCalcSection(this)\" style=\"background:linear-gradient(135deg,#667eea 0%,#764ba2 100%);padding:16px 20px;cursor:pointer;display:flex;justify-content:space-between;align-items:center\">';"
-        "formHtml += '<div style=\"display:flex;align-items:center;gap:12px\">';"
-        "formHtml += '<div style=\"width:40px;height:40px;background:rgba(255,255,255,0.2);border-radius:10px;display:flex;align-items:center;justify-content:center;font-size:20px\">⚙️</div>';"
-        "formHtml += '<div><span style=\"font-weight:700;color:white;font-size:16px;display:block\">Calculation Settings</span>';"
-        "formHtml += '<span style=\"color:rgba(255,255,255,0.8);font-size:12px\">Transform raw sensor values</span></div></div>';"
-        "formHtml += '<span class=\"calc-toggle-icon\" style=\"color:white;font-size:20px;transition:transform 0.3s ease\">▼</span></div>';"
+        // Header row with label and dropdown
+        "formHtml += '<div style=\"display:flex;align-items:center;gap:15px;flex-wrap:wrap\">';"
+        "formHtml += '<label style=\"font-weight:600;color:#333;font-size:14px;white-space:nowrap\">⚙️ Calculation Type:</label>';"
 
-        // Content area
-        "formHtml += '<div class=\"calc-section-content\" style=\"display:none;padding:20px;background:linear-gradient(180deg,#f8f9ff 0%,#ffffff 100%)\">';"
-
-        // Question header
-        "formHtml += '<div style=\"margin-bottom:20px;padding-bottom:15px;border-bottom:2px solid #e8ecf4\">';"
-        "formHtml += '<p style=\"font-weight:600;color:#2d3748;margin:0;font-size:15px\">Select calculation type for this sensor:</p>';"
+        // Dropdown select
+        "formHtml += '<select name=\"sensor_' + sensorId + '_calc_type\" onchange=\"showCalcFields(this,' + sensorId + ')\" style=\"flex:1;min-width:200px;padding:10px 12px;border:1px solid #ced4da;border-radius:6px;font-size:14px;background:white;cursor:pointer\">';"
+        "formHtml += '<option value=\"0\" selected>📥 Direct Value - Raw value as-is</option>';"
+        "formHtml += '<option value=\"10\">🔢 Flow Int+Dec - Integer + Decimal registers</option>';"
+        "formHtml += '<option value=\"1\">🌀 Vortex Flow - HIGH×100 + LOW</option>';"
+        "formHtml += '<option value=\"3\">📊 Level % - Tank fill 0-100%</option>';"
+        "formHtml += '<option value=\"2\">✖️ Scale + Offset - (Raw × Scale) + Offset</option>';"
+        "formHtml += '<option value=\"4\">🛢️ Tank Volume - Level to liters/m³</option>';"
+        "formHtml += '<option value=\"8\">📈 4-20mA Range - Map signal to output</option>';"
+        "formHtml += '</select>';"
         "formHtml += '</div>';"
 
-        // Options grid - 2 columns
-        "formHtml += '<div style=\"display:grid;grid-template-columns:repeat(2,1fr);gap:12px\">';"
+        // Dynamic fields container
+        "formHtml += '<div id=\"calc-fields-' + sensorId + '\" style=\"margin-top:15px\"></div>';"
 
-        // Option 0: Direct Value (default)
-        "formHtml += '<label class=\"calc-option\" style=\"display:flex;align-items:flex-start;padding:15px;background:white;border:2px solid #e2e8f0;border-radius:10px;cursor:pointer;transition:all 0.2s ease\" onmouseover=\"this.style.transform=\\'translateY(-2px)\\';this.style.boxShadow=\\'0 4px 12px rgba(102,126,234,0.15)\\'\" onmouseout=\"this.style.transform=\\'\\';this.style.boxShadow=\\'\\'\">';"
-        "formHtml += '<input type=\"radio\" name=\"sensor_' + sensorId + '_calc_type\" value=\"0\" checked onchange=\"showCalcFields(this,' + sensorId + ');highlightCalcOption(this)\" style=\"margin-top:3px;accent-color:#667eea\">';"
-        "formHtml += '<div style=\"margin-left:10px\"><div style=\"display:flex;align-items:center;gap:8px\">';"
-        "formHtml += '<span style=\"font-size:18px\">📥</span><strong style=\"color:#2d3748\">Direct Value</strong></div>';"
-        "formHtml += '<div style=\"color:#718096;font-size:12px;margin-top:4px\">Raw value as-is (with scale factor)</div></div></label>';"
-
-        // Option 10: Flow Meter Integer + Decimal
-        "formHtml += '<label class=\"calc-option\" style=\"display:flex;align-items:flex-start;padding:15px;background:white;border:2px solid #e2e8f0;border-radius:10px;cursor:pointer;transition:all 0.2s ease\" onmouseover=\"this.style.transform=\\'translateY(-2px)\\';this.style.boxShadow=\\'0 4px 12px rgba(102,126,234,0.15)\\'\" onmouseout=\"this.style.transform=\\'\\';this.style.boxShadow=\\'\\'\">';"
-        "formHtml += '<input type=\"radio\" name=\"sensor_' + sensorId + '_calc_type\" value=\"10\" onchange=\"showCalcFields(this,' + sensorId + ');highlightCalcOption(this)\" style=\"margin-top:3px;accent-color:#667eea\">';"
-        "formHtml += '<div style=\"margin-left:10px\"><div style=\"display:flex;align-items:center;gap:8px\">';"
-        "formHtml += '<span style=\"font-size:18px\">🔢</span><strong style=\"color:#2d3748\">Flow Int+Dec</strong></div>';"
-        "formHtml += '<div style=\"color:#718096;font-size:12px;margin-top:4px\">12345 + 0.678 = 12345.678</div></div></label>';"
-
-        // Option 1: Vortex style
-        "formHtml += '<label class=\"calc-option\" style=\"display:flex;align-items:flex-start;padding:15px;background:white;border:2px solid #e2e8f0;border-radius:10px;cursor:pointer;transition:all 0.2s ease\" onmouseover=\"this.style.transform=\\'translateY(-2px)\\';this.style.boxShadow=\\'0 4px 12px rgba(102,126,234,0.15)\\'\" onmouseout=\"this.style.transform=\\'\\';this.style.boxShadow=\\'\\'\">';"
-        "formHtml += '<input type=\"radio\" name=\"sensor_' + sensorId + '_calc_type\" value=\"1\" onchange=\"showCalcFields(this,' + sensorId + ');highlightCalcOption(this)\" style=\"margin-top:3px;accent-color:#667eea\">';"
-        "formHtml += '<div style=\"margin-left:10px\"><div style=\"display:flex;align-items:center;gap:8px\">';"
-        "formHtml += '<span style=\"font-size:18px\">🌀</span><strong style=\"color:#2d3748\">Vortex Flow</strong></div>';"
-        "formHtml += '<div style=\"color:#718096;font-size:12px;margin-top:4px\">HIGH×100 + LOW registers</div></div></label>';"
-
-        // Option 3: Level to Percentage
-        "formHtml += '<label class=\"calc-option\" style=\"display:flex;align-items:flex-start;padding:15px;background:white;border:2px solid #e2e8f0;border-radius:10px;cursor:pointer;transition:all 0.2s ease\" onmouseover=\"this.style.transform=\\'translateY(-2px)\\';this.style.boxShadow=\\'0 4px 12px rgba(102,126,234,0.15)\\'\" onmouseout=\"this.style.transform=\\'\\';this.style.boxShadow=\\'\\'\">';"
-        "formHtml += '<input type=\"radio\" name=\"sensor_' + sensorId + '_calc_type\" value=\"3\" onchange=\"showCalcFields(this,' + sensorId + ');highlightCalcOption(this)\" style=\"margin-top:3px;accent-color:#667eea\">';"
-        "formHtml += '<div style=\"margin-left:10px\"><div style=\"display:flex;align-items:center;gap:8px\">';"
-        "formHtml += '<span style=\"font-size:18px\">📊</span><strong style=\"color:#2d3748\">Level %</strong></div>';"
-        "formHtml += '<div style=\"color:#718096;font-size:12px;margin-top:4px\">Tank fill level 0-100%</div></div></label>';"
-
-        // Option 2: Scale Value
-        "formHtml += '<label class=\"calc-option\" style=\"display:flex;align-items:flex-start;padding:15px;background:white;border:2px solid #e2e8f0;border-radius:10px;cursor:pointer;transition:all 0.2s ease\" onmouseover=\"this.style.transform=\\'translateY(-2px)\\';this.style.boxShadow=\\'0 4px 12px rgba(102,126,234,0.15)\\'\" onmouseout=\"this.style.transform=\\'\\';this.style.boxShadow=\\'\\'\">';"
-        "formHtml += '<input type=\"radio\" name=\"sensor_' + sensorId + '_calc_type\" value=\"2\" onchange=\"showCalcFields(this,' + sensorId + ');highlightCalcOption(this)\" style=\"margin-top:3px;accent-color:#667eea\">';"
-        "formHtml += '<div style=\"margin-left:10px\"><div style=\"display:flex;align-items:center;gap:8px\">';"
-        "formHtml += '<span style=\"font-size:18px\">✖️</span><strong style=\"color:#2d3748\">Scale + Offset</strong></div>';"
-        "formHtml += '<div style=\"color:#718096;font-size:12px;margin-top:4px\">(Raw × Scale) + Offset</div></div></label>';"
-
-        // Option 4: Tank Volume
-        "formHtml += '<label class=\"calc-option\" style=\"display:flex;align-items:flex-start;padding:15px;background:white;border:2px solid #e2e8f0;border-radius:10px;cursor:pointer;transition:all 0.2s ease\" onmouseover=\"this.style.transform=\\'translateY(-2px)\\';this.style.boxShadow=\\'0 4px 12px rgba(102,126,234,0.15)\\'\" onmouseout=\"this.style.transform=\\'\\';this.style.boxShadow=\\'\\'\">';"
-        "formHtml += '<input type=\"radio\" name=\"sensor_' + sensorId + '_calc_type\" value=\"4\" onchange=\"showCalcFields(this,' + sensorId + ');highlightCalcOption(this)\" style=\"margin-top:3px;accent-color:#667eea\">';"
-        "formHtml += '<div style=\"margin-left:10px\"><div style=\"display:flex;align-items:center;gap:8px\">';"
-        "formHtml += '<span style=\"font-size:18px\">🛢️</span><strong style=\"color:#2d3748\">Tank Volume</strong></div>';"
-        "formHtml += '<div style=\"color:#718096;font-size:12px;margin-top:4px\">Level to liters/m³</div></div></label>';"
-
-        // Option 8: 4-20mA
-        "formHtml += '<label class=\"calc-option\" style=\"display:flex;align-items:flex-start;padding:15px;background:white;border:2px solid #e2e8f0;border-radius:10px;cursor:pointer;transition:all 0.2s ease\" onmouseover=\"this.style.transform=\\'translateY(-2px)\\';this.style.boxShadow=\\'0 4px 12px rgba(102,126,234,0.15)\\'\" onmouseout=\"this.style.transform=\\'\\';this.style.boxShadow=\\'\\'\">';"
-        "formHtml += '<input type=\"radio\" name=\"sensor_' + sensorId + '_calc_type\" value=\"8\" onchange=\"showCalcFields(this,' + sensorId + ');highlightCalcOption(this)\" style=\"margin-top:3px;accent-color:#667eea\">';"
-        "formHtml += '<div style=\"margin-left:10px\"><div style=\"display:flex;align-items:center;gap:8px\">';"
-        "formHtml += '<span style=\"font-size:18px\">📈</span><strong style=\"color:#2d3748\">4-20mA Range</strong></div>';"
-        "formHtml += '<div style=\"color:#718096;font-size:12px;margin-top:4px\">Map signal to output range</div></div></label>';"
-
-        "formHtml += '</div>';" // Close grid
-
-        // Dynamic fields container with styling
-        "formHtml += '<div id=\"calc-fields-' + sensorId + '\" style=\"margin-top:20px\"></div>';"
-
-        "formHtml += '</div></div>';"
+        "formHtml += '</div>';"
         // ========== END CALCULATION ENGINE UI ==========
 
         "formHtml += '<br><p style=\"color:#dc3545;font-size:12px;margin:5px 0\"><strong>* Required fields</strong> - Name and Unit ID must be filled</p>';"
@@ -3674,41 +3620,14 @@ static esp_err_t config_page_handler(httpd_req_t *req)
         "}"
 
         // ========== CALCULATION ENGINE JAVASCRIPT FUNCTIONS ==========
-        "function toggleCalcSection(header) {"
-        "const content = header.nextElementSibling;"
-        "const icon = header.querySelector('.calc-toggle-icon');"
-        "if (content.style.display === 'none') {"
-        "content.style.display = 'block';"
-        "icon.style.transform = 'rotate(180deg)';"
-        "} else {"
-        "content.style.display = 'none';"
-        "icon.style.transform = 'rotate(0deg)';"
-        "}"
-        "}"
-
-        // Highlight selected calculation option
-        "function highlightCalcOption(radio) {"
-        "const allLabels = radio.closest('.calc-section-content').querySelectorAll('.calc-option');"
-        "allLabels.forEach(function(label) {"
-        "const inp = label.querySelector('input[type=radio]');"
-        "if (inp && inp.checked) {"
-        "label.style.borderColor = '#667eea';"
-        "label.style.background = 'linear-gradient(135deg,#f8f9ff 0%,#eef1ff 100%)';"
-        "} else {"
-        "label.style.borderColor = '#e2e8f0';"
-        "label.style.background = 'white';"
-        "}"
-        "});"
-        "}"
-
         "function showCalcFields(select, sensorId) {"
         "const container = document.getElementById('calc-fields-' + sensorId);"
         "const calcType = parseInt(select.value);"
         "let fieldsHtml = '';"
-        "const inputStyle = 'width:100%;padding:10px;border:2px solid #e2e8f0;border-radius:8px;font-size:14px;transition:border-color 0.2s;outline:none';"
-        "const labelStyle = 'font-size:13px;color:#4a5568;display:block;margin-bottom:5px;font-weight:500';"
-        "const boxStyle = 'background:linear-gradient(135deg,#f8f9ff 0%,#ffffff 100%);padding:16px;border-radius:10px;margin-top:12px;border:1px solid #e8ecf4';"
-        "const titleStyle = 'margin:0 0 12px 0;font-weight:600;color:#667eea;font-size:14px;display:flex;align-items:center;gap:8px';"
+        "const inputStyle = 'width:100%;padding:8px 10px;border:1px solid #ced4da;border-radius:4px;font-size:14px';"
+        "const labelStyle = 'font-size:13px;color:#495057;display:block;margin-bottom:4px;font-weight:500';"
+        "const boxStyle = 'background:white;padding:12px;border-radius:6px;border:1px solid #dee2e6';"
+        "const titleStyle = 'margin:0 0 10px 0;font-weight:600;color:#495057;font-size:13px';"
 
         // CALC_COMBINE_REGISTERS (1) - Vortex Flowmeter
         "if (calcType === 1) {"
