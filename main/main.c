@@ -1584,99 +1584,196 @@ static void create_telemetry_payload(char* payload, size_t payload_size) {
         }
         
         int payload_pos = 0;
-
-        // Don't use array wrapper - send single JSON object directly
-        // (JSON templates already have "body" wrapper)
-
         int valid_sensors = 0;
-        for (int i = 0; i < actual_count; i++) {
-            if (readings[i].valid) {
-                // Find the matching sensor config by unit_id
-                sensor_config_t* matching_sensor = NULL;
-                for (int j = 0; j < config->sensor_count; j++) {
-                    if (strcmp(config->sensors[j].unit_id, readings[i].unit_id) == 0) {
-                        matching_sensor = &config->sensors[j];
-                        break;
-                    }
-                }
-                
-                if (!matching_sensor || !matching_sensor->enabled) {
-                    ESP_LOGW(TAG, "[WARN] Sensor %s not found or disabled", readings[i].unit_id);
-                    continue;
-                }
-                
-                ESP_LOGI(TAG, "[TARGET] Sensor: Name='%s', Unit='%s', Type='%s', Value=%.2f", 
-                         matching_sensor->name, matching_sensor->unit_id, 
-                         matching_sensor->sensor_type, readings[i].value);
-                
-                // Generate JSON for this specific sensor using template system
-                esp_err_t json_result;
 
-                // Check if sensor is ENERGY type and has hex string available
-                if (strcasecmp(matching_sensor->sensor_type, "ENERGY") == 0 &&
-                    strlen(readings[i].raw_hex) > 0) {
-                    // Use the hex string from Test RS485 for ENERGY sensors
-                    json_result = generate_sensor_json_with_hex(
-                        matching_sensor,
-                        readings[i].value,
-                        readings[i].raw_value,
-                        readings[i].raw_hex,
-                        &net_stats,  // Pass network stats
-                        temp_json,
-                        MAX_JSON_PAYLOAD_SIZE
-                    );
-                } else {
-                    // Use standard JSON generation for other sensor types
-                    json_result = generate_sensor_json(
-                        matching_sensor,
-                        readings[i].value,
-                        readings[i].raw_value ? readings[i].raw_value : (uint32_t)(readings[i].value * 10000),
-                        &net_stats,  // Pass network stats
-                        temp_json,
-                        MAX_JSON_PAYLOAD_SIZE
-                    );
-                }
-                
-                if (json_result == ESP_OK) {
-                    // Send each sensor as a separate MQTT message
-                    if (mqtt_connected && mqtt_client != NULL) {
-                        char sensor_topic[256];
-                        snprintf(sensor_topic, sizeof(sensor_topic),
-                                 "devices/%s/messages/events/", config->azure_device_id);
+        // Check if batch mode is enabled (send all sensors in single JSON)
+        if (config->batch_telemetry) {
+            ESP_LOGI(TAG, "[BATCH] Building batched JSON for all sensors");
 
-                        int msg_id = esp_mqtt_client_publish(
-                            mqtt_client,
-                            sensor_topic,
-                            temp_json,
-                            strlen(temp_json),
-                            0,  // QoS 0
-                            0   // No retain
-                        );
+            // Get current timestamp for all sensors
+            time_t now;
+            struct tm timeinfo;
+            char timestamp[32];
+            time(&now);
+            gmtime_r(&now, &timeinfo);
+            strftime(timestamp, sizeof(timestamp), "%Y-%m-%dT%H:%M:%SZ", &timeinfo);
 
-                        if (msg_id >= 0) {
-                            ESP_LOGI(TAG, "[MQTT] Sent sensor %d/%d: %s (msg_id=%d)",
-                                     valid_sensors + 1, actual_count, matching_sensor->unit_id, msg_id);
-                            valid_sensors++;
+            // Start building the batched JSON: {"body":[
+            payload_pos = snprintf(payload, payload_size, "{\"body\":[");
 
-                            // Small delay between messages to avoid flooding
-                            vTaskDelay(pdMS_TO_TICKS(100));
-                        } else {
-                            ESP_LOGW(TAG, "[WARN] Failed to publish sensor %s", matching_sensor->unit_id);
+            char* last_unit_id = NULL;
+            for (int i = 0; i < actual_count; i++) {
+                if (readings[i].valid) {
+                    // Find the matching sensor config by unit_id
+                    sensor_config_t* matching_sensor = NULL;
+                    for (int j = 0; j < config->sensor_count; j++) {
+                        if (strcmp(config->sensors[j].unit_id, readings[i].unit_id) == 0) {
+                            matching_sensor = &config->sensors[j];
+                            break;
                         }
                     }
 
-                    // Store last sensor's JSON in payload for backward compatibility
-                    int remaining_space = payload_size - payload_pos;
-                    if (remaining_space > strlen(temp_json) + 10) {
-                        payload_pos = snprintf(payload, payload_size, "%s", temp_json);
+                    if (!matching_sensor || !matching_sensor->enabled) {
+                        ESP_LOGW(TAG, "[WARN] Sensor %s not found or disabled", readings[i].unit_id);
+                        continue;
                     }
-                } else {
-                    ESP_LOGW(TAG, "[WARN] Failed to generate JSON for sensor %d", i);
+
+                    // Add comma separator if not first entry
+                    if (valid_sensors > 0) {
+                        payload_pos += snprintf(payload + payload_pos, payload_size - payload_pos, ",");
+                    }
+
+                    // Determine value key based on sensor type
+                    const char* value_key = "value";
+                    if (strcasecmp(matching_sensor->sensor_type, "Level") == 0 ||
+                        strcasecmp(matching_sensor->sensor_type, "Radar Level") == 0) {
+                        value_key = "level_filled";
+                    } else if (strcasecmp(matching_sensor->sensor_type, "Flow-Meter") == 0) {
+                        value_key = "consumption";
+                    } else if (strcasecmp(matching_sensor->sensor_type, "RAINGAUGE") == 0) {
+                        value_key = "raingauge";
+                    } else if (strcasecmp(matching_sensor->sensor_type, "BOREWELL") == 0) {
+                        value_key = "borewell";
+                    } else if (strcasecmp(matching_sensor->sensor_type, "ENERGY") == 0) {
+                        value_key = "ene_con_hex";
+                    }
+
+                    // Add sensor entry to body array
+                    // Format: {"level_filled":31.55,"created_on":"2025-12-12T17:28:14Z","unit_id":"FG23352L"}
+                    payload_pos += snprintf(payload + payload_pos, payload_size - payload_pos,
+                        "{\"%s\":%.3f,\"created_on\":\"%s\",\"unit_id\":\"%s\"}",
+                        value_key, readings[i].value, timestamp, matching_sensor->unit_id);
+
+                    last_unit_id = matching_sensor->unit_id;
+                    valid_sensors++;
+
+                    ESP_LOGI(TAG, "[BATCH] Added sensor %d: %s = %.3f",
+                             valid_sensors, matching_sensor->unit_id, readings[i].value);
                 }
             }
+
+            // Close body array and add properties
+            payload_pos += snprintf(payload + payload_pos, payload_size - payload_pos,
+                "],\"properties\":{\"unit_id\":\"%s\",\"flow_factor\":\"$twin.tags.flow_factor\","
+                "\"max_capacity\":\"$twin.tags.max_capacity\",\"industry_id\":\"$twin.tags.industry_id\","
+                "\"category_id\":\"$twin.tags.category_id\",\"shifttime\":\"$twin.tags.shifttime\","
+                "\"unit_threshold\":\"$twin.tags.unit_threshold\"}}",
+                last_unit_id ? last_unit_id : config->azure_device_id);
+
+            // Send the batched JSON as a single MQTT message
+            if (valid_sensors > 0 && mqtt_connected && mqtt_client != NULL) {
+                char sensor_topic[256];
+                snprintf(sensor_topic, sizeof(sensor_topic),
+                         "devices/%s/messages/events/", config->azure_device_id);
+
+                int msg_id = esp_mqtt_client_publish(
+                    mqtt_client,
+                    sensor_topic,
+                    payload,
+                    strlen(payload),
+                    0,  // QoS 0
+                    0   // No retain
+                );
+
+                if (msg_id >= 0) {
+                    ESP_LOGI(TAG, "[MQTT] Sent batched telemetry with %d sensors (msg_id=%d, size=%d bytes)",
+                             valid_sensors, msg_id, strlen(payload));
+                } else {
+                    ESP_LOGW(TAG, "[WARN] Failed to publish batched telemetry");
+                    valid_sensors = 0;  // Mark as not sent
+                }
+            }
+
+            ESP_LOGI(TAG, "[OK] Batched telemetry: %d sensors in single message", valid_sensors);
+        } else {
+            // Individual mode: send each sensor as separate MQTT message (original behavior)
+            ESP_LOGI(TAG, "[INDIVIDUAL] Sending sensors as separate messages");
+
+            for (int i = 0; i < actual_count; i++) {
+                if (readings[i].valid) {
+                    // Find the matching sensor config by unit_id
+                    sensor_config_t* matching_sensor = NULL;
+                    for (int j = 0; j < config->sensor_count; j++) {
+                        if (strcmp(config->sensors[j].unit_id, readings[i].unit_id) == 0) {
+                            matching_sensor = &config->sensors[j];
+                            break;
+                        }
+                    }
+
+                    if (!matching_sensor || !matching_sensor->enabled) {
+                        ESP_LOGW(TAG, "[WARN] Sensor %s not found or disabled", readings[i].unit_id);
+                        continue;
+                    }
+
+                    ESP_LOGI(TAG, "[TARGET] Sensor: Name='%s', Unit='%s', Type='%s', Value=%.2f",
+                             matching_sensor->name, matching_sensor->unit_id,
+                             matching_sensor->sensor_type, readings[i].value);
+
+                    // Generate JSON for this specific sensor using template system
+                    esp_err_t json_result;
+
+                    // Check if sensor is ENERGY type and has hex string available
+                    if (strcasecmp(matching_sensor->sensor_type, "ENERGY") == 0 &&
+                        strlen(readings[i].raw_hex) > 0) {
+                        json_result = generate_sensor_json_with_hex(
+                            matching_sensor,
+                            readings[i].value,
+                            readings[i].raw_value,
+                            readings[i].raw_hex,
+                            &net_stats,
+                            temp_json,
+                            MAX_JSON_PAYLOAD_SIZE
+                        );
+                    } else {
+                        json_result = generate_sensor_json(
+                            matching_sensor,
+                            readings[i].value,
+                            readings[i].raw_value ? readings[i].raw_value : (uint32_t)(readings[i].value * 10000),
+                            &net_stats,
+                            temp_json,
+                            MAX_JSON_PAYLOAD_SIZE
+                        );
+                    }
+
+                    if (json_result == ESP_OK) {
+                        if (mqtt_connected && mqtt_client != NULL) {
+                            char sensor_topic[256];
+                            snprintf(sensor_topic, sizeof(sensor_topic),
+                                     "devices/%s/messages/events/", config->azure_device_id);
+
+                            int msg_id = esp_mqtt_client_publish(
+                                mqtt_client,
+                                sensor_topic,
+                                temp_json,
+                                strlen(temp_json),
+                                0,  // QoS 0
+                                0   // No retain
+                            );
+
+                            if (msg_id >= 0) {
+                                ESP_LOGI(TAG, "[MQTT] Sent sensor %d/%d: %s (msg_id=%d)",
+                                         valid_sensors + 1, actual_count, matching_sensor->unit_id, msg_id);
+                                valid_sensors++;
+                                vTaskDelay(pdMS_TO_TICKS(100));
+                            } else {
+                                ESP_LOGW(TAG, "[WARN] Failed to publish sensor %s", matching_sensor->unit_id);
+                            }
+                        }
+
+                        // Store last sensor's JSON in payload
+                        int remaining_space = payload_size - payload_pos;
+                        if (remaining_space > strlen(temp_json) + 10) {
+                            payload_pos = snprintf(payload, payload_size, "%s", temp_json);
+                        }
+                    } else {
+                        ESP_LOGW(TAG, "[WARN] Failed to generate JSON for sensor %d", i);
+                    }
+                }
+            }
+
+            ESP_LOGI(TAG, "[OK] Sent individual telemetry for %d/%d sensors", valid_sensors, actual_count);
         }
 
-        ESP_LOGI(TAG, "[OK] Sent telemetry for %d/%d sensors", valid_sensors, actual_count);
         sensors_already_published = valid_sensors;  // Track how many were already sent via MQTT
     } else {
         ESP_LOGW(TAG, "[WARN] No valid sensor data available, skipping telemetry");

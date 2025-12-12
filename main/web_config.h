@@ -215,6 +215,9 @@ typedef struct {
     int modem_boot_delay;      // Delay in seconds to wait for modem boot after reset
     int modem_reset_gpio_pin;  // GPIO pin for modem reset control
     int trigger_gpio_pin;      // GPIO pin for configuration mode trigger (default: 34)
+
+    // Telemetry options
+    bool batch_telemetry;      // Send all sensors in single JSON message (default: true)
 } system_config_t;
 
 // Function prototypes

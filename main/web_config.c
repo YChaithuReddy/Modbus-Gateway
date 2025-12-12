@@ -2503,6 +2503,14 @@ static esp_err_t config_page_handler(httpd_req_t *req)
         "<input type='number' name='telemetry_interval' value='%d' min='30' max='3600' style='width:100%%;padding:10px;border:1px solid #e0e0e0;border-radius:6px;font-size:15px'>"
         "<small style='color:#888;display:block;margin-top:5px;font-size:13px'>How often to send sensor data to Azure (30-3600 seconds)</small>"
         "</div>"
+        "<label style='font-weight:600;padding-top:10px'>Batch Mode:</label>"
+        "<div>"
+        "<label style='display:flex;align-items:center;gap:10px;cursor:pointer'>"
+        "<input type='checkbox' name='batch_telemetry' %s style='width:20px;height:20px'>"
+        "<span style='font-size:15px'>Send all sensors in single JSON message</span>"
+        "</label>"
+        "<small style='color:#888;display:block;margin-top:5px;font-size:13px'>When enabled, all sensor data is sent as one message with \"body\" array. When disabled, each sensor is sent separately.</small>"
+        "</div>"
         "</div>"
         "<div style='margin-top:25px;padding:20px;background:#f8f9fa;border-radius:8px;text-align:center'>"
         "<button type='button' onclick='saveAzureConfig()' style='background:#28a745;color:white;padding:12px 30px;border:none;border-radius:6px;font-weight:bold;font-size:16px;cursor:pointer'>Save Azure Configuration</button>"
@@ -2511,7 +2519,8 @@ static esp_err_t config_page_handler(httpd_req_t *req)
         "</div>"
         "</form>"
         "</div>",
-        g_system_config.telemetry_interval);
+        g_system_config.telemetry_interval,
+        g_system_config.batch_telemetry ? "checked" : "");
     httpd_resp_sendstr_chunk(req, chunk);
 
     // Telemetry Monitor section
@@ -4334,9 +4343,10 @@ static esp_err_t config_page_handler(httpd_req_t *req)
         "const deviceId=document.querySelector('input[name=\"azure_device_id\"]').value;"
         "const deviceKey=document.getElementById('azure_device_key').value;"
         "const telemetryInterval=document.querySelector('input[name=\"telemetry_interval\"]').value;"
+        "const batchTelemetry=document.querySelector('input[name=\"batch_telemetry\"]').checked?'1':'0';"
         "if(!deviceId){alert('ERROR: Please enter the Azure device ID');return;}"
         "if(!deviceKey){alert('ERROR: Please enter the Azure device key');return;}"
-        "const formData='azure_device_id='+encodeURIComponent(deviceId)+'&azure_device_key='+encodeURIComponent(deviceKey)+'&telemetry_interval='+telemetryInterval;"
+        "const formData='azure_device_id='+encodeURIComponent(deviceId)+'&azure_device_key='+encodeURIComponent(deviceKey)+'&telemetry_interval='+telemetryInterval+'&batch_telemetry='+batchTelemetry;"
         "fetch('/save_azure_config',{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},body:formData})"
         ".then(r=>r.json()).then(data=>{"
         "if(data.status==='success'){alert('SUCCESS: Azure configuration saved successfully!\\n\\nDevice ID, device key, and telemetry interval updated.');}else{alert('ERROR: '+data.message);}"
@@ -6042,10 +6052,13 @@ static esp_err_t save_azure_config_handler(httpd_req_t *req)
         } else if (strncmp(param, "telemetry_interval=", 19) == 0) {
             g_system_config.telemetry_interval = atoi(param + 19);
             ESP_LOGI(TAG, "Telemetry interval: %d", g_system_config.telemetry_interval);
+        } else if (strncmp(param, "batch_telemetry=", 16) == 0) {
+            g_system_config.batch_telemetry = (atoi(param + 16) == 1);
+            ESP_LOGI(TAG, "Batch telemetry: %s", g_system_config.batch_telemetry ? "enabled" : "disabled");
         }
         param = strtok(NULL, "&");
     }
-    
+
     // Save to NVS
     esp_err_t save_result = config_save_to_nvs(&g_system_config);
     if (save_result == ESP_OK) {
@@ -11274,6 +11287,7 @@ typedef struct {
     int modem_boot_delay;
     int modem_reset_gpio_pin;
     int trigger_gpio_pin;
+    bool batch_telemetry;
 } core_config_t;
 
 esp_err_t config_load_from_nvs(system_config_t *config)
@@ -11316,6 +11330,7 @@ esp_err_t config_load_from_nvs(system_config_t *config)
         config->modem_boot_delay = core.modem_boot_delay;
         config->modem_reset_gpio_pin = core.modem_reset_gpio_pin;
         config->trigger_gpio_pin = core.trigger_gpio_pin;
+        config->batch_telemetry = core.batch_telemetry;
 
         // Load individual sensors
         for (int i = 0; i < config->sensor_count && i < 20; i++) {
@@ -11395,6 +11410,7 @@ esp_err_t config_save_to_nvs(const system_config_t *config)
     core.modem_boot_delay = config->modem_boot_delay;
     core.modem_reset_gpio_pin = config->modem_reset_gpio_pin;
     core.trigger_gpio_pin = config->trigger_gpio_pin;
+    core.batch_telemetry = config->batch_telemetry;
 
     // Save core config (~700 bytes, well under NVS limit)
     err = nvs_set_blob(nvs_handle, "sys_core", &core, sizeof(core_config_t));
@@ -11497,6 +11513,9 @@ esp_err_t config_reset_to_defaults(void)
     g_system_config.telegram_config.alerts_enabled = true;
     g_system_config.telegram_config.startup_notification = true;
     g_system_config.telegram_config.poll_interval = 10;
+
+    // Telemetry options
+    g_system_config.batch_telemetry = true;  // Default: send all sensors in single JSON message
 
     // Initialize all sensors with default values (20 sensors supported)
     for (int i = 0; i < 20; i++) {
