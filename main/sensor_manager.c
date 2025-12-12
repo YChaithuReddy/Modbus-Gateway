@@ -707,15 +707,36 @@ esp_err_t sensor_read_all_configured(sensor_reading_t *readings, int max_reading
 
     for (int i = 0; i < config->sensor_count && *actual_count < max_readings; i++) {
         if (config->sensors[i].enabled) {
-            ESP_LOGI(TAG, "Reading sensor %d: %s (Unit: %s, Slave: %d)", 
+            ESP_LOGI(TAG, "Reading sensor %d: %s (Unit: %s, Slave: %d)",
                      i + 1, config->sensors[i].name, config->sensors[i].unit_id, config->sensors[i].slave_id);
-            esp_err_t ret = sensor_read_single(&config->sensors[i], &readings[*actual_count]);
-            if (ret == ESP_OK && readings[*actual_count].valid) {
-                ESP_LOGI(TAG, "Sensor %s read successfully: %.2f", 
-                         config->sensors[i].unit_id, readings[*actual_count].value);
-                (*actual_count)++;
-            } else {
-                ESP_LOGE(TAG, "Failed to read sensor %s", config->sensors[i].unit_id);
+
+            // Retry logic - try up to 3 times before giving up
+            const int MAX_RETRIES = 3;
+            const int RETRY_DELAY_MS = 500;  // Wait 500ms between retries
+            bool read_success = false;
+
+            for (int retry = 0; retry < MAX_RETRIES && !read_success; retry++) {
+                if (retry > 0) {
+                    ESP_LOGW(TAG, "Retry %d/%d for sensor %s...", retry, MAX_RETRIES - 1, config->sensors[i].unit_id);
+                    vTaskDelay(pdMS_TO_TICKS(RETRY_DELAY_MS));
+                }
+
+                esp_err_t ret = sensor_read_single(&config->sensors[i], &readings[*actual_count]);
+                if (ret == ESP_OK && readings[*actual_count].valid) {
+                    ESP_LOGI(TAG, "Sensor %s read successfully: %.2f%s",
+                             config->sensors[i].unit_id, readings[*actual_count].value,
+                             retry > 0 ? " (after retry)" : "");
+                    (*actual_count)++;
+                    read_success = true;
+                } else if (retry < MAX_RETRIES - 1) {
+                    ESP_LOGW(TAG, "Sensor %s read attempt %d failed, will retry",
+                             config->sensors[i].unit_id, retry + 1);
+                }
+            }
+
+            if (!read_success) {
+                ESP_LOGE(TAG, "Failed to read sensor %s after %d attempts",
+                         config->sensors[i].unit_id, MAX_RETRIES);
             }
         } else {
             ESP_LOGW(TAG, "Sensor %d (%s) is disabled", i + 1, config->sensors[i].name);
