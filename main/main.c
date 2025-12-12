@@ -362,12 +362,15 @@ static void initialize_time(void) {
     time_t now = time(NULL);
     struct tm timeinfo = { 0 };
     localtime_r(&now, &timeinfo);
+    time_t rtc_time = now;  // Save RTC time as fallback
 
-    if (timeinfo.tm_year >= (2024 - 1900)) {
-        ESP_LOGI(TAG, "[TIME] ✅ System time already valid from RTC (year %d) - skipping NTP", timeinfo.tm_year + 1900);
-        ESP_LOGI(TAG, "Time initialized");
-        return;
+    bool rtc_valid = (timeinfo.tm_year >= (2024 - 1900));
+    if (rtc_valid) {
+        ESP_LOGI(TAG, "[TIME] RTC has valid time (year %d) - will verify with NTP", timeinfo.tm_year + 1900);
     }
+
+    // Always try NTP sync to ensure correct time (RTC may have drifted or have wrong timezone)
+    ESP_LOGI(TAG, "[TIME] Attempting NTP sync for accurate time...");
 
     // Configure SNTP with multiple servers for redundancy
     esp_sntp_setoperatingmode(SNTP_OPMODE_POLL);
@@ -376,12 +379,15 @@ static void initialize_time(void) {
     esp_sntp_setservername(2, "time.cloudflare.com");
     esp_sntp_init();
 
-    // Wait for time to be set with more retries
+    // Wait for time to be set with retries
     int retry = 0;
-    const int retry_count = 15;  // Increased from 10
+    const int retry_count = 10;
+
+    // Reset timeinfo to check for NTP update
+    timeinfo.tm_year = 0;
 
     while (timeinfo.tm_year < (2024 - 1900) && ++retry < retry_count) {
-        ESP_LOGI(TAG, "Waiting for system time to be set... (%d/%d)", retry, retry_count);
+        ESP_LOGI(TAG, "Waiting for NTP sync... (%d/%d)", retry, retry_count);
         vTaskDelay(2000 / portTICK_PERIOD_MS);
         time(&now);
         localtime_r(&now, &timeinfo);
@@ -390,8 +396,13 @@ static void initialize_time(void) {
     if (timeinfo.tm_year >= (2024 - 1900)) {
         ESP_LOGI(TAG, "[TIME] ✅ NTP sync successful - year %d", timeinfo.tm_year + 1900);
         last_ntp_sync_time = time(NULL);  // Track sync time for periodic re-sync
+    } else if (rtc_valid) {
+        // NTP failed but RTC had valid time - restore RTC time
+        ESP_LOGW(TAG, "[TIME] ⚠️ NTP sync failed - using RTC time as fallback");
+        struct timeval tv = { .tv_sec = rtc_time, .tv_usec = 0 };
+        settimeofday(&tv, NULL);
     } else {
-        ESP_LOGW(TAG, "[TIME] ⚠️ NTP sync failed - system time may be incorrect");
+        ESP_LOGW(TAG, "[TIME] ⚠️ NTP sync failed and no valid RTC - system time may be incorrect");
     }
     ESP_LOGI(TAG, "Time initialized");
 }
