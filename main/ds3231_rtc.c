@@ -1,6 +1,8 @@
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 #include <sys/time.h>
+#include <time.h>
 #include "driver/i2c.h"
 #include "esp_log.h"
 #include "ds3231_rtc.h"
@@ -219,6 +221,7 @@ esp_err_t ds3231_get_temperature(float* temp) {
 }
 
 // Sync system time from RTC
+// NOTE: RTC stores UTC time, so we must convert to epoch correctly
 esp_err_t ds3231_sync_system_time(void) {
     struct tm timeinfo;
     esp_err_t ret = ds3231_get_time_tm(&timeinfo);
@@ -227,7 +230,23 @@ esp_err_t ds3231_sync_system_time(void) {
         return ret;
     }
 
+    // RTC stores UTC time, so we need to convert UTC struct tm to epoch
+    // mktime() assumes local time, so we temporarily set TZ to UTC
+    char *old_tz = getenv("TZ");
+    setenv("TZ", "UTC0", 1);
+    tzset();
+
+    timeinfo.tm_isdst = 0;  // No DST for UTC
     time_t now = mktime(&timeinfo);
+
+    // Restore original timezone
+    if (old_tz) {
+        setenv("TZ", old_tz, 1);
+    } else {
+        unsetenv("TZ");
+    }
+    tzset();
+
     struct timeval tv = {
         .tv_sec = now,
         .tv_usec = 0
