@@ -1623,26 +1623,35 @@ static void create_telemetry_payload(char* payload, size_t payload_size) {
                         payload_pos += snprintf(payload + payload_pos, payload_size - payload_pos, ",");
                     }
 
-                    // Determine value key based on sensor type
+                    // Determine value key and type based on sensor type
                     const char* value_key = "value";
+                    const char* type_value = "SENSOR";
                     if (strcasecmp(matching_sensor->sensor_type, "Level") == 0 ||
                         strcasecmp(matching_sensor->sensor_type, "Radar Level") == 0) {
                         value_key = "level_filled";
+                        type_value = "LEVEL";
                     } else if (strcasecmp(matching_sensor->sensor_type, "Flow-Meter") == 0) {
                         value_key = "consumption";
+                        type_value = "FLOW";
                     } else if (strcasecmp(matching_sensor->sensor_type, "RAINGAUGE") == 0) {
                         value_key = "raingauge";
+                        type_value = "RAINGAUGE";
                     } else if (strcasecmp(matching_sensor->sensor_type, "BOREWELL") == 0) {
                         value_key = "borewell";
+                        type_value = "BOREWELL";
                     } else if (strcasecmp(matching_sensor->sensor_type, "ENERGY") == 0) {
                         value_key = "ene_con_hex";
+                        type_value = "ENERGY";
+                    } else if (strcasecmp(matching_sensor->sensor_type, "QUALITY") == 0) {
+                        value_key = "value";
+                        type_value = "QUALITY";
                     }
 
                     // Add sensor entry to body array
-                    // Format: {"level_filled":31.55,"created_on":"2025-12-12T17:28:14Z","unit_id":"FG23352L"}
+                    // Format: {"consumption":3220.3,"type":"FLOW","created_on":"2025-12-12T18:19:01Z","unit_id":"FG23451F"}
                     payload_pos += snprintf(payload + payload_pos, payload_size - payload_pos,
-                        "{\"%s\":%.3f,\"created_on\":\"%s\",\"unit_id\":\"%s\"}",
-                        value_key, readings[i].value, timestamp, matching_sensor->unit_id);
+                        "{\"%s\":%.3f,\"type\":\"%s\",\"created_on\":\"%s\",\"unit_id\":\"%s\"}",
+                        value_key, readings[i].value, type_value, timestamp, matching_sensor->unit_id);
 
                     last_unit_id = matching_sensor->unit_id;
                     valid_sensors++;
