@@ -116,15 +116,19 @@ static esp_err_t hardware_reset_modem(void) {
     gpio_set_level(modem_config.pwr_pin, 1);
     vTaskDelay(pdMS_TO_TICKS(3000));  // Wait for complete power down
 
-    // Step 2: Assert hardware RESET
-    ESP_LOGI(TAG, "   Step 2: Asserting hardware RESET (LOW)...");
-    gpio_set_level(modem_config.reset_pin, 0);
-    vTaskDelay(pdMS_TO_TICKS(500));  // Hold reset for 500ms (extended from 200ms)
+    // Step 2: Assert hardware RESET (only if reset pin is configured)
+    if (modem_config.reset_pin >= 0) {
+        ESP_LOGI(TAG, "   Step 2: Asserting hardware RESET (LOW)...");
+        gpio_set_level(modem_config.reset_pin, 0);
+        vTaskDelay(pdMS_TO_TICKS(500));  // Hold reset for 500ms (extended from 200ms)
 
-    // Step 3: Release RESET and power on modem
-    ESP_LOGI(TAG, "   Step 3: Releasing RESET and powering ON modem...");
-    gpio_set_level(modem_config.reset_pin, 1);  // Release RESET
-    vTaskDelay(pdMS_TO_TICKS(500));
+        // Step 3: Release RESET and power on modem
+        ESP_LOGI(TAG, "   Step 3: Releasing RESET and powering ON modem...");
+        gpio_set_level(modem_config.reset_pin, 1);  // Release RESET
+        vTaskDelay(pdMS_TO_TICKS(500));
+    } else {
+        ESP_LOGI(TAG, "   Step 2-3: Skipping hardware RESET (pin not configured)");
+    }
 
     // Power on modem (pulse PWR_PIN)
     gpio_set_level(modem_config.pwr_pin, 0);
@@ -303,8 +307,8 @@ static esp_err_t init_modem_for_ppp(void) {
                 tried_ppp_escape = true;
             }
 
-            // Hardware reset on retry 4
-            if (retry_count == 4 && !tried_hardware_reset) {
+            // Hardware reset on retry 4 (only if reset pin is configured)
+            if (retry_count == 4 && !tried_hardware_reset && modem_config.reset_pin >= 0) {
                 ESP_LOGW(TAG, "🔄 Performing hardware reset...");
                 gpio_set_level(modem_config.reset_pin, 0);
                 vTaskDelay(pdMS_TO_TICKS(500));
@@ -543,16 +547,20 @@ esp_err_t a7670c_ppp_init(const ppp_config_t* config) {
     };
     gpio_config(&pwr_io_conf);
 
-    // Configure reset pin
-    gpio_config_t rst_io_conf = {
-        .pin_bit_mask = (1ULL << modem_config.reset_pin),
-        .mode = GPIO_MODE_OUTPUT,
-        .pull_up_en = GPIO_PULLUP_DISABLE,
-        .pull_down_en = GPIO_PULLDOWN_DISABLE,
-        .intr_type = GPIO_INTR_DISABLE
-    };
-    gpio_config(&rst_io_conf);
-    gpio_set_level(modem_config.reset_pin, 1);  // RESET pin HIGH = normal operation
+    // Configure reset pin (only if valid, -1 means disabled)
+    if (modem_config.reset_pin >= 0) {
+        gpio_config_t rst_io_conf = {
+            .pin_bit_mask = (1ULL << modem_config.reset_pin),
+            .mode = GPIO_MODE_OUTPUT,
+            .pull_up_en = GPIO_PULLUP_DISABLE,
+            .pull_down_en = GPIO_PULLDOWN_DISABLE,
+            .intr_type = GPIO_INTR_DISABLE
+        };
+        gpio_config(&rst_io_conf);
+        gpio_set_level(modem_config.reset_pin, 1);  // RESET pin HIGH = normal operation
+    } else {
+        ESP_LOGI(TAG, "Reset pin disabled (-1), skipping GPIO configuration");
+    }
 
     // Register event handlers
     ESP_ERROR_CHECK(esp_event_handler_register(IP_EVENT, ESP_EVENT_ANY_ID,
