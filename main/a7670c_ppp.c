@@ -193,14 +193,21 @@ static void uart_rx_task(void *pvParameters) {
 
     while (uart_rx_task_running) {
         int len = uart_read_bytes(modem_config.uart_num, data, 2048, pdMS_TO_TICKS(100));
-        if (len > 0 && ppp_netif) {
-            // Feed received data to PPP stack
-            esp_netif_receive(ppp_netif, data, len, NULL);
+        if (len > 0) {
+            // Take local copy of netif pointer to avoid race condition
+            // (netif could be destroyed between check and use)
+            esp_netif_t *netif_local = ppp_netif;
+            if (netif_local != NULL && uart_rx_task_running) {
+                // Feed received data to PPP stack
+                esp_netif_receive(netif_local, data, len, NULL);
+            }
         }
     }
 
+    // Ensure buffer is freed even if task is being force-deleted
     free(data);
-    ESP_LOGI(TAG, "UART RX task stopped");
+    data = NULL;
+    ESP_LOGI(TAG, "UART RX task stopped cleanly");
     uart_rx_task_handle = NULL;
     vTaskDelete(NULL);
 }
@@ -868,8 +875,13 @@ esp_err_t a7670c_get_signal_strength(signal_strength_t* signal) {
         return ESP_ERR_INVALID_ARG;
     }
 
-    // Initialize operator_name
+    // Initialize all fields to safe defaults (prevents use of uninitialized values on error)
+    signal->rssi = 0;
+    signal->ber = 0;
+    signal->rssi_dbm = -999;  // Invalid value to indicate "not measured"
+    signal->quality = "Unknown";
     strncpy(signal->operator_name, "Unknown", sizeof(signal->operator_name));
+    signal->operator_name[sizeof(signal->operator_name) - 1] = '\0';
 
     char response[256] = {0};
 

@@ -110,6 +110,11 @@ static esp_err_t ds3231_write_reg(uint8_t reg_addr, uint8_t* data, size_t len) {
     return ret;
 }
 
+// Helper to validate BCD byte (each nibble must be 0-9)
+static bool is_valid_bcd(uint8_t val) {
+    return ((val & 0x0F) <= 9) && ((val >> 4) <= 9);
+}
+
 // Get time from DS3231 as struct tm
 esp_err_t ds3231_get_time_tm(struct tm* timeinfo) {
     if (timeinfo == NULL) {
@@ -123,6 +128,20 @@ esp_err_t ds3231_get_time_tm(struct tm* timeinfo) {
         return ret;
     }
 
+    // Validate BCD values before conversion (detect I2C corruption)
+    for (int i = 0; i < 7; i++) {
+        uint8_t masked = (i == 0) ? (data[i] & 0x7F) :
+                         (i == 1) ? (data[i] & 0x7F) :
+                         (i == 2) ? (data[i] & 0x3F) :
+                         (i == 3) ? (data[i] & 0x07) :
+                         (i == 4) ? (data[i] & 0x3F) :
+                         (i == 5) ? (data[i] & 0x1F) : data[i];
+        if (!is_valid_bcd(masked)) {
+            ESP_LOGE(TAG, "Invalid BCD value at register %d: 0x%02X", i, data[i]);
+            return ESP_ERR_INVALID_RESPONSE;
+        }
+    }
+
     timeinfo->tm_sec = BCD_TO_DEC(data[0] & 0x7F);
     timeinfo->tm_min = BCD_TO_DEC(data[1] & 0x7F);
     timeinfo->tm_hour = BCD_TO_DEC(data[2] & 0x3F);  // 24-hour format
@@ -134,6 +153,17 @@ esp_err_t ds3231_get_time_tm(struct tm* timeinfo) {
     // Handle century bit
     if (data[5] & 0x80) {
         timeinfo->tm_year += 100;  // 21st century
+    }
+
+    // Validate ranges after conversion
+    if (timeinfo->tm_sec > 59 || timeinfo->tm_min > 59 || timeinfo->tm_hour > 23 ||
+        timeinfo->tm_mday < 1 || timeinfo->tm_mday > 31 ||
+        timeinfo->tm_mon < 0 || timeinfo->tm_mon > 11 ||
+        timeinfo->tm_wday < 0 || timeinfo->tm_wday > 6) {
+        ESP_LOGE(TAG, "RTC time values out of range: %02d:%02d:%02d %d/%d",
+                 timeinfo->tm_hour, timeinfo->tm_min, timeinfo->tm_sec,
+                 timeinfo->tm_mon + 1, timeinfo->tm_mday);
+        return ESP_ERR_INVALID_RESPONSE;
     }
 
     timeinfo->tm_isdst = -1;  // Let system determine DST
@@ -232,15 +262,24 @@ esp_err_t ds3231_sync_system_time(void) {
 
     // RTC stores UTC time, so we need to convert UTC struct tm to epoch
     // mktime() assumes local time, so we temporarily set TZ to UTC
-    char *old_tz = getenv("TZ");
+    // IMPORTANT: Copy old_tz to local buffer before setenv (getenv returns internal pointer)
+    char old_tz[64] = {0};
+    bool had_tz = false;
+    char *old_tz_ptr = getenv("TZ");
+    if (old_tz_ptr) {
+        strncpy(old_tz, old_tz_ptr, sizeof(old_tz) - 1);
+        old_tz[sizeof(old_tz) - 1] = '\0';
+        had_tz = true;
+    }
+
     setenv("TZ", "UTC0", 1);
     tzset();
 
     timeinfo.tm_isdst = 0;  // No DST for UTC
     time_t now = mktime(&timeinfo);
 
-    // Restore original timezone
-    if (old_tz) {
+    // Restore original timezone from our safe copy
+    if (had_tz) {
         setenv("TZ", old_tz, 1);
     } else {
         unsetenv("TZ");

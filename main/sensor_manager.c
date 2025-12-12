@@ -280,28 +280,35 @@ esp_err_t sensor_test_live(const sensor_config_t *sensor, sensor_test_result_t *
     }
 
     // Get the raw register values
-    uint16_t registers[10];
+    // Use larger buffer to handle all sensor types (max 8 registers for 64-bit values)
+    uint16_t registers[16];
     int reg_count = modbus_get_response_length();
-    
+
+    // Validate register count against our buffer size
+    if (reg_count > 16) {
+        ESP_LOGW(TAG, "Register count %d exceeds buffer, limiting to 16", reg_count);
+        reg_count = 16;
+    }
+
     if (reg_count < sensor->quantity) {
         result->success = false;
-        snprintf(result->error_message, sizeof(result->error_message), 
+        snprintf(result->error_message, sizeof(result->error_message),
                 "Insufficient registers received: got %d, expected %d", reg_count, sensor->quantity);
         return ESP_FAIL;
     }
 
-    for (int i = 0; i < reg_count && i < 10; i++) {
+    for (int i = 0; i < reg_count; i++) {
         registers[i] = modbus_get_response_buffer(i);
     }
 
-    // Create hex representation
-    char hex_buf[64] = {0};
-    for (int i = 0; i < reg_count; i++) {
-        char temp[8];
-        snprintf(temp, sizeof(temp), "%04X ", registers[i]);
-        strncat(hex_buf, temp, sizeof(hex_buf) - strlen(hex_buf) - 1);
+    // Create hex representation (5 chars per register: "XXXX ")
+    char hex_buf[96] = {0};  // Enough for 16 registers (16 * 5 = 80) + safety margin
+    int hex_pos = 0;
+    for (int i = 0; i < reg_count && hex_pos < (int)(sizeof(hex_buf) - 6); i++) {
+        hex_pos += snprintf(hex_buf + hex_pos, sizeof(hex_buf) - hex_pos, "%04X ", registers[i]);
     }
     strncpy(result->raw_hex, hex_buf, sizeof(result->raw_hex) - 1);
+    result->raw_hex[sizeof(result->raw_hex) - 1] = '\0';  // Ensure null termination
 
     // Special handling for Flow-Meter sensors (4 registers: UINT32_BADC + FLOAT32_BADC)
     if (strcmp(sensor->sensor_type, "Flow-Meter") == 0 && reg_count >= 4) {

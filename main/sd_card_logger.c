@@ -534,15 +534,30 @@ esp_err_t sd_card_replay_messages(void (*publish_callback)(const pending_message
         }
 
         // Parse line: ID|TIMESTAMP|TOPIC|PAYLOAD
-        char *id_str = strtok(line, "|");
-        char *timestamp = strtok(NULL, "|");
-        char *topic = strtok(NULL, "|");
-        // Get everything after the 3rd pipe as payload (handles any content in payload)
-        char *payload = topic ? (topic + strlen(topic) + 1) : NULL;
+        // Use manual parsing to safely handle payload that may contain pipes
+        char *id_str = NULL;
+        char *timestamp = NULL;
+        char *topic = NULL;
+        char *payload = NULL;
+        int pipe_count = 0;
+        char *ptr = line;
+        char *field_start = line;
 
-        // Validate payload isn't empty
-        if (payload && *payload == '\0') {
-            payload = NULL;
+        // Find first 3 pipes and extract fields
+        while (*ptr && pipe_count < 3) {
+            if (*ptr == '|') {
+                *ptr = '\0';  // Null terminate current field
+                if (pipe_count == 0) id_str = field_start;
+                else if (pipe_count == 1) timestamp = field_start;
+                else if (pipe_count == 2) topic = field_start;
+                field_start = ptr + 1;
+                pipe_count++;
+            }
+            ptr++;
+        }
+        // Everything after 3rd pipe is payload (may contain pipes)
+        if (pipe_count == 3 && *field_start != '\0') {
+            payload = field_start;
         }
 
         if (id_str == NULL || timestamp == NULL || topic == NULL || payload == NULL) {
@@ -591,10 +606,14 @@ esp_err_t sd_card_replay_messages(void (*publish_callback)(const pending_message
         }
 
         pending_message_t msg;
+        memset(&msg, 0, sizeof(msg));  // Initialize to zero for safety
         msg.message_id = atoi(id_str);
         strncpy(msg.timestamp, timestamp, sizeof(msg.timestamp) - 1);
+        msg.timestamp[sizeof(msg.timestamp) - 1] = '\0';  // Ensure null termination
         strncpy(msg.topic, topic, sizeof(msg.topic) - 1);
+        msg.topic[sizeof(msg.topic) - 1] = '\0';  // Ensure null termination
         strncpy(msg.payload, payload, sizeof(msg.payload) - 1);
+        msg.payload[sizeof(msg.payload) - 1] = '\0';  // Ensure null termination
 
         ESP_LOGI(TAG, "📤 Replaying message ID: %lu from %s", msg.message_id, msg.timestamp);
 

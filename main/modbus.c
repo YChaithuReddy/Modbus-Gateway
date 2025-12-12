@@ -17,6 +17,7 @@ static const char *TAG = "MODBUS";
 // Global Variables
 static uint16_t response_buffer[MODBUS_MAX_REGISTERS];
 static uint8_t response_length = 0;
+static int last_response_bytes = 0;  // Track actual bytes received for bounds validation
 static QueueHandle_t uart_queue = NULL;
 static modbus_stats_t stats = {0};
 
@@ -287,12 +288,15 @@ static modbus_result_t modbus_send_request(uint8_t slave_id, uint8_t function_co
         return MODBUS_INVALID_RESPONSE;
     }
     
-    // Copy response data
+    // Copy response data and track actual response length
     if (response_data && max_response_length > 0) {
         size_t copy_length = (response_length < max_response_length) ? response_length : max_response_length;
         memcpy(response_data, response, copy_length);
+        last_response_bytes = copy_length;  // Track actual bytes for bounds validation
+    } else {
+        last_response_bytes = response_length;
     }
-    
+
     stats.successful_requests++;
     ESP_LOGI(TAG, "[OK] Modbus request successful");
     return MODBUS_SUCCESS;
@@ -312,9 +316,17 @@ modbus_result_t modbus_read_holding_registers(uint8_t slave_id, uint16_t start_a
     if (result == MODBUS_SUCCESS) {
         uint8_t byte_count = response[2];
 
-        // Bounds check: Validate byte_count to prevent buffer overflow from malformed response
+        // Bounds check 1: Validate byte_count to prevent buffer overflow from malformed response
         if (byte_count > MODBUS_MAX_REGISTERS * 2) {
             ESP_LOGE(TAG, "[ERROR] Response byte_count too large: %d bytes (max %d)", byte_count, MODBUS_MAX_REGISTERS * 2);
+            return MODBUS_INVALID_RESPONSE;
+        }
+
+        // Bounds check 2: Validate actual response has enough bytes (header + data + CRC)
+        int expected_bytes = 3 + byte_count + 2;  // slave_id + func + byte_count + data + CRC
+        if (last_response_bytes < expected_bytes) {
+            ESP_LOGE(TAG, "[ERROR] Response too short: got %d bytes, need %d for %d data bytes",
+                     last_response_bytes, expected_bytes, byte_count);
             return MODBUS_INVALID_RESPONSE;
         }
 
@@ -328,13 +340,13 @@ modbus_result_t modbus_read_holding_registers(uint8_t slave_id, uint16_t start_a
         response_length = num_registers;
 
         ESP_LOGI(TAG, "[OK] Successfully read %d registers", num_registers);
-        
+
         // Log register values for debugging
         for (int i = 0; i < num_registers; i++) {
             ESP_LOGI(TAG, "[DATA] Register[%d]: 0x%04X (%d)", i, response_buffer[i], response_buffer[i]);
         }
     }
-    
+
     return result;
 }
 
@@ -342,19 +354,27 @@ modbus_result_t modbus_read_holding_registers(uint8_t slave_id, uint16_t start_a
 modbus_result_t modbus_read_input_registers(uint8_t slave_id, uint16_t start_addr, uint16_t num_regs)
 {
     uint8_t response[MODBUS_MAX_BUFFER_SIZE];
-    
-    ESP_LOGI(TAG, "[READ] Reading %d input registers from slave %d, starting at 0x%04X", 
+
+    ESP_LOGI(TAG, "[READ] Reading %d input registers from slave %d, starting at 0x%04X",
              num_regs, slave_id, start_addr);
-    
+
     modbus_result_t result = modbus_send_request(slave_id, MODBUS_READ_INPUT_REGISTERS,
                                                start_addr, num_regs, response, sizeof(response));
 
     if (result == MODBUS_SUCCESS) {
         uint8_t byte_count = response[2];
 
-        // Bounds check: Validate byte_count to prevent buffer overflow from malformed response
+        // Bounds check 1: Validate byte_count to prevent buffer overflow from malformed response
         if (byte_count > MODBUS_MAX_REGISTERS * 2) {
             ESP_LOGE(TAG, "[ERROR] Response byte_count too large: %d bytes (max %d)", byte_count, MODBUS_MAX_REGISTERS * 2);
+            return MODBUS_INVALID_RESPONSE;
+        }
+
+        // Bounds check 2: Validate actual response has enough bytes (header + data + CRC)
+        int expected_bytes = 3 + byte_count + 2;  // slave_id + func + byte_count + data + CRC
+        if (last_response_bytes < expected_bytes) {
+            ESP_LOGE(TAG, "[ERROR] Response too short: got %d bytes, need %d for %d data bytes",
+                     last_response_bytes, expected_bytes, byte_count);
             return MODBUS_INVALID_RESPONSE;
         }
 
@@ -367,13 +387,13 @@ modbus_result_t modbus_read_input_registers(uint8_t slave_id, uint16_t start_add
 
         response_length = num_registers;
         ESP_LOGI(TAG, "[OK] Successfully read %d input registers", num_registers);
-        
+
         // Log register values for debugging
         for (int i = 0; i < num_registers; i++) {
             ESP_LOGI(TAG, "[DATA] Register[%d]: 0x%04X (%d)", i, response_buffer[i], response_buffer[i]);
         }
     }
-    
+
     return result;
 }
 
