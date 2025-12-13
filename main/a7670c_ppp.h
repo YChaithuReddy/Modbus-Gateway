@@ -58,4 +58,11 @@ uint32_t a7670c_get_retry_delay_ms(void);
 // Get UART number used by modem (for HTTP module access)
 int a7670c_get_uart_num(void);
 
+// Pause PPP for AT command operations (stops UART RX task, exits data mode)
+// Returns ESP_OK if successful, original PPP state is preserved for resume
+esp_err_t a7670c_ppp_pause_for_at(void);
+
+// Resume PPP after AT command operations (restarts UART RX task, re-enters PPP)
+esp_err_t a7670c_ppp_resume(void);
+
 #endif // A7670C_PPP_H

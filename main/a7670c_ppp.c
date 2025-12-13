@@ -1057,3 +1057,138 @@ uint32_t a7670c_get_retry_delay_ms(void) {
 int a7670c_get_uart_num(void) {
     return modem_config.uart_num;
 }
+
+// Pause PPP for AT command operations
+esp_err_t a7670c_ppp_pause_for_at(void) {
+    ESP_LOGI(TAG, "🔄 Pausing PPP for AT command operations...");
+
+    // Step 1: Stop UART RX task FIRST (critical - must stop before sending +++)
+    if (uart_rx_task_handle != NULL) {
+        ESP_LOGI(TAG, "   Stopping UART RX task...");
+        uart_rx_task_running = false;
+
+        // Wait for task to stop (up to 1 second)
+        int wait_count = 0;
+        while (uart_rx_task_handle != NULL && wait_count < 10) {
+            vTaskDelay(pdMS_TO_TICKS(100));
+            wait_count++;
+        }
+
+        if (uart_rx_task_handle != NULL) {
+            ESP_LOGW(TAG, "   UART RX task did not stop gracefully, forcing delete");
+            vTaskDelete(uart_rx_task_handle);
+            uart_rx_task_handle = NULL;
+        }
+        ESP_LOGI(TAG, "   UART RX task stopped");
+    }
+
+    // Step 2: Flush UART to clear any pending data
+    uart_flush(modem_config.uart_num);
+    vTaskDelay(pdMS_TO_TICKS(100));
+
+    // Step 3: Guard time before escape sequence (must be silent for 1+ second)
+    ESP_LOGI(TAG, "   Guard time before +++ (1.2s)...");
+    vTaskDelay(pdMS_TO_TICKS(1200));
+
+    // Step 4: Send PPP escape sequence: +++ (without CR/LF)
+    uart_write_bytes(modem_config.uart_num, "+++", 3);
+    ESP_LOGI(TAG, "   Sent +++ escape sequence");
+
+    // Step 5: Guard time after escape sequence (1+ second)
+    vTaskDelay(pdMS_TO_TICKS(1200));
+
+    // Step 6: Flush and read any response
+    uint8_t buf[256];
+    int len = uart_read_bytes(modem_config.uart_num, buf, sizeof(buf) - 1, pdMS_TO_TICKS(500));
+    if (len > 0) {
+        buf[len] = '\0';
+        ESP_LOGI(TAG, "   Response after +++: %s", buf);
+    }
+
+    // Step 7: Send ATH to hang up the data call
+    ESP_LOGI(TAG, "   Sending ATH to hang up...");
+    uart_write_bytes(modem_config.uart_num, "ATH\r\n", 5);
+    vTaskDelay(pdMS_TO_TICKS(1000));
+
+    len = uart_read_bytes(modem_config.uart_num, buf, sizeof(buf) - 1, pdMS_TO_TICKS(500));
+    if (len > 0) {
+        buf[len] = '\0';
+        ESP_LOGI(TAG, "   ATH response: %s", buf);
+    }
+
+    // Step 8: Verify modem is responding to AT commands
+    ESP_LOGI(TAG, "   Verifying AT command mode...");
+    uart_flush(modem_config.uart_num);
+    uart_write_bytes(modem_config.uart_num, "AT\r\n", 4);
+    vTaskDelay(pdMS_TO_TICKS(500));
+
+    len = uart_read_bytes(modem_config.uart_num, buf, sizeof(buf) - 1, pdMS_TO_TICKS(1000));
+    if (len > 0) {
+        buf[len] = '\0';
+        if (strstr((char*)buf, "OK")) {
+            ESP_LOGI(TAG, "✅ PPP paused - modem ready for AT commands");
+            return ESP_OK;
+        }
+        ESP_LOGW(TAG, "   AT response (no OK): %s", buf);
+    }
+
+    // Try one more time
+    uart_flush(modem_config.uart_num);
+    uart_write_bytes(modem_config.uart_num, "AT\r\n", 4);
+    vTaskDelay(pdMS_TO_TICKS(1000));
+
+    len = uart_read_bytes(modem_config.uart_num, buf, sizeof(buf) - 1, pdMS_TO_TICKS(1000));
+    if (len > 0) {
+        buf[len] = '\0';
+        if (strstr((char*)buf, "OK")) {
+            ESP_LOGI(TAG, "✅ PPP paused - modem ready for AT commands (2nd attempt)");
+            return ESP_OK;
+        }
+    }
+
+    ESP_LOGE(TAG, "❌ Failed to enter AT command mode");
+    return ESP_FAIL;
+}
+
+// Resume PPP after AT command operations
+esp_err_t a7670c_ppp_resume(void) {
+    ESP_LOGI(TAG, "🔄 Resuming PPP connection...");
+
+    // Re-activate PDP context
+    ESP_LOGI(TAG, "   Reactivating PDP context...");
+    uart_write_bytes(modem_config.uart_num, "AT+CGACT=1,1\r\n", 14);
+    vTaskDelay(pdMS_TO_TICKS(3000));
+
+    uint8_t buf[256];
+    int len = uart_read_bytes(modem_config.uart_num, buf, sizeof(buf) - 1, pdMS_TO_TICKS(1000));
+    if (len > 0) {
+        buf[len] = '\0';
+        ESP_LOGI(TAG, "   CGACT response: %s", buf);
+    }
+
+    // Enter PPP mode again
+    ESP_LOGI(TAG, "   Entering PPP mode...");
+    uart_flush(modem_config.uart_num);
+    uart_write_bytes(modem_config.uart_num, "ATD*99#\r\n", 9);
+    vTaskDelay(pdMS_TO_TICKS(2000));
+    uart_flush(modem_config.uart_num);
+
+    // Restart UART RX task
+    if (uart_rx_task_handle == NULL && ppp_netif != NULL) {
+        ESP_LOGI(TAG, "   Restarting UART RX task...");
+        xTaskCreate(uart_rx_task, "uart_rx", 4096, NULL, 12, &uart_rx_task_handle);
+    }
+
+    // Wait for PPP to reconnect
+    ESP_LOGI(TAG, "   Waiting for PPP IP address...");
+    EventBits_t bits = xEventGroupWaitBits(ppp_event_group, PPP_CONNECTED_BIT,
+                                           pdFALSE, pdFALSE, pdMS_TO_TICKS(30000));
+
+    if (bits & PPP_CONNECTED_BIT) {
+        ESP_LOGI(TAG, "✅ PPP resumed successfully!");
+        return ESP_OK;
+    }
+
+    ESP_LOGW(TAG, "⚠️ PPP resume timeout - may need full reconnect");
+    return ESP_ERR_TIMEOUT;
+}

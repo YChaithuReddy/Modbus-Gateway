@@ -95,48 +95,15 @@ static esp_err_t exit_ppp_for_http(void)
 {
     ESP_LOGI(TAG, "Exiting PPP mode for HTTP operations...");
 
-    // Check if PPP is connected
-    if (a7670c_ppp_is_connected()) {
-        ESP_LOGI(TAG, "PPP is connected, need to exit data mode");
-
-        // Guard time before escape sequence
-        vTaskDelay(pdMS_TO_TICKS(1200));
-
-        // Send escape sequence +++
-        uart_write_bytes(modem_uart_num, "+++", 3);
-        ESP_LOGI(TAG, "Sent +++ escape sequence");
-
-        // Guard time after escape sequence
-        vTaskDelay(pdMS_TO_TICKS(1200));
-
-        // Flush and check response
-        uart_flush(modem_uart_num);
-        vTaskDelay(pdMS_TO_TICKS(500));
-    }
-
-    // Try AT command to verify we're in command mode
-    esp_err_t ret = send_at_simple("AT", "OK", 2000);
+    // Use the PPP module's pause function which properly stops UART RX task first
+    esp_err_t ret = a7670c_ppp_pause_for_at();
     if (ret != ESP_OK) {
-        ESP_LOGW(TAG, "Modem not responding, trying harder...");
-
-        // Try escape sequence again
-        vTaskDelay(pdMS_TO_TICKS(1200));
-        uart_write_bytes(modem_uart_num, "+++", 3);
-        vTaskDelay(pdMS_TO_TICKS(1200));
-
-        // Try ATH to hang up
-        uart_write_bytes(modem_uart_num, "ATH\r\n", 5);
-        vTaskDelay(pdMS_TO_TICKS(1000));
-
-        uart_flush(modem_uart_num);
-        ret = send_at_simple("AT", "OK", 2000);
+        ESP_LOGE(TAG, "Failed to pause PPP for AT commands");
+        return ret;
     }
 
-    if (ret == ESP_OK) {
-        ESP_LOGI(TAG, "Modem is in command mode");
-    }
-
-    return ret;
+    ESP_LOGI(TAG, "Modem is in command mode");
+    return ESP_OK;
 }
 
 esp_err_t a7670c_http_init(void)
