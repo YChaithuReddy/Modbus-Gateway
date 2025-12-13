@@ -229,6 +229,32 @@ static void ota_download_task(void *pvParameter)
         ESP_LOGI(TAG, "========================================");
         ESP_LOGI(TAG, "PPP connection remains active during OTA.");
         ESP_LOGI(TAG, "MQTT reconnection is suppressed until OTA completes.");
+
+        // Give PPP connection time to stabilize before starting TLS
+        // Cellular networks need time for routing to settle
+        ESP_LOGI(TAG, "Waiting 10 seconds for PPP connection to stabilize...");
+        vTaskDelay(pdMS_TO_TICKS(10000));
+
+        // Do a simple HTTP request first to "warm up" DNS and network path
+        // This helps ensure the cellular network is ready for TLS
+        ESP_LOGI(TAG, "Warming up network connection...");
+        esp_http_client_config_t warmup_config = {
+            .url = "http://detectportal.firefox.com/success.txt",  // Simple HTTP endpoint
+            .timeout_ms = 15000,
+        };
+        esp_http_client_handle_t warmup_client = esp_http_client_init(&warmup_config);
+        if (warmup_client) {
+            esp_err_t warmup_err = esp_http_client_perform(warmup_client);
+            if (warmup_err == ESP_OK) {
+                ESP_LOGI(TAG, "Network warmup successful (HTTP %d)", esp_http_client_get_status_code(warmup_client));
+            } else {
+                ESP_LOGW(TAG, "Network warmup failed: %s (continuing anyway)", esp_err_to_name(warmup_err));
+            }
+            esp_http_client_cleanup(warmup_client);
+            vTaskDelay(pdMS_TO_TICKS(2000));  // Short delay after warmup
+        }
+
+        ESP_LOGI(TAG, "PPP stabilization complete, starting OTA download...");
     }
 
     // Both WiFi and SIM mode use ESP32 HTTP client
@@ -289,9 +315,10 @@ static void ota_download_task(void *pvParameter)
             ESP_LOGW(TAG, "GitHub/CDN URL - cert verification skipped via sdkconfig");
         }
 
-        // SIM mode needs longer timeouts and more retries due to PPP latency
-        int connection_timeout = is_sim_mode ? 60000 : OTA_RECV_TIMEOUT_MS;
-        int max_connect_retries = is_sim_mode ? 3 : 1;
+        // SIM mode needs longer timeouts and more retries due to PPP/cellular latency
+        // TLS handshake can fail intermittently on mobile networks
+        int connection_timeout = is_sim_mode ? 90000 : OTA_RECV_TIMEOUT_MS;  // 90s for SIM
+        int max_connect_retries = is_sim_mode ? 5 : 1;  // 5 retries for SIM mode
 
         // Configure HTTP client for this URL
         // Use event handler to capture Location header during redirects
@@ -347,7 +374,8 @@ static void ota_download_task(void *pvParameter)
                 client = NULL;
 
                 // Delay before retry - give network time to recover
-                int retry_delay = is_sim_mode ? 5000 : 2000;
+                // SIM mode needs longer delays for cellular network stabilization
+                int retry_delay = is_sim_mode ? 10000 : 2000;  // 10s for SIM
                 ESP_LOGI(TAG, "Waiting %d ms before retry...", retry_delay);
                 vTaskDelay(pdMS_TO_TICKS(retry_delay));
 
