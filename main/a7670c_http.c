@@ -167,7 +167,7 @@ esp_err_t a7670c_http_init(void)
 
     // Get APN from system config
     system_config_t *config = get_system_config();
-    const char *apn = (config && strlen(config->sim_apn) > 0) ? config->sim_apn : "airteliot";
+    const char *apn = (config && strlen(config->sim_config.apn) > 0) ? config->sim_config.apn : "airteliot";
 
     // Set APN
     ESP_LOGI(TAG, "Setting APN: %s", apn);
@@ -427,9 +427,8 @@ esp_err_t a7670c_http_download_ota(const char* url, modem_http_progress_cb_t pro
         return ESP_ERR_NO_MEM;
     }
 
-    // Handle redirects manually for GitHub URLs
+    // Handle redirects - modem should follow automatically with REDIR=1
     const char* current_url = url;
-    char redirect_url[2048] = {0};
     int redirect_count = 0;
     const int MAX_REDIRECTS = 5;
 
