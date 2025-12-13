@@ -392,4 +392,57 @@ az iot hub device-twin show \
 
 ---
 
+## SIM Mode OTA Limitations
+
+**Important**: OTA updates over cellular (SIM mode) may not work with GitHub releases due to mobile carrier restrictions.
+
+### The Issue
+Some mobile carriers (including Airtel IoT) block or interfere with HTTPS connections to certain CDN providers (like GitHub's objects.githubusercontent.com). This causes TLS handshake failures with error `-0x0050` (connection reset).
+
+**Symptoms:**
+- OTA works perfectly in WiFi mode
+- OTA fails in SIM mode during TLS handshake
+- Azure IoT Hub MQTT (port 8883) works fine over the same connection
+- Error: `mbedtls_ssl_handshake returned -0x0050`
+
+### Recommended Solution: Use Azure Blob Storage
+
+Since Azure connections work reliably over mobile networks (same infrastructure as IoT Hub), host your firmware on Azure Blob Storage instead of GitHub:
+
+1. **Create Azure Storage Account** with a container for firmware
+2. **Upload firmware.bin** to the container
+3. **Generate SAS URL** or use public access
+4. **Use Azure Blob URL for OTA**:
+```json
+{
+  "command": "ota_update",
+  "url": "https://yourstorage.blob.core.windows.net/firmware/firmware.bin?sv=2021-06-08&se=...",
+  "version": "1.0.1"
+}
+```
+
+### Azure CLI Example
+```bash
+# Upload firmware to blob storage
+az storage blob upload \
+  --account-name yourstorage \
+  --container-name firmware \
+  --name firmware.bin \
+  --file ./build/firmware.bin
+
+# Generate SAS URL (valid for 7 days)
+az storage blob generate-sas \
+  --account-name yourstorage \
+  --container-name firmware \
+  --name firmware.bin \
+  --permissions r \
+  --expiry $(date -u -d "7 days" '+%Y-%m-%dT%H:%MZ') \
+  --full-uri
+```
+
+### Alternative: WiFi-only OTA
+If SIM mode OTA is not critical, continue using GitHub releases - they work perfectly in WiFi mode.
+
+---
+
 *Last Updated: December 2024*

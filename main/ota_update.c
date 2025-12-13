@@ -282,20 +282,18 @@ static void ota_download_task(void *pvParameter)
 
         // Configure HTTP client for this URL
         // Use event handler to capture Location header during redirects
-        // For SIM/PPP mode, use smaller buffers and longer timeout
+        // Use same settings for both WiFi and SIM mode (cert bundle works in WiFi)
         esp_http_client_config_t http_config = {
             .url = current_url,
             .timeout_ms = use_ppp ? 60000 : OTA_RECV_TIMEOUT_MS,  // Longer timeout for PPP
             .keep_alive_enable = false,           // Don't keep alive for redirects
-            .buffer_size = use_ppp ? 2048 : 4096, // Smaller buffer for PPP (less memory, more compatible)
-            .buffer_size_tx = use_ppp ? 512 : 1024,
+            .buffer_size = 4096,                  // Same buffer size for both modes
+            .buffer_size_tx = 1024,
             .skip_cert_common_name_check = true,  // Allow redirects to different domains
             .event_handler = http_event_handler,  // Capture Location header via events
             .is_async = false,                    // Synchronous mode
             .use_global_ca_store = false,         // Don't use global CA store
-            // For SIM/PPP mode: Skip cert bundle to avoid TLS issues with carrier networks
-            // WiFi mode: Use cert bundle for full verification
-            .crt_bundle_attach = use_ppp ? NULL : esp_crt_bundle_attach,
+            .crt_bundle_attach = esp_crt_bundle_attach,  // Use cert bundle for both modes
             .cert_pem = NULL,                     // No custom cert
             .transport_type = HTTP_TRANSPORT_OVER_SSL,
         };
@@ -333,7 +331,7 @@ static void ota_download_task(void *pvParameter)
             // Open HTTP connection
             ESP_LOGI(TAG, "Attempting HTTPS connection (attempt %d/%d)...", retry + 1, MAX_CONNECT_RETRIES);
             if (use_ppp) {
-                ESP_LOGI(TAG, "PPP mode: timeout=%dms, buffer=%d, no cert bundle",
+                ESP_LOGI(TAG, "PPP mode: timeout=%dms, buffer=%d, using cert bundle",
                          http_config.timeout_ms, http_config.buffer_size);
             }
             err = esp_http_client_open(client, 0);
