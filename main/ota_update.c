@@ -256,13 +256,21 @@ static void ota_download_task(void *pvParameter)
             vTaskDelay(pdMS_TO_TICKS(5000));
             esp_restart();
         } else {
-            // Failed
+            // Failed - need to recover PPP connection
             ESP_LOGE(TAG, "Modem HTTP OTA failed: %s", esp_err_to_name(err));
             xSemaphoreTake(ota_mutex, portMAX_DELAY);
             ota_info.status = OTA_STATUS_FAILED;
             snprintf(ota_info.error_msg, sizeof(ota_info.error_msg), "Modem HTTP failed: %s", esp_err_to_name(err));
             xSemaphoreGive(ota_mutex);
             notify_status_change(OTA_STATUS_FAILED, ota_info.error_msg);
+
+            // Recovery: Reboot to restore PPP connection cleanly
+            // The modem HTTP process disrupts PPP, so cleanest recovery is reboot
+            ESP_LOGW(TAG, "========================================");
+            ESP_LOGW(TAG, "OTA Failed - Rebooting to recover PPP");
+            ESP_LOGW(TAG, "========================================");
+            vTaskDelay(pdMS_TO_TICKS(3000));
+            esp_restart();
         }
 
         ota_task_handle = NULL;
