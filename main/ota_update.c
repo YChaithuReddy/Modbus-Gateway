@@ -7,6 +7,7 @@
 #include "iot_configs.h"
 #include "web_config.h"
 #include "a7670c_ppp.h"
+#include "a7670c_http.h"
 
 #include <string.h>
 #include "freertos/FreeRTOS.h"
@@ -200,10 +201,78 @@ esp_err_t ota_start_update(const char* firmware_url, const char* version)
     return ESP_OK;
 }
 
+// Progress callback for modem HTTP OTA
+static void modem_http_ota_progress(int progress, int bytes_downloaded, int total_bytes)
+{
+    xSemaphoreTake(ota_mutex, portMAX_DELAY);
+    ota_info.progress = progress;
+    ota_info.bytes_downloaded = bytes_downloaded;
+    ota_info.total_bytes = total_bytes;
+    xSemaphoreGive(ota_mutex);
+
+    if (progress_callback) {
+        progress_callback(progress, bytes_downloaded, total_bytes);
+    }
+}
+
 static void ota_download_task(void *pvParameter)
 {
     ESP_LOGI(TAG, "OTA download task started");
     esp_err_t err;
+
+    // Check if we're in SIM mode - use modem HTTP which is more reliable for mobile networks
+    system_config_t *sys_config = get_system_config();
+    bool use_modem_http = (sys_config != NULL && sys_config->network_mode == NETWORK_MODE_SIM);
+
+    if (use_modem_http) {
+        ESP_LOGI(TAG, "========================================");
+        ESP_LOGI(TAG, "SIM Mode Detected - Using Modem HTTP");
+        ESP_LOGI(TAG, "========================================");
+        ESP_LOGI(TAG, "Modem HTTP uses the A7670C's built-in HTTPS stack");
+        ESP_LOGI(TAG, "which is more reliable over mobile networks.");
+
+        xSemaphoreTake(ota_mutex, portMAX_DELAY);
+        ota_info.status = OTA_STATUS_DOWNLOADING;
+        xSemaphoreGive(ota_mutex);
+        notify_status_change(OTA_STATUS_DOWNLOADING, "Using modem HTTP for download");
+
+        // Use modem HTTP for OTA download
+        err = a7670c_http_download_ota(ota_info.update_url, modem_http_ota_progress);
+
+        if (err == ESP_OK) {
+            // Success!
+            xSemaphoreTake(ota_mutex, portMAX_DELAY);
+            ota_info.status = OTA_STATUS_PENDING_REBOOT;
+            ota_info.progress = 100;
+            strncpy(ota_info.current_version, ota_info.new_version, sizeof(ota_info.current_version) - 1);
+            xSemaphoreGive(ota_mutex);
+            notify_status_change(OTA_STATUS_PENDING_REBOOT, "Update successful, rebooting...");
+
+            ESP_LOGI(TAG, "========================================");
+            ESP_LOGI(TAG, "OTA Update Successful (Modem HTTP)!");
+            ESP_LOGI(TAG, "Rebooting in 5 seconds...");
+            ESP_LOGI(TAG, "========================================");
+
+            vTaskDelay(pdMS_TO_TICKS(5000));
+            esp_restart();
+        } else {
+            // Failed
+            ESP_LOGE(TAG, "Modem HTTP OTA failed: %s", esp_err_to_name(err));
+            xSemaphoreTake(ota_mutex, portMAX_DELAY);
+            ota_info.status = OTA_STATUS_FAILED;
+            snprintf(ota_info.error_msg, sizeof(ota_info.error_msg), "Modem HTTP failed: %s", esp_err_to_name(err));
+            xSemaphoreGive(ota_mutex);
+            notify_status_change(OTA_STATUS_FAILED, ota_info.error_msg);
+        }
+
+        ota_task_handle = NULL;
+        vTaskDelete(NULL);
+        return;  // Exit task - modem HTTP handles everything
+    }
+
+    // WiFi mode - use ESP32 HTTP client (original implementation)
+    ESP_LOGI(TAG, "WiFi Mode - Using ESP32 HTTP client");
+
     esp_http_client_handle_t client = NULL;
     char *download_buffer = NULL;
     const int DOWNLOAD_BUFFER_SIZE = 4096;
@@ -243,28 +312,6 @@ static void ota_download_task(void *pvParameter)
     int status_code = 0;
     int content_length = 0;
 
-    // Check if we're in SIM mode and need to use PPP interface
-    system_config_t *sys_config = get_system_config();
-    bool use_ppp = (sys_config != NULL && sys_config->network_mode == NETWORK_MODE_SIM);
-
-    if (use_ppp) {
-        esp_netif_t *ppp_netif = a7670c_ppp_get_netif();
-        if (ppp_netif != NULL) {
-            // Set PPP as the default network interface for routing
-            esp_netif_set_default_netif(ppp_netif);
-            ESP_LOGI(TAG, "SIM mode detected - set PPP as default network interface");
-            // Give PPP interface time to stabilize before HTTPS request
-            ESP_LOGI(TAG, "Waiting 2 seconds for PPP interface to stabilize...");
-            vTaskDelay(pdMS_TO_TICKS(2000));
-        } else {
-            ESP_LOGW(TAG, "SIM mode but PPP netif not available - using default routing");
-        }
-    }
-
-    // Connection retry settings (especially important for SIM/PPP mode)
-    const int MAX_CONNECT_RETRIES = use_ppp ? 3 : 1;
-    const int RETRY_DELAY_MS = 3000;
-
     while (redirect_count < MAX_REDIRECTS) {
         // Clear redirect location from previous iteration
         redirect_location[0] = '\0';
@@ -280,78 +327,55 @@ static void ota_download_task(void *pvParameter)
             ESP_LOGW(TAG, "GitHub/CDN URL - cert verification skipped via sdkconfig");
         }
 
-        // Configure HTTP client for this URL
+        // Configure HTTP client for this URL (WiFi mode only)
         // Use event handler to capture Location header during redirects
-        // Use same settings for both WiFi and SIM mode (cert bundle works in WiFi)
         esp_http_client_config_t http_config = {
             .url = current_url,
-            .timeout_ms = use_ppp ? 60000 : OTA_RECV_TIMEOUT_MS,  // Longer timeout for PPP
+            .timeout_ms = OTA_RECV_TIMEOUT_MS,
             .keep_alive_enable = false,           // Don't keep alive for redirects
-            .buffer_size = 4096,                  // Same buffer size for both modes
+            .buffer_size = 4096,
             .buffer_size_tx = 1024,
             .skip_cert_common_name_check = true,  // Allow redirects to different domains
             .event_handler = http_event_handler,  // Capture Location header via events
             .is_async = false,                    // Synchronous mode
             .use_global_ca_store = false,         // Don't use global CA store
-            .crt_bundle_attach = esp_crt_bundle_attach,  // Use cert bundle for both modes
-            .cert_pem = NULL,                     // No custom cert
+            .crt_bundle_attach = esp_crt_bundle_attach,
+            .cert_pem = NULL,
             .transport_type = HTTP_TRANSPORT_OVER_SSL,
         };
 
-        // Connection retry loop for PPP mode
-        bool connected = false;
-        for (int retry = 0; retry < MAX_CONNECT_RETRIES && !connected; retry++) {
-            if (retry > 0) {
-                ESP_LOGW(TAG, "Connection retry %d/%d after %dms delay...",
-                         retry + 1, MAX_CONNECT_RETRIES, RETRY_DELAY_MS);
-                // Clean up previous client
-                if (client) {
-                    esp_http_client_cleanup(client);
-                    client = NULL;
-                }
-                vTaskDelay(pdMS_TO_TICKS(RETRY_DELAY_MS));
-            }
-
-            // Create HTTP client
-            client = esp_http_client_init(&http_config);
-            if (!client) {
-                ESP_LOGE(TAG, "Failed to create HTTP client");
-                continue;
-            }
-
-            // Set User-Agent header (required by GitHub)
-            // Use a common browser-like User-Agent to avoid being blocked
-            esp_http_client_set_header(client, "User-Agent", "Mozilla/5.0 (Linux; Android 10) AppleWebKit/537.36");
-            esp_http_client_set_header(client, "Accept", "*/*");
-            // Add Connection header to explicitly request close after response
-            esp_http_client_set_header(client, "Connection", "close");
-            // Add Host header explicitly for some servers
-            // esp_http_client_set_header(client, "Accept-Encoding", "identity");
-
-            // Open HTTP connection
-            ESP_LOGI(TAG, "Attempting HTTPS connection (attempt %d/%d)...", retry + 1, MAX_CONNECT_RETRIES);
-            if (use_ppp) {
-                ESP_LOGI(TAG, "PPP mode: timeout=%dms, buffer=%d, using cert bundle",
-                         http_config.timeout_ms, http_config.buffer_size);
-            }
-            err = esp_http_client_open(client, 0);
-            if (err == ESP_OK) {
-                connected = true;
-                ESP_LOGI(TAG, "HTTPS connection established successfully");
-            } else {
-                ESP_LOGW(TAG, "Connection attempt %d failed: %s", retry + 1, esp_err_to_name(err));
-            }
-        }
-
-        if (!connected) {
-            ESP_LOGE(TAG, "Failed to open HTTP connection after %d attempts", MAX_CONNECT_RETRIES);
+        // Create HTTP client
+        client = esp_http_client_init(&http_config);
+        if (!client) {
+            ESP_LOGE(TAG, "Failed to create HTTP client");
             xSemaphoreTake(ota_mutex, portMAX_DELAY);
             ota_info.status = OTA_STATUS_FAILED;
-            snprintf(ota_info.error_msg, sizeof(ota_info.error_msg), "Connection failed after %d retries", MAX_CONNECT_RETRIES);
+            snprintf(ota_info.error_msg, sizeof(ota_info.error_msg), "Failed to create HTTP client");
             xSemaphoreGive(ota_mutex);
             free(current_url);
             goto cleanup;
         }
+
+        // Set User-Agent header (required by GitHub)
+        esp_http_client_set_header(client, "User-Agent", "Mozilla/5.0 (Linux; Android 10) AppleWebKit/537.36");
+        esp_http_client_set_header(client, "Accept", "*/*");
+        esp_http_client_set_header(client, "Connection", "close");
+
+        // Open HTTP connection
+        ESP_LOGI(TAG, "Attempting HTTPS connection...");
+        err = esp_http_client_open(client, 0);
+        if (err != ESP_OK) {
+            ESP_LOGE(TAG, "Failed to open HTTP connection: %s", esp_err_to_name(err));
+            xSemaphoreTake(ota_mutex, portMAX_DELAY);
+            ota_info.status = OTA_STATUS_FAILED;
+            snprintf(ota_info.error_msg, sizeof(ota_info.error_msg), "Connection failed: %s", esp_err_to_name(err));
+            xSemaphoreGive(ota_mutex);
+            esp_http_client_cleanup(client);
+            client = NULL;
+            free(current_url);
+            goto cleanup;
+        }
+        ESP_LOGI(TAG, "HTTPS connection established successfully");
 
         // Fetch headers
         content_length = esp_http_client_fetch_headers(client);

@@ -392,27 +392,37 @@ az iot hub device-twin show \
 
 ---
 
-## SIM Mode OTA Limitations
+## SIM Mode OTA - Modem HTTP
 
-**Important**: OTA updates over cellular (SIM mode) may not work with GitHub releases due to mobile carrier restrictions.
+**New in v1.0.1**: OTA updates in SIM mode now use the A7670C modem's built-in HTTP/HTTPS stack instead of ESP32's HTTP client. This is more reliable over mobile networks.
 
-### The Issue
-Some mobile carriers (including Airtel IoT) block or interfere with HTTPS connections to certain CDN providers (like GitHub's objects.githubusercontent.com). This causes TLS handshake failures with error `-0x0050` (connection reset).
+### How It Works
 
-**Symptoms:**
-- OTA works perfectly in WiFi mode
-- OTA fails in SIM mode during TLS handshake
-- Azure IoT Hub MQTT (port 8883) works fine over the same connection
-- Error: `mbedtls_ssl_handshake returned -0x0050`
+When OTA is triggered in SIM mode, the device automatically:
+1. Exits PPP data mode temporarily
+2. Uses the modem's AT+HTTP commands for firmware download
+3. Downloads firmware directly through the modem's HTTPS stack
+4. Writes firmware to flash and reboots
 
-### Recommended Solution: Use Azure Blob Storage
+### Advantages
+- **More reliable**: Modem's TLS stack is optimized for mobile networks
+- **Better CDN compatibility**: Works with GitHub releases and other CDNs
+- **Carrier-friendly**: Less likely to be blocked by carrier firewalls
+- **Automatic**: No configuration needed - SIM mode OTA uses modem HTTP automatically
 
-Since Azure connections work reliably over mobile networks (same infrastructure as IoT Hub), host your firmware on Azure Blob Storage instead of GitHub:
+### OTA Commands (Work in Both Modes)
+```json
+{
+  "command": "ota_update",
+  "url": "https://github.com/user/repo/releases/download/v1.0.1/firmware.bin",
+  "version": "1.0.1"
+}
+```
 
-1. **Create Azure Storage Account** with a container for firmware
-2. **Upload firmware.bin** to the container
-3. **Generate SAS URL** or use public access
-4. **Use Azure Blob URL for OTA**:
+### Alternative: Azure Blob Storage
+
+For maximum reliability, you can also host firmware on Azure Blob Storage:
+
 ```json
 {
   "command": "ota_update",
@@ -439,9 +449,6 @@ az storage blob generate-sas \
   --expiry $(date -u -d "7 days" '+%Y-%m-%dT%H:%MZ') \
   --full-uri
 ```
-
-### Alternative: WiFi-only OTA
-If SIM mode OTA is not critical, continue using GitHub releases - they work perfectly in WiFi mode.
 
 ---
 

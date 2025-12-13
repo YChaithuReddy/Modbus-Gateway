@@ -1052,3 +1052,8 @@ esp_err_t a7670c_get_stored_signal_strength(signal_strength_t* signal) {
 uint32_t a7670c_get_retry_delay_ms(void) {
     return get_retry_delay_ms();
 }
+
+// Get UART number used by modem (for HTTP module access)
+int a7670c_get_uart_num(void) {
+    return modem_config.uart_num;
+}

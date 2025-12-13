@@ -55,4 +55,7 @@ esp_err_t a7670c_restart_modem(void);
 // Get recommended retry delay based on connection failure history (in milliseconds)
 uint32_t a7670c_get_retry_delay_ms(void);
 
+// Get UART number used by modem (for HTTP module access)
+int a7670c_get_uart_num(void);
+
 #endif // A7670C_PPP_H
