@@ -23,7 +23,6 @@
 #include "nvs.h"
 #include "esp_crt_bundle.h"
 #include "esp_netif.h"
-#include <net/if.h>  // For struct ifreq
 
 static const char *TAG = "OTA_UPDATE";
 
@@ -233,8 +232,23 @@ static void ota_download_task(void *pvParameter)
         ESP_LOGI(TAG, "========================================");
         ESP_LOGI(TAG, "SIM Mode - Using ESP32 HTTP over PPP");
         ESP_LOGI(TAG, "========================================");
-        ESP_LOGI(TAG, "PPP connection remains active during OTA.");
-        ESP_LOGI(TAG, "MQTT reconnection is suppressed until OTA completes.");
+
+        // Log memory status
+        ESP_LOGI(TAG, "Free heap before SIM OTA: %lu bytes", esp_get_free_heap_size());
+
+        // CRITICAL: Verify PPP is actually connected before attempting OTA
+        if (!a7670c_ppp_is_connected()) {
+            ESP_LOGE(TAG, "PPP not connected - cannot perform OTA over SIM");
+            xSemaphoreTake(ota_mutex, portMAX_DELAY);
+            ota_info.status = OTA_STATUS_FAILED;
+            snprintf(ota_info.error_msg, sizeof(ota_info.error_msg), "PPP not connected");
+            xSemaphoreGive(ota_mutex);
+            ota_in_progress = false;
+            ota_task_handle = NULL;
+            vTaskDelete(NULL);
+            return;
+        }
+        ESP_LOGI(TAG, "PPP connection verified - proceeding with OTA");
 
         // CRITICAL: Set PPP as the default network interface for HTTP client
         // Without this, HTTP client may try to route through WiFi interface
@@ -255,19 +269,40 @@ static void ota_download_task(void *pvParameter)
                 ESP_LOGW(TAG, "Could not get PPP interface name, using default routing");
             }
         } else {
-            ESP_LOGW(TAG, "PPP netif not available - HTTP may not route correctly");
+            ESP_LOGE(TAG, "PPP netif not available - cannot route OTA traffic");
+            xSemaphoreTake(ota_mutex, portMAX_DELAY);
+            ota_info.status = OTA_STATUS_FAILED;
+            snprintf(ota_info.error_msg, sizeof(ota_info.error_msg), "PPP interface unavailable");
+            xSemaphoreGive(ota_mutex);
+            ota_in_progress = false;
+            ota_task_handle = NULL;
+            vTaskDelete(NULL);
+            return;
         }
 
         // Give PPP connection time to stabilize before starting TLS
-        ESP_LOGI(TAG, "Waiting 2 seconds for PPP interface to stabilize...");
-        vTaskDelay(pdMS_TO_TICKS(2000));
+        // Cellular networks need more time than WiFi for stable data connection
+        ESP_LOGI(TAG, "Waiting 5 seconds for PPP/cellular network to stabilize...");
+        vTaskDelay(pdMS_TO_TICKS(5000));
+
+        // Get IP address to verify network is working
+        char ip_str[32] = {0};
+        if (a7670c_ppp_get_ip_info(ip_str, sizeof(ip_str)) == ESP_OK) {
+            ESP_LOGI(TAG, "PPP IP address: %s", ip_str);
+        }
 
         ESP_LOGI(TAG, "PPP stabilization complete, starting OTA download...");
+        ESP_LOGI(TAG, "Free heap after PPP setup: %lu bytes", esp_get_free_heap_size());
     }
 
     // Both WiFi and SIM mode use ESP32 HTTP client
     // For SIM mode, it works over the PPP connection
     ESP_LOGI(TAG, "%s - Using ESP32 HTTP client", is_sim_mode ? "SIM Mode" : "WiFi Mode");
+
+    // Log memory for WiFi mode too
+    if (!is_sim_mode) {
+        ESP_LOGI(TAG, "Free heap before WiFi OTA: %lu bytes", esp_get_free_heap_size());
+    }
 
     esp_http_client_handle_t client = NULL;
     char *download_buffer = NULL;
