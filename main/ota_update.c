@@ -23,6 +23,7 @@
 #include "nvs.h"
 #include "esp_crt_bundle.h"
 #include "esp_netif.h"
+#include <net/if.h>  // For struct ifreq
 
 static const char *TAG = "OTA_UPDATE";
 
@@ -223,8 +224,10 @@ static void ota_download_task(void *pvParameter)
     system_config_t *sys_config = get_system_config();
     bool is_sim_mode = (sys_config != NULL && sys_config->network_mode == NETWORK_MODE_SIM);
 
-    // Store PPP interface name for HTTP client binding (SIM mode only)
-    char ppp_if_name[16] = {0};
+    // Store PPP interface for HTTP client binding (SIM mode only)
+    struct ifreq ppp_ifreq;
+    memset(&ppp_ifreq, 0, sizeof(ppp_ifreq));
+    bool ppp_if_valid = false;
 
     if (is_sim_mode) {
         ESP_LOGI(TAG, "========================================");
@@ -241,12 +244,15 @@ static void ota_download_task(void *pvParameter)
             ESP_LOGI(TAG, "PPP set as default network interface for OTA");
 
             // Get interface name for HTTP client binding
-            esp_err_t ret = esp_netif_get_netif_impl_name(ppp_netif, ppp_if_name);
-            if (ret == ESP_OK && strlen(ppp_if_name) > 0) {
-                ESP_LOGI(TAG, "PPP interface name: %s", ppp_if_name);
+            char if_name_buf[16] = {0};
+            esp_err_t ret = esp_netif_get_netif_impl_name(ppp_netif, if_name_buf);
+            if (ret == ESP_OK && strlen(if_name_buf) > 0) {
+                // Copy interface name to ifreq structure
+                strncpy(ppp_ifreq.ifr_name, if_name_buf, sizeof(ppp_ifreq.ifr_name) - 1);
+                ppp_if_valid = true;
+                ESP_LOGI(TAG, "PPP interface name: %s", ppp_ifreq.ifr_name);
             } else {
                 ESP_LOGW(TAG, "Could not get PPP interface name, using default routing");
-                ppp_if_name[0] = '\0';
             }
         } else {
             ESP_LOGW(TAG, "PPP netif not available - HTTP may not route correctly");
@@ -334,7 +340,7 @@ static void ota_download_task(void *pvParameter)
             .skip_cert_common_name_check = true,  // Allow redirects to different domains
             .crt_bundle_attach = esp_crt_bundle_attach,  // Use certificate bundle (like MQTT)
             .event_handler = http_event_handler,  // Capture Location header via events
-            .if_name = (is_sim_mode && ppp_if_name[0]) ? ppp_if_name : NULL,  // Bind to PPP interface
+            .if_name = (is_sim_mode && ppp_if_valid) ? &ppp_ifreq : NULL,  // Bind to PPP interface
         };
 
         // Create HTTP client
