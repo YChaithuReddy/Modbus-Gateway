@@ -1,6 +1,9 @@
 /**
  * @file a7670c_http.c
- * @brief A7670C Modem HTTP/HTTPS implementation for OTA updates
+ * @brief A7670C Modem HTTPS implementation for OTA updates
+ *
+ * Uses AT+SH* commands (SHHTTP) for secure HTTPS connections.
+ * The regular AT+HTTP* commands only support plain HTTP on A7670C.
  */
 
 #include "a7670c_http.h"
@@ -24,13 +27,75 @@ extern int a7670c_get_uart_num(void);
 
 // HTTP state
 static bool http_initialized = false;
+static bool http_connected = false;
 static int modem_uart_num = -1;
 
 // UART buffers for AT commands
 static uint8_t at_rx_buffer[4096];
 static char at_response[4096];
 
-// Send AT command and get full response (similar to a7670c_ppp.c but accessible here)
+// Current content info
+static size_t current_content_length = 0;
+
+// Parse URL into host, port, path
+typedef struct {
+    char host[256];
+    int port;
+    char path[1024];
+    bool is_https;
+} parsed_url_t;
+
+static bool parse_url(const char* url, parsed_url_t* parsed) {
+    memset(parsed, 0, sizeof(parsed_url_t));
+    parsed->port = 80;  // Default HTTP port
+
+    const char* p = url;
+
+    // Check protocol
+    if (strncmp(p, "https://", 8) == 0) {
+        parsed->is_https = true;
+        parsed->port = 443;
+        p += 8;
+    } else if (strncmp(p, "http://", 7) == 0) {
+        parsed->is_https = false;
+        p += 7;
+    } else {
+        return false;  // Invalid URL
+    }
+
+    // Find host end (/ or :)
+    const char* host_end = p;
+    while (*host_end && *host_end != '/' && *host_end != ':') {
+        host_end++;
+    }
+
+    size_t host_len = host_end - p;
+    if (host_len >= sizeof(parsed->host)) {
+        host_len = sizeof(parsed->host) - 1;
+    }
+    strncpy(parsed->host, p, host_len);
+    parsed->host[host_len] = '\0';
+
+    p = host_end;
+
+    // Check for port
+    if (*p == ':') {
+        p++;
+        parsed->port = atoi(p);
+        while (*p && *p != '/') p++;
+    }
+
+    // Get path (including query string)
+    if (*p == '/') {
+        strncpy(parsed->path, p, sizeof(parsed->path) - 1);
+    } else {
+        strcpy(parsed->path, "/");
+    }
+
+    return true;
+}
+
+// Send AT command and get full response
 static esp_err_t send_at_cmd(const char* cmd, const char* expected, char* response, size_t response_size, int timeout_ms)
 {
     if (modem_uart_num < 0) {
@@ -106,28 +171,19 @@ static esp_err_t exit_ppp_for_http(void)
     return ESP_OK;
 }
 
-esp_err_t a7670c_http_init(void)
+// Disconnect current HTTPS session
+static void shhttp_disconnect(void) {
+    if (http_connected) {
+        send_at_simple("AT+SHDISC", "OK", 5000);
+        http_connected = false;
+        vTaskDelay(pdMS_TO_TICKS(500));
+    }
+}
+
+// Setup modem network (SIM, registration, APN, PDP)
+static esp_err_t setup_modem_network(void)
 {
-    ESP_LOGI(TAG, "========================================");
-    ESP_LOGI(TAG, "Initializing Modem HTTP Service");
-    ESP_LOGI(TAG, "========================================");
-
-    // Get UART number from PPP module
-    modem_uart_num = a7670c_get_uart_num();
-    if (modem_uart_num < 0) {
-        ESP_LOGE(TAG, "Modem UART not available");
-        return ESP_ERR_INVALID_STATE;
-    }
-
-    // Exit PPP mode - this will power cycle the modem
-    esp_err_t ret = exit_ppp_for_http();
-    if (ret != ESP_OK) {
-        ESP_LOGE(TAG, "Failed to exit PPP mode");
-        return ret;
-    }
-
-    // After power cycle, we need to set up SIM and network
-    ESP_LOGI(TAG, "Setting up modem for HTTP...");
+    esp_err_t ret;
 
     // Check SIM
     ESP_LOGI(TAG, "Checking SIM card...");
@@ -151,11 +207,13 @@ esp_err_t a7670c_http_init(void)
     ESP_LOGI(TAG, "Waiting for network registration...");
     int net_retries = 30;
     while (net_retries-- > 0) {
-        if (send_at_simple("AT+CREG?", ",1", 2000) == ESP_OK ||
-            send_at_simple("AT+CREG?", ",5", 2000) == ESP_OK ||
-            send_at_simple("AT+CREG?", ",6", 2000) == ESP_OK) {
-            ESP_LOGI(TAG, "Network registered");
-            break;
+        ret = send_at_cmd("AT+CREG?", "OK", at_response, sizeof(at_response), 2000);
+        if (ret == ESP_OK) {
+            // Check for registered (1 or 5 or 6)
+            if (strstr(at_response, ",1") || strstr(at_response, ",5") || strstr(at_response, ",6")) {
+                ESP_LOGI(TAG, "Network registered");
+                break;
+            }
         }
         vTaskDelay(pdMS_TO_TICKS(2000));
     }
@@ -185,147 +243,168 @@ esp_err_t a7670c_http_init(void)
     send_at_simple("AT+CGACT=1,1", "OK", 10000);
     vTaskDelay(pdMS_TO_TICKS(2000));
 
-    // Terminate any existing HTTP session
-    send_at_simple("AT+HTTPTERM", "OK", 2000);
-    vTaskDelay(pdMS_TO_TICKS(500));
-
-    // Initialize HTTP service
-    ESP_LOGI(TAG, "Initializing HTTP service...");
-    ret = send_at_simple("AT+HTTPINIT", "OK", 5000);
-    if (ret != ESP_OK) {
-        ESP_LOGE(TAG, "Failed to initialize HTTP service");
-        return ret;
-    }
-
-    // Configure SSL for HTTPS
-    // SSL context 0, TLS 1.2
-    send_at_simple("AT+CSSLCFG=\"sslversion\",0,4", "OK", 2000);
-    send_at_simple("AT+CSSLCFG=\"ignorelocaltime\",0,1", "OK", 2000);
-    send_at_simple("AT+CSSLCFG=\"enableSNI\",0,1", "OK", 2000);
-
-    // Enable HTTPS
-    ret = send_at_simple("AT+HTTPSSL=1", "OK", 2000);
-    if (ret != ESP_OK) {
-        ESP_LOGW(TAG, "HTTPSSL command failed, continuing anyway...");
-    }
-
-    // Set User-Agent (required for GitHub)
-    send_at_simple("AT+HTTPPARA=\"UA\",\"Mozilla/5.0 (Linux; Android 10) AppleWebKit/537.36\"", "OK", 2000);
-
-    // Set content type
-    send_at_simple("AT+HTTPPARA=\"CONTENT\",\"application/octet-stream\"", "OK", 2000);
-
-    // Enable redirect following
-    send_at_simple("AT+HTTPPARA=\"REDIR\",1", "OK", 2000);
-
-    http_initialized = true;
-    ESP_LOGI(TAG, "========================================");
-    ESP_LOGI(TAG, "Modem HTTP service initialized successfully!");
-    ESP_LOGI(TAG, "========================================");
     return ESP_OK;
 }
 
-esp_err_t a7670c_http_terminate(void)
+// Connect to HTTPS server using AT+SH* commands
+static esp_err_t shhttp_connect(const char* url)
 {
-    if (!http_initialized) {
-        return ESP_OK;
-    }
+    esp_err_t ret;
+    parsed_url_t parsed;
 
-    ESP_LOGI(TAG, "Terminating HTTP service...");
-
-    send_at_simple("AT+HTTPTERM", "OK", 2000);
-    http_initialized = false;
-
-    return ESP_OK;
-}
-
-esp_err_t a7670c_http_get(const char* url, modem_http_status_t* status, bool follow_redirects)
-{
-    if (!http_initialized || url == NULL || status == NULL) {
+    if (!parse_url(url, &parsed)) {
+        ESP_LOGE(TAG, "Failed to parse URL: %s", url);
         return ESP_ERR_INVALID_ARG;
     }
 
-    memset(status, 0, sizeof(modem_http_status_t));
-    esp_err_t ret;
+    ESP_LOGI(TAG, "Connecting to: %s (port %d, path: %s)", parsed.host, parsed.port, parsed.path);
 
-    ESP_LOGI(TAG, "HTTP GET: %s", url);
+    // Disconnect any existing session
+    shhttp_disconnect();
 
-    // Set URL
-    char url_cmd[2048];
-    snprintf(url_cmd, sizeof(url_cmd), "AT+HTTPPARA=\"URL\",\"%s\"", url);
+    // Configure SSL (must be done before SHCONN)
+    // Context 0, ignore RTC time (for certificate validation)
+    send_at_simple("AT+CSSLCFG=\"ignorertctime\",0,1", "OK", 2000);
+
+    // TLS 1.2 (value 3 = TLS 1.2, value 4 = ALL)
+    send_at_simple("AT+CSSLCFG=\"sslversion\",0,3", "OK", 2000);
+
+    // Enable SNI (Server Name Indication) - required for most HTTPS servers
+    char sni_cmd[300];
+    snprintf(sni_cmd, sizeof(sni_cmd), "AT+CSSLCFG=\"sni\",0,\"%s\"", parsed.host);
+    send_at_simple(sni_cmd, "OK", 2000);
+
+    // Trust all certificates (no CA verification) - SSL context 1, empty cert name
+    // This is acceptable for OTA from known sources
+    ret = send_at_simple("AT+SHSSL=1,\"\"", "OK", 2000);
+    if (ret != ESP_OK) {
+        // Try alternative syntax
+        send_at_simple("AT+SHSSL=1", "OK", 2000);
+    }
+
+    // Configure SHHTTP
+    // Set the full URL (including https://)
+    char url_cmd[1500];
+    snprintf(url_cmd, sizeof(url_cmd), "AT+SHCONF=\"URL\",\"%s\"", url);
     ret = send_at_simple(url_cmd, "OK", 5000);
     if (ret != ESP_OK) {
         ESP_LOGE(TAG, "Failed to set URL");
         return ret;
     }
 
-    // Perform GET request
-    // Response format: +HTTPACTION: <method>,<status_code>,<data_length>
-    ret = send_at_cmd("AT+HTTPACTION=0", "+HTTPACTION:", at_response, sizeof(at_response), 120000);
+    // Body length (0 for GET)
+    send_at_simple("AT+SHCONF=\"BODYLEN\",0", "OK", 2000);
+
+    // Header length
+    send_at_simple("AT+SHCONF=\"HEADERLEN\",512", "OK", 2000);
+
+    // Connection timeout
+    send_at_simple("AT+SHCONF=\"TIMEOUT\",60", "OK", 2000);
+
+    // Connect (TLS handshake happens here)
+    ESP_LOGI(TAG, "Establishing HTTPS connection (TLS handshake)...");
+    ret = send_at_simple("AT+SHCONN", "OK", 60000);  // Long timeout for TLS
     if (ret != ESP_OK) {
-        ESP_LOGE(TAG, "HTTP GET request failed");
+        ESP_LOGE(TAG, "SHCONN failed - TLS handshake error");
         return ret;
     }
 
-    // Parse response: +HTTPACTION: 0,<status>,<length>
-    char* action_line = strstr(at_response, "+HTTPACTION:");
-    if (action_line) {
-        int method, http_status, content_len;
-        if (sscanf(action_line, "+HTTPACTION: %d,%d,%d", &method, &http_status, &content_len) == 3) {
-            status->status_code = http_status;
-            status->content_length = content_len;
-            status->is_redirect = (http_status >= 300 && http_status < 400);
-
-            ESP_LOGI(TAG, "HTTP Response: status=%d, content_length=%d", http_status, content_len);
-
-            // Handle redirects
-            if (status->is_redirect && follow_redirects) {
-                // Read redirect response to get Location header
-                // The modem may have already followed the redirect with REDIR=1
-                ESP_LOGI(TAG, "Redirect detected (status %d)", http_status);
-            }
-        } else {
-            ESP_LOGE(TAG, "Failed to parse HTTPACTION response");
-            return ESP_FAIL;
-        }
+    // Verify connection state
+    ret = send_at_cmd("AT+SHSTATE?", "+SHSTATE:", at_response, sizeof(at_response), 2000);
+    if (ret == ESP_OK && strstr(at_response, "+SHSTATE: 1")) {
+        ESP_LOGI(TAG, "HTTPS connected successfully!");
+        http_connected = true;
     } else {
-        ESP_LOGE(TAG, "No HTTPACTION in response");
+        ESP_LOGE(TAG, "Connection not established (SHSTATE != 1)");
         return ESP_FAIL;
     }
 
     return ESP_OK;
 }
 
-esp_err_t a7670c_http_read(uint8_t* buffer, size_t buffer_size, size_t offset, size_t* bytes_read)
+// Perform HTTPS GET request
+static esp_err_t shhttp_get(int* http_status, size_t* content_length)
 {
-    if (!http_initialized || buffer == NULL || bytes_read == NULL) {
+    if (!http_connected) {
+        return ESP_ERR_INVALID_STATE;
+    }
+
+    esp_err_t ret;
+
+    // Clear headers
+    send_at_simple("AT+SHCHEAD", "OK", 2000);
+
+    // Add headers
+    send_at_simple("AT+SHAHEAD=\"User-Agent\",\"ESP32-OTA/1.0\"", "OK", 2000);
+    send_at_simple("AT+SHAHEAD=\"Accept\",\"*/*\"", "OK", 2000);
+    send_at_simple("AT+SHAHEAD=\"Connection\",\"keep-alive\"", "OK", 2000);
+
+    // Perform GET request (method 1 = GET)
+    // The path is already included in the URL set via SHCONF
+    // Response format: +SHREQ: "GET",<status>,<length>
+    ESP_LOGI(TAG, "Sending GET request...");
+    ret = send_at_cmd("AT+SHREQ=\"/\",1", "+SHREQ:", at_response, sizeof(at_response), 120000);
+    if (ret != ESP_OK) {
+        ESP_LOGE(TAG, "SHREQ failed");
+        return ret;
+    }
+
+    // Parse response: +SHREQ: "GET",<status>,<length>
+    char* shreq_line = strstr(at_response, "+SHREQ:");
+    if (shreq_line) {
+        char method[16];
+        int status = 0, length = 0;
+        if (sscanf(shreq_line, "+SHREQ: \"%[^\"]\", %d, %d", method, &status, &length) == 3 ||
+            sscanf(shreq_line, "+SHREQ: \"%[^\"]\",%d,%d", method, &status, &length) == 3) {
+            *http_status = status;
+            *content_length = length;
+            current_content_length = length;
+            ESP_LOGI(TAG, "HTTP Response: status=%d, content_length=%d", status, length);
+            return ESP_OK;
+        }
+    }
+
+    ESP_LOGE(TAG, "Failed to parse SHREQ response: %s", at_response);
+    return ESP_FAIL;
+}
+
+// Read data from HTTPS response
+static esp_err_t shhttp_read(uint8_t* buffer, size_t buffer_size, size_t offset, size_t* bytes_read)
+{
+    if (!http_connected || buffer == NULL || bytes_read == NULL) {
         return ESP_ERR_INVALID_ARG;
     }
 
     *bytes_read = 0;
 
-    // Request data chunk
-    // AT+HTTPREAD=<offset>,<size>
-    char read_cmd[64];
-    snprintf(read_cmd, sizeof(read_cmd), "AT+HTTPREAD=%zu,%zu", offset, buffer_size);
+    // Calculate how much to read
+    size_t to_read = buffer_size;
+    if (current_content_length > 0 && offset + to_read > current_content_length) {
+        to_read = current_content_length - offset;
+    }
 
-    // Response format:
-    // +HTTPREAD: <actual_length>
-    // <binary data>
-    // OK
+    if (to_read == 0) {
+        return ESP_OK;  // Nothing more to read
+    }
+
+    // AT+SHREAD=<offset>,<length>
+    // Response: +SHREAD: <actual_length>\r\n<data>
+    char read_cmd[64];
+    snprintf(read_cmd, sizeof(read_cmd), "AT+SHREAD=%zu,%zu", offset, to_read);
 
     ESP_LOGI(TAG, ">>> %s", read_cmd);
     char cmd_with_crlf[128];
     snprintf(cmd_with_crlf, sizeof(cmd_with_crlf), "%s\r\n", read_cmd);
     uart_write_bytes(modem_uart_num, cmd_with_crlf, strlen(cmd_with_crlf));
 
-    // Wait for +HTTPREAD header
+    // Wait for +SHREAD header
     char header_buf[128] = {0};
     int header_len = 0;
     int64_t start_time = esp_timer_get_time() / 1000;
     int actual_length = 0;
+    bool found_header = false;
 
-    // First, read until we get +HTTPREAD: <length>
+    // First, read until we get +SHREAD: <length>
     while ((esp_timer_get_time() / 1000 - start_time) < 30000) {
         int len = uart_read_bytes(modem_uart_num, at_rx_buffer, 1, pdMS_TO_TICKS(100));
         if (len > 0) {
@@ -334,13 +413,15 @@ esp_err_t a7670c_http_read(uint8_t* buffer, size_t buffer_size, size_t offset, s
                 header_buf[header_len] = '\0';
 
                 // Check if we have the complete header line
-                char* httpread = strstr(header_buf, "+HTTPREAD:");
-                if (httpread) {
-                    char* newline = strchr(httpread, '\n');
+                char* shread = strstr(header_buf, "+SHREAD:");
+                if (shread) {
+                    char* newline = strchr(shread, '\n');
                     if (newline) {
                         // Parse length
-                        if (sscanf(httpread, "+HTTPREAD: %d", &actual_length) == 1) {
+                        if (sscanf(shread, "+SHREAD: %d", &actual_length) == 1 ||
+                            sscanf(shread, "+SHREAD:%d", &actual_length) == 1) {
                             ESP_LOGI(TAG, "Reading %d bytes of data...", actual_length);
+                            found_header = true;
                             break;
                         }
                     }
@@ -348,16 +429,16 @@ esp_err_t a7670c_http_read(uint8_t* buffer, size_t buffer_size, size_t offset, s
 
                 // Check for error
                 if (strstr(header_buf, "ERROR")) {
-                    ESP_LOGE(TAG, "HTTPREAD error: %s", header_buf);
+                    ESP_LOGE(TAG, "SHREAD error: %s", header_buf);
                     return ESP_FAIL;
                 }
             }
         }
     }
 
-    if (actual_length == 0) {
-        ESP_LOGW(TAG, "No data to read (length=0)");
-        return ESP_OK;  // Not an error, just no more data
+    if (!found_header || actual_length == 0) {
+        ESP_LOGW(TAG, "No data to read");
+        return ESP_OK;
     }
 
     // Now read the binary data
@@ -365,12 +446,10 @@ esp_err_t a7670c_http_read(uint8_t* buffer, size_t buffer_size, size_t offset, s
     start_time = esp_timer_get_time() / 1000;
 
     while (data_read < (size_t)actual_length && (esp_timer_get_time() / 1000 - start_time) < 60000) {
-        size_t to_read = actual_length - data_read;
-        if (to_read > sizeof(at_rx_buffer)) {
-            to_read = sizeof(at_rx_buffer);
-        }
+        size_t remaining = actual_length - data_read;
+        size_t chunk = remaining > sizeof(at_rx_buffer) ? sizeof(at_rx_buffer) : remaining;
 
-        int len = uart_read_bytes(modem_uart_num, at_rx_buffer, to_read, pdMS_TO_TICKS(1000));
+        int len = uart_read_bytes(modem_uart_num, at_rx_buffer, chunk, pdMS_TO_TICKS(1000));
         if (len > 0) {
             // Copy to output buffer
             size_t copy_len = len;
@@ -392,6 +471,118 @@ esp_err_t a7670c_http_read(uint8_t* buffer, size_t buffer_size, size_t offset, s
     return ESP_OK;
 }
 
+// Read Location header from redirect response
+static esp_err_t read_redirect_location(char* location, size_t location_size)
+{
+    // Read response body which may contain redirect info
+    // For HTTP redirects, the modem might have the URL in the response
+    uint8_t temp_buf[1024];
+    size_t bytes_read = 0;
+
+    esp_err_t ret = shhttp_read(temp_buf, sizeof(temp_buf) - 1, 0, &bytes_read);
+    if (ret == ESP_OK && bytes_read > 0) {
+        temp_buf[bytes_read] = '\0';
+        ESP_LOGI(TAG, "Redirect response: %s", temp_buf);
+
+        // Look for Location header in response
+        char* loc = strstr((char*)temp_buf, "Location:");
+        if (!loc) loc = strstr((char*)temp_buf, "location:");
+
+        if (loc) {
+            loc += 9;  // Skip "Location:"
+            while (*loc == ' ') loc++;  // Skip whitespace
+
+            // Copy URL until newline or end
+            int i = 0;
+            while (loc[i] && loc[i] != '\r' && loc[i] != '\n' && i < (int)location_size - 1) {
+                location[i] = loc[i];
+                i++;
+            }
+            location[i] = '\0';
+            return ESP_OK;
+        }
+    }
+
+    return ESP_FAIL;
+}
+
+esp_err_t a7670c_http_init(void)
+{
+    ESP_LOGI(TAG, "========================================");
+    ESP_LOGI(TAG, "Initializing Modem HTTPS Service (SHHTTP)");
+    ESP_LOGI(TAG, "========================================");
+
+    // Get UART number from PPP module
+    modem_uart_num = a7670c_get_uart_num();
+    if (modem_uart_num < 0) {
+        ESP_LOGE(TAG, "Modem UART not available");
+        return ESP_ERR_INVALID_STATE;
+    }
+
+    // Exit PPP mode - this will power cycle the modem
+    esp_err_t ret = exit_ppp_for_http();
+    if (ret != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to exit PPP mode");
+        return ret;
+    }
+
+    // Setup network
+    ret = setup_modem_network();
+    if (ret != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to setup network");
+        return ret;
+    }
+
+    http_initialized = true;
+    ESP_LOGI(TAG, "========================================");
+    ESP_LOGI(TAG, "Modem HTTPS service ready!");
+    ESP_LOGI(TAG, "========================================");
+    return ESP_OK;
+}
+
+esp_err_t a7670c_http_terminate(void)
+{
+    shhttp_disconnect();
+    http_initialized = false;
+    return ESP_OK;
+}
+
+esp_err_t a7670c_http_get(const char* url, modem_http_status_t* status, bool follow_redirects)
+{
+    if (!http_initialized || url == NULL || status == NULL) {
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    memset(status, 0, sizeof(modem_http_status_t));
+    esp_err_t ret;
+
+    // Connect to server
+    ret = shhttp_connect(url);
+    if (ret != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to connect to server");
+        return ret;
+    }
+
+    // Perform GET
+    int http_status = 0;
+    size_t content_length = 0;
+    ret = shhttp_get(&http_status, &content_length);
+    if (ret != ESP_OK) {
+        return ret;
+    }
+
+    status->status_code = http_status;
+    status->content_length = content_length;
+    status->is_redirect = (http_status >= 300 && http_status < 400);
+
+    return ESP_OK;
+}
+
+esp_err_t a7670c_http_read(uint8_t* buffer, size_t buffer_size, size_t offset, size_t* bytes_read)
+{
+    return shhttp_read(buffer, buffer_size, offset, bytes_read);
+}
+
 esp_err_t a7670c_http_download_ota(const char* url, modem_http_progress_cb_t progress_cb)
 {
     if (url == NULL) {
@@ -399,12 +590,11 @@ esp_err_t a7670c_http_download_ota(const char* url, modem_http_progress_cb_t pro
     }
 
     ESP_LOGI(TAG, "========================================");
-    ESP_LOGI(TAG, "Starting Modem HTTP OTA Download");
+    ESP_LOGI(TAG, "Starting Modem HTTPS OTA Download");
     ESP_LOGI(TAG, "URL: %s", url);
     ESP_LOGI(TAG, "========================================");
 
     esp_err_t ret;
-    modem_http_status_t http_status;
     esp_ota_handle_t ota_handle = 0;
     const esp_partition_t *ota_partition = NULL;
     uint8_t *download_buffer = NULL;
@@ -415,7 +605,7 @@ esp_err_t a7670c_http_download_ota(const char* url, modem_http_progress_cb_t pro
     // Initialize HTTP
     ret = a7670c_http_init();
     if (ret != ESP_OK) {
-        ESP_LOGE(TAG, "Failed to initialize modem HTTP");
+        ESP_LOGE(TAG, "Failed to initialize modem HTTPS");
         return ret;
     }
 
@@ -427,46 +617,63 @@ esp_err_t a7670c_http_download_ota(const char* url, modem_http_progress_cb_t pro
         return ESP_ERR_NO_MEM;
     }
 
-    // Handle redirects - modem should follow automatically with REDIR=1
+    // Handle GitHub redirects manually
+    // GitHub returns 302 redirect to actual S3 URL
     const char* current_url = url;
+    char redirect_url[1024] = {0};
     int redirect_count = 0;
     const int MAX_REDIRECTS = 5;
+    int http_status = 0;
+    size_t content_length = 0;
 
     while (redirect_count < MAX_REDIRECTS) {
-        // Perform GET request
-        ret = a7670c_http_get(current_url, &http_status, false);
+        // Connect and perform GET
+        ret = shhttp_connect(current_url);
         if (ret != ESP_OK) {
-            ESP_LOGE(TAG, "HTTP GET failed");
+            ESP_LOGE(TAG, "Failed to connect");
             goto cleanup;
         }
 
-        // Check for redirect (modem with REDIR=1 should follow automatically)
-        if (http_status.status_code == 200) {
-            ESP_LOGI(TAG, "Got HTTP 200 OK, content_length=%d", http_status.content_length);
+        ret = shhttp_get(&http_status, &content_length);
+        if (ret != ESP_OK) {
+            ESP_LOGE(TAG, "GET request failed");
+            goto cleanup;
+        }
+
+        ESP_LOGI(TAG, "HTTP status: %d, content_length: %zu", http_status, content_length);
+
+        if (http_status == 200) {
+            // Success - continue to download
+            ESP_LOGI(TAG, "Got HTTP 200 OK, ready to download");
             break;
-        } else if (http_status.is_redirect) {
-            // Need to read response to get Location header
-            // For now, rely on modem's auto-redirect (REDIR=1)
-            ESP_LOGW(TAG, "Redirect status %d - modem should follow automatically", http_status.status_code);
-            redirect_count++;
+        } else if (http_status >= 300 && http_status < 400) {
+            // Redirect - need to follow
+            ESP_LOGI(TAG, "Redirect (%d) - reading location...", http_status);
 
-            // Re-initialize HTTP for redirect
-            a7670c_http_terminate();
-            vTaskDelay(pdMS_TO_TICKS(1000));
+            ret = read_redirect_location(redirect_url, sizeof(redirect_url));
+            if (ret == ESP_OK && strlen(redirect_url) > 0) {
+                ESP_LOGI(TAG, "Redirect to: %s", redirect_url);
+                current_url = redirect_url;
+                redirect_count++;
 
-            ret = a7670c_http_init();
-            if (ret != ESP_OK) {
+                // Disconnect and retry with new URL
+                shhttp_disconnect();
+                vTaskDelay(pdMS_TO_TICKS(1000));
+                continue;
+            } else {
+                ESP_LOGE(TAG, "Failed to get redirect location");
+                ret = ESP_FAIL;
                 goto cleanup;
             }
         } else {
-            ESP_LOGE(TAG, "HTTP error: %d", http_status.status_code);
+            ESP_LOGE(TAG, "HTTP error: %d", http_status);
             ret = ESP_FAIL;
             goto cleanup;
         }
     }
 
-    if (http_status.status_code != 200) {
-        ESP_LOGE(TAG, "Failed to get HTTP 200 after redirects");
+    if (http_status != 200) {
+        ESP_LOGE(TAG, "Failed to get HTTP 200 after %d redirects", redirect_count);
         ret = ESP_FAIL;
         goto cleanup;
     }
@@ -491,14 +698,13 @@ esp_err_t a7670c_http_download_ota(const char* url, modem_http_progress_cb_t pro
 
     // Download and write firmware in chunks
     size_t total_downloaded = 0;
-    size_t content_length = http_status.content_length > 0 ? http_status.content_length : 0;
 
-    ESP_LOGI(TAG, "Downloading firmware (%d bytes)...", http_status.content_length);
+    ESP_LOGI(TAG, "Downloading firmware (%zu bytes)...", content_length);
 
     while (1) {
         size_t bytes_read = 0;
 
-        ret = a7670c_http_read(download_buffer, CHUNK_SIZE, total_downloaded, &bytes_read);
+        ret = shhttp_read(download_buffer, CHUNK_SIZE, total_downloaded, &bytes_read);
         if (ret != ESP_OK) {
             ESP_LOGE(TAG, "Failed to read HTTP data");
             goto cleanup;
