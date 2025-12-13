@@ -50,6 +50,9 @@ typedef struct {
 // Progress callback function type
 typedef void (*ota_progress_cb_t)(uint8_t progress, uint32_t bytes_downloaded, uint32_t total_bytes);
 
+// Status change callback function type (for reporting to Azure)
+typedef void (*ota_status_cb_t)(ota_status_t status, const char* message);
+
 /**
  * @brief Initialize OTA module
  *
@@ -129,6 +132,13 @@ const char* ota_get_version(void);
  * @param callback Function to call with progress updates
  */
 void ota_set_progress_callback(ota_progress_cb_t callback);
+
+/**
+ * @brief Set status change callback
+ *
+ * @param callback Function to call when OTA status changes
+ */
+void ota_set_status_callback(ota_status_cb_t callback);
 
 /**
  * @brief Get status as string

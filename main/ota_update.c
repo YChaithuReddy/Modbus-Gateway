@@ -26,6 +26,7 @@ static ota_info_t ota_info = {0};
 static SemaphoreHandle_t ota_mutex = NULL;
 static TaskHandle_t ota_task_handle = NULL;
 static ota_progress_cb_t progress_callback = NULL;
+static ota_status_cb_t status_callback = NULL;
 static volatile bool ota_cancel_requested = false;
 
 // For chunked web upload
@@ -38,6 +39,43 @@ static const esp_partition_t *ota_partition = NULL;
 
 // Forward declarations
 static void ota_download_task(void *pvParameter);
+static void notify_status_change(ota_status_t status, const char* message);
+
+// Storage for redirect URL captured from event handler
+// GitHub CDN URLs can be very long (includes JWT tokens), need large buffer
+static char redirect_location[2048] = {0};
+
+// HTTP event handler to capture Location header during redirects
+static esp_err_t http_event_handler(esp_http_client_event_t *evt)
+{
+    switch (evt->event_id) {
+        case HTTP_EVENT_ON_HEADER:
+            // Check if this is the Location header
+            if (strcasecmp(evt->header_key, "Location") == 0 ||
+                strcasecmp(evt->header_key, "location") == 0) {
+                size_t url_len = strlen(evt->header_value);
+                if (url_len >= sizeof(redirect_location)) {
+                    ESP_LOGW(TAG, "Location header too long (%d bytes), truncating", url_len);
+                    url_len = sizeof(redirect_location) - 1;
+                }
+                strncpy(redirect_location, evt->header_value, sizeof(redirect_location) - 1);
+                redirect_location[sizeof(redirect_location) - 1] = '\0';
+                ESP_LOGI(TAG, "Captured Location header (%d bytes)", strlen(redirect_location));
+            }
+            break;
+        default:
+            break;
+    }
+    return ESP_OK;
+}
+
+// Helper to notify status changes
+static void notify_status_change(ota_status_t status, const char* message)
+{
+    if (status_callback) {
+        status_callback(status, message ? message : "");
+    }
+}
 
 esp_err_t ota_init(void)
 {
@@ -162,55 +200,228 @@ esp_err_t ota_start_update(const char* firmware_url, const char* version)
 static void ota_download_task(void *pvParameter)
 {
     ESP_LOGI(TAG, "OTA download task started");
+    esp_err_t err;
+    esp_http_client_handle_t client = NULL;
+    char *download_buffer = NULL;
+    const int DOWNLOAD_BUFFER_SIZE = 4096;
+    bool ota_started = false;
+    int last_logged_progress = -10;
 
     xSemaphoreTake(ota_mutex, portMAX_DELAY);
     ota_info.status = OTA_STATUS_DOWNLOADING;
     xSemaphoreGive(ota_mutex);
+    notify_status_change(OTA_STATUS_DOWNLOADING, "Starting download");
 
-    // Configure HTTP client
-    // Note: For GitHub and other CDNs, certificate verification may fail due to
-    // ESP32's limited certificate bundle. For production, use Azure Blob Storage.
-    // For testing/development, we disable strict certificate verification.
-    esp_http_client_config_t http_config = {
-        .url = ota_info.update_url,
-        .timeout_ms = OTA_RECV_TIMEOUT_MS,
-        .keep_alive_enable = true,
-        .skip_cert_common_name_check = true,
-        .cert_pem = NULL,  // Disable certificate verification for OTA compatibility
-    };
-
-    // Configure OTA
-    esp_https_ota_config_t ota_config = {
-        .http_config = &http_config,
-    };
-
-    esp_https_ota_handle_t https_ota_handle = NULL;
-    esp_err_t err = esp_https_ota_begin(&ota_config, &https_ota_handle);
-
-    if (err != ESP_OK) {
-        ESP_LOGE(TAG, "esp_https_ota_begin failed: %s", esp_err_to_name(err));
+    // Allocate download buffer
+    download_buffer = malloc(DOWNLOAD_BUFFER_SIZE);
+    if (!download_buffer) {
+        ESP_LOGE(TAG, "Failed to allocate download buffer");
         xSemaphoreTake(ota_mutex, portMAX_DELAY);
         ota_info.status = OTA_STATUS_FAILED;
-        snprintf(ota_info.error_msg, sizeof(ota_info.error_msg), "Connection failed: %s", esp_err_to_name(err));
+        snprintf(ota_info.error_msg, sizeof(ota_info.error_msg), "Memory allocation failed");
         xSemaphoreGive(ota_mutex);
         goto cleanup;
     }
 
-    // Get image size
-    int image_size = esp_https_ota_get_image_size(https_ota_handle);
-    if (image_size > 0) {
+    // Current URL for redirect following
+    char *current_url = strdup(ota_info.update_url);
+    if (!current_url) {
+        ESP_LOGE(TAG, "Failed to allocate URL buffer");
         xSemaphoreTake(ota_mutex, portMAX_DELAY);
-        ota_info.total_bytes = image_size;
+        ota_info.status = OTA_STATUS_FAILED;
+        snprintf(ota_info.error_msg, sizeof(ota_info.error_msg), "Memory allocation failed");
         xSemaphoreGive(ota_mutex);
-        ESP_LOGI(TAG, "Firmware size: %d bytes", image_size);
+        goto cleanup;
     }
 
-    // Download and write firmware
-    while (1) {
+    // Handle redirects by recreating client for each redirect (more reliable than reusing)
+    int redirect_count = 0;
+    const int MAX_REDIRECTS = 10;
+    int status_code = 0;
+    int content_length = 0;
+
+    while (redirect_count < MAX_REDIRECTS) {
+        // Clear redirect location from previous iteration
+        redirect_location[0] = '\0';
+
+        // Check if URL is from GitHub (for logging purposes)
+        bool is_github_url = (strstr(current_url, "github.com") != NULL) ||
+                             (strstr(current_url, "githubusercontent.com") != NULL) ||
+                             (strstr(current_url, "github-releases") != NULL) ||
+                             (strstr(current_url, "objects.githubusercontent.com") != NULL);
+
+        ESP_LOGI(TAG, "Connecting to: %s", current_url);
+        if (is_github_url) {
+            ESP_LOGW(TAG, "GitHub/CDN URL - cert verification skipped via sdkconfig");
+        }
+
+        // Configure HTTP client for this URL
+        // Use event handler to capture Location header during redirects
+        esp_http_client_config_t http_config = {
+            .url = current_url,
+            .timeout_ms = OTA_RECV_TIMEOUT_MS,
+            .keep_alive_enable = false,           // Don't keep alive for redirects
+            .buffer_size = 4096,                  // Larger buffer for HTTP headers
+            .buffer_size_tx = 1024,
+            .skip_cert_common_name_check = true,  // Allow redirects to different domains
+            .crt_bundle_attach = esp_crt_bundle_attach,  // Always attach - sdkconfig skips verification
+            .event_handler = http_event_handler,  // Capture Location header via events
+        };
+
+        // Create HTTP client
+        client = esp_http_client_init(&http_config);
+        if (!client) {
+            ESP_LOGE(TAG, "Failed to create HTTP client");
+            xSemaphoreTake(ota_mutex, portMAX_DELAY);
+            ota_info.status = OTA_STATUS_FAILED;
+            snprintf(ota_info.error_msg, sizeof(ota_info.error_msg), "HTTP client init failed");
+            xSemaphoreGive(ota_mutex);
+            free(current_url);
+            goto cleanup;
+        }
+
+        // Set User-Agent header (required by GitHub)
+        esp_http_client_set_header(client, "User-Agent", "ESP32-OTA/1.0");
+        esp_http_client_set_header(client, "Accept", "*/*");
+
+        // Open HTTP connection
+        err = esp_http_client_open(client, 0);
+        if (err != ESP_OK) {
+            ESP_LOGE(TAG, "Failed to open HTTP connection: %s", esp_err_to_name(err));
+            xSemaphoreTake(ota_mutex, portMAX_DELAY);
+            ota_info.status = OTA_STATUS_FAILED;
+            snprintf(ota_info.error_msg, sizeof(ota_info.error_msg), "Connection failed: %s", esp_err_to_name(err));
+            xSemaphoreGive(ota_mutex);
+            free(current_url);
+            goto cleanup;
+        }
+
+        // Fetch headers
+        content_length = esp_http_client_fetch_headers(client);
+        status_code = esp_http_client_get_status_code(client);
+
+        ESP_LOGI(TAG, "HTTP Status: %d, Content-Length: %d", status_code, content_length);
+
+        // Check for redirect (301, 302, 303, 307, 308)
+        if (status_code == 301 || status_code == 302 || status_code == 303 ||
+            status_code == 307 || status_code == 308) {
+
+            redirect_count++;
+            ESP_LOGI(TAG, "Redirect %d detected (HTTP %d)", redirect_count, status_code);
+
+            // The Location header was captured by the event handler
+            if (redirect_location[0] == '\0') {
+                ESP_LOGE(TAG, "No Location header captured by event handler");
+                esp_http_client_close(client);
+                esp_http_client_cleanup(client);
+                client = NULL;
+                xSemaphoreTake(ota_mutex, portMAX_DELAY);
+                ota_info.status = OTA_STATUS_FAILED;
+                snprintf(ota_info.error_msg, sizeof(ota_info.error_msg), "Redirect: no Location header");
+                xSemaphoreGive(ota_mutex);
+                free(current_url);
+                goto cleanup;
+            }
+
+            ESP_LOGI(TAG, "Redirecting to: %s", redirect_location);
+
+            // Copy the redirect URL before cleaning up
+            char *new_url = strdup(redirect_location);
+
+            // Clean up current client
+            esp_http_client_close(client);
+            esp_http_client_cleanup(client);
+            client = NULL;
+
+            if (!new_url) {
+                ESP_LOGE(TAG, "Failed to allocate redirect URL");
+                xSemaphoreTake(ota_mutex, portMAX_DELAY);
+                ota_info.status = OTA_STATUS_FAILED;
+                snprintf(ota_info.error_msg, sizeof(ota_info.error_msg), "Memory allocation failed");
+                xSemaphoreGive(ota_mutex);
+                free(current_url);
+                goto cleanup;
+            }
+
+            // Update current URL for next iteration
+            free(current_url);
+            current_url = new_url;
+
+            continue;
+        }
+
+        // Not a redirect, break out of loop
+        break;
+    }
+
+    // Free URL buffer - no longer needed
+    free(current_url);
+    current_url = NULL;
+
+    if (redirect_count >= MAX_REDIRECTS) {
+        ESP_LOGE(TAG, "Too many redirects");
+        xSemaphoreTake(ota_mutex, portMAX_DELAY);
+        ota_info.status = OTA_STATUS_FAILED;
+        snprintf(ota_info.error_msg, sizeof(ota_info.error_msg), "Too many redirects");
+        xSemaphoreGive(ota_mutex);
+        goto cleanup;
+    }
+
+    if (status_code != 200) {
+        ESP_LOGE(TAG, "HTTP error: %d", status_code);
+        xSemaphoreTake(ota_mutex, portMAX_DELAY);
+        ota_info.status = OTA_STATUS_FAILED;
+        snprintf(ota_info.error_msg, sizeof(ota_info.error_msg), "HTTP error: %d", status_code);
+        xSemaphoreGive(ota_mutex);
+        goto cleanup;
+    }
+
+    if (content_length > 0) {
+        xSemaphoreTake(ota_mutex, portMAX_DELAY);
+        ota_info.total_bytes = content_length;
+        xSemaphoreGive(ota_mutex);
+        ESP_LOGI(TAG, "Firmware size: %d bytes", content_length);
+    }
+
+    // Get OTA partition (same as web upload)
+    ota_partition = esp_ota_get_next_update_partition(NULL);
+    if (ota_partition == NULL) {
+        ESP_LOGE(TAG, "No OTA partition available");
+        xSemaphoreTake(ota_mutex, portMAX_DELAY);
+        ota_info.status = OTA_STATUS_FAILED;
+        snprintf(ota_info.error_msg, sizeof(ota_info.error_msg), "No OTA partition");
+        xSemaphoreGive(ota_mutex);
+        goto cleanup;
+    }
+
+    ESP_LOGI(TAG, "Writing to partition: %s @ 0x%lx", ota_partition->label, ota_partition->address);
+
+    // Start OTA (same as web upload)
+    err = esp_ota_begin(ota_partition, OTA_SIZE_UNKNOWN, &ota_handle);
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "esp_ota_begin failed: %s", esp_err_to_name(err));
+        xSemaphoreTake(ota_mutex, portMAX_DELAY);
+        ota_info.status = OTA_STATUS_FAILED;
+        snprintf(ota_info.error_msg, sizeof(ota_info.error_msg), "OTA begin failed: %s", esp_err_to_name(err));
+        xSemaphoreGive(ota_mutex);
+        goto cleanup;
+    }
+    ota_started = true;
+
+    xSemaphoreTake(ota_mutex, portMAX_DELAY);
+    ota_info.status = OTA_STATUS_INSTALLING;
+    ota_info.bytes_downloaded = 0;
+    xSemaphoreGive(ota_mutex);
+    notify_status_change(OTA_STATUS_INSTALLING, "Writing firmware to flash");
+
+    // Download and write firmware (same approach as web upload)
+    int bytes_read = 0;
+    int total_read = 0;
+
+    while ((bytes_read = esp_http_client_read(client, download_buffer, DOWNLOAD_BUFFER_SIZE)) > 0) {
         // Check for cancel request
         if (ota_cancel_requested) {
             ESP_LOGW(TAG, "OTA cancelled by user");
-            esp_https_ota_abort(https_ota_handle);
             xSemaphoreTake(ota_mutex, portMAX_DELAY);
             ota_info.status = OTA_STATUS_IDLE;
             snprintf(ota_info.error_msg, sizeof(ota_info.error_msg), "Cancelled by user");
@@ -218,94 +429,121 @@ static void ota_download_task(void *pvParameter)
             goto cleanup;
         }
 
-        err = esp_https_ota_perform(https_ota_handle);
-
-        if (err == ESP_ERR_HTTPS_OTA_IN_PROGRESS) {
-            // Update progress
-            int bytes_read = esp_https_ota_get_image_len_read(https_ota_handle);
-
+        // Write to flash (same as web upload)
+        err = esp_ota_write(ota_handle, download_buffer, bytes_read);
+        if (err != ESP_OK) {
+            ESP_LOGE(TAG, "esp_ota_write failed: %s", esp_err_to_name(err));
             xSemaphoreTake(ota_mutex, portMAX_DELAY);
-            ota_info.bytes_downloaded = bytes_read;
-            if (ota_info.total_bytes > 0) {
-                ota_info.progress = (bytes_read * 100) / ota_info.total_bytes;
-            }
+            ota_info.status = OTA_STATUS_FAILED;
+            snprintf(ota_info.error_msg, sizeof(ota_info.error_msg), "Write failed: %s", esp_err_to_name(err));
             xSemaphoreGive(ota_mutex);
-
-            // Call progress callback
-            if (progress_callback) {
-                progress_callback(ota_info.progress, ota_info.bytes_downloaded, ota_info.total_bytes);
-            }
-
-            // Log progress every 10%
-            static int last_logged_progress = -10;
-            if (ota_info.progress >= last_logged_progress + 10) {
-                ESP_LOGI(TAG, "Download progress: %d%% (%lu/%lu bytes)",
-                         ota_info.progress, ota_info.bytes_downloaded, ota_info.total_bytes);
-                last_logged_progress = ota_info.progress;
-            }
-
-            continue;
+            goto cleanup;
         }
 
-        if (err == ESP_OK) {
-            // Download complete
-            break;
+        total_read += bytes_read;
+
+        // Update progress
+        xSemaphoreTake(ota_mutex, portMAX_DELAY);
+        ota_info.bytes_downloaded = total_read;
+        if (ota_info.total_bytes > 0) {
+            ota_info.progress = (total_read * 100) / ota_info.total_bytes;
+        }
+        xSemaphoreGive(ota_mutex);
+
+        // Call progress callback
+        if (progress_callback) {
+            progress_callback(ota_info.progress, ota_info.bytes_downloaded, ota_info.total_bytes);
         }
 
-        // Error occurred
-        ESP_LOGE(TAG, "esp_https_ota_perform failed: %s", esp_err_to_name(err));
-        esp_https_ota_abort(https_ota_handle);
+        // Log progress every 10%
+        if (ota_info.progress >= last_logged_progress + 10) {
+            ESP_LOGI(TAG, "Download progress: %d%% (%d/%lu bytes)",
+                     ota_info.progress, total_read, ota_info.total_bytes);
+            last_logged_progress = ota_info.progress;
+        }
+    }
+
+    if (bytes_read < 0) {
+        ESP_LOGE(TAG, "HTTP read error");
         xSemaphoreTake(ota_mutex, portMAX_DELAY);
         ota_info.status = OTA_STATUS_FAILED;
-        snprintf(ota_info.error_msg, sizeof(ota_info.error_msg), "Download failed: %s", esp_err_to_name(err));
+        snprintf(ota_info.error_msg, sizeof(ota_info.error_msg), "Download failed");
         xSemaphoreGive(ota_mutex);
         goto cleanup;
     }
 
-    // Verify and finish
+    ESP_LOGI(TAG, "Download complete: %d bytes", total_read);
+
+    // Finish OTA (same as web upload - this validates the firmware)
+    err = esp_ota_end(ota_handle);
+    ota_handle = 0;
+    ota_started = false;
+
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "esp_ota_end failed: %s", esp_err_to_name(err));
+        xSemaphoreTake(ota_mutex, portMAX_DELAY);
+        ota_info.status = OTA_STATUS_FAILED;
+        snprintf(ota_info.error_msg, sizeof(ota_info.error_msg), "Validation failed: %s", esp_err_to_name(err));
+        xSemaphoreGive(ota_mutex);
+        goto cleanup;
+    }
+
+    // Set boot partition
+    err = esp_ota_set_boot_partition(ota_partition);
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "esp_ota_set_boot_partition failed: %s", esp_err_to_name(err));
+        xSemaphoreTake(ota_mutex, portMAX_DELAY);
+        ota_info.status = OTA_STATUS_FAILED;
+        snprintf(ota_info.error_msg, sizeof(ota_info.error_msg), "Set boot failed: %s", esp_err_to_name(err));
+        xSemaphoreGive(ota_mutex);
+        goto cleanup;
+    }
+
+    // Success!
     xSemaphoreTake(ota_mutex, portMAX_DELAY);
-    ota_info.status = OTA_STATUS_VERIFYING;
+    ota_info.status = OTA_STATUS_PENDING_REBOOT;
     ota_info.progress = 100;
+    strncpy(ota_info.current_version, ota_info.new_version, sizeof(ota_info.current_version) - 1);
     xSemaphoreGive(ota_mutex);
+    notify_status_change(OTA_STATUS_PENDING_REBOOT, "Update successful, rebooting...");
 
-    ESP_LOGI(TAG, "Download complete, verifying...");
+    ESP_LOGI(TAG, "✅ OTA update successful! Firmware downloaded and verified.");
+    ESP_LOGI(TAG, "Rebooting in 5 seconds to apply update...");
 
-    if (!esp_https_ota_is_complete_data_received(https_ota_handle)) {
-        ESP_LOGE(TAG, "Incomplete data received");
-        esp_https_ota_abort(https_ota_handle);
-        xSemaphoreTake(ota_mutex, portMAX_DELAY);
-        ota_info.status = OTA_STATUS_FAILED;
-        snprintf(ota_info.error_msg, sizeof(ota_info.error_msg), "Incomplete download");
-        xSemaphoreGive(ota_mutex);
-        goto cleanup;
+    // Clean up before reboot
+    if (client) {
+        esp_http_client_close(client);
+        esp_http_client_cleanup(client);
+        client = NULL;
+    }
+    if (download_buffer) {
+        free(download_buffer);
+        download_buffer = NULL;
     }
 
-    // Finish OTA and set boot partition
-    xSemaphoreTake(ota_mutex, portMAX_DELAY);
-    ota_info.status = OTA_STATUS_INSTALLING;
-    xSemaphoreGive(ota_mutex);
-
-    err = esp_https_ota_finish(https_ota_handle);
-    https_ota_handle = NULL;
-
-    if (err == ESP_OK) {
-        ESP_LOGI(TAG, "OTA update successful!");
-        xSemaphoreTake(ota_mutex, portMAX_DELAY);
-        ota_info.status = OTA_STATUS_PENDING_REBOOT;
-        strncpy(ota_info.current_version, ota_info.new_version, sizeof(ota_info.current_version) - 1);
-        xSemaphoreGive(ota_mutex);
-
-        ESP_LOGI(TAG, "Firmware updated to version: %s", ota_info.new_version);
-        ESP_LOGI(TAG, "Please reboot to apply update");
-    } else {
-        ESP_LOGE(TAG, "esp_https_ota_finish failed: %s", esp_err_to_name(err));
-        xSemaphoreTake(ota_mutex, portMAX_DELAY);
-        ota_info.status = OTA_STATUS_FAILED;
-        snprintf(ota_info.error_msg, sizeof(ota_info.error_msg), "Install failed: %s", esp_err_to_name(err));
-        xSemaphoreGive(ota_mutex);
-    }
+    // Wait 5 seconds for status to be reported, then reboot
+    vTaskDelay(pdMS_TO_TICKS(5000));
+    ESP_LOGI(TAG, "Rebooting now...");
+    esp_restart();
+    // Code below will never execute after reboot
 
 cleanup:
+    // Notify failure if status is FAILED
+    if (ota_info.status == OTA_STATUS_FAILED) {
+        notify_status_change(OTA_STATUS_FAILED, ota_info.error_msg);
+    }
+
+    if (ota_started && ota_handle) {
+        esp_ota_abort(ota_handle);
+        ota_handle = 0;
+    }
+    if (client) {
+        esp_http_client_close(client);
+        esp_http_client_cleanup(client);
+    }
+    if (download_buffer) {
+        free(download_buffer);
+    }
     ota_task_handle = NULL;
     vTaskDelete(NULL);
 }
@@ -440,6 +678,11 @@ const char* ota_get_version(void)
 void ota_set_progress_callback(ota_progress_cb_t callback)
 {
     progress_callback = callback;
+}
+
+void ota_set_status_callback(ota_status_cb_t callback)
+{
+    status_callback = callback;
 }
 
 const char* ota_status_to_string(ota_status_t status)

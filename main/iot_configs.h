@@ -33,7 +33,7 @@
 #define DEVICE_TWIN_UPDATE_INTERVAL_SEC 300  // 5 minutes - report device status to Azure
 
 // OTA Configuration
-#define OTA_RECV_TIMEOUT_MS 5000          // HTTP receive timeout
+#define OTA_RECV_TIMEOUT_MS 30000         // HTTP receive timeout (30s for slow CDN)
 #define OTA_BUF_SIZE 4096                 // Download buffer size
 #define OTA_MAX_RETRY 3                   // Max download retries
 #define OTA_CONFIRM_TIMEOUT_SEC 300       // 5 minutes to confirm new firmware before rollback

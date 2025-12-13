@@ -34,7 +34,7 @@
 #include "sd_card_logger.h"
 #include "ds3231_rtc.h"
 #include "a7670c_ppp.h"
-#include "telegram_bot.h"
+// #include "telegram_bot.h"  // Disabled to save memory
 #include "ota_update.h"
 #include "cJSON.h"
 #include "esp_crt_bundle.h"
@@ -111,7 +111,7 @@ static uint32_t system_restart_count = 0;           // Loaded from NVS on boot
 static char mqtt_broker_uri[256];
 static char mqtt_username[256];
 static char telemetry_topic[256];
-static char telemetry_payload[8192];  // Increased to support up to 20 sensors
+static char telemetry_payload[4096];  // Reduced to save 4KB RAM (supports ~10 sensors)
 static char c2d_topic[256];
 
 // Device Twin topic patterns for Azure IoT Hub
@@ -123,7 +123,7 @@ static int device_twin_request_id = 0;
 
 // Static buffers for telemetry to prevent heap fragmentation
 // These replace malloc/free calls that were causing memory exhaustion
-static sensor_reading_t telemetry_readings[20];  // Pre-allocated sensor readings
+static sensor_reading_t telemetry_readings[10];  // Reduced from 20 to match sensors[10]
 static char telemetry_temp_json[MAX_JSON_PAYLOAD_SIZE];  // Pre-allocated JSON buffer
 static int sensors_already_published = 0;  // Track sensors published in create_telemetry_payload
 
@@ -155,10 +155,10 @@ static volatile bool sensor_led_on = false;
 static SemaphoreHandle_t startup_log_mutex = NULL;
 
 // Telemetry history buffer for web interface
-#define TELEMETRY_HISTORY_SIZE 25
+#define TELEMETRY_HISTORY_SIZE 10  // Reduced from 25 to save ~6.5KB RAM
 typedef struct {
     char timestamp[32];
-    char payload[400];  // Truncated version for display
+    char payload[200];  // Reduced from 400 to save ~5KB RAM
     bool success;
 } telemetry_record_t;
 
@@ -177,6 +177,7 @@ static void telemetry_task(void *pvParameters);
 static void mqtt_event_handler(void *handler_args, esp_event_base_t base, int32_t event_id, void *event_data);
 static void handle_device_twin_desired_properties(const char *data, int data_len);
 static void report_device_twin_properties(void);
+static void ota_status_callback(ota_status_t status, const char* message);
 
 // Function to add telemetry to history buffer
 static void add_telemetry_to_history(const char *payload, bool success) {
@@ -1103,7 +1104,7 @@ static void mqtt_event_handler(void *handler_args, esp_event_base_t base, int32_
                             }
                             else if (strcmp(cmd, "add_sensor") == 0) {
                                 system_config_t *cfg = get_system_config();
-                                if (cfg->sensor_count < 20) {
+                                if (cfg->sensor_count < 10) {
                                     cJSON *sensor = cJSON_GetObjectItem(root, "sensor");
                                     if (sensor) {
                                         int idx = cfg->sensor_count;
@@ -1164,7 +1165,7 @@ static void mqtt_event_handler(void *handler_args, esp_event_base_t base, int32_
                                         ESP_LOGW(TAG, "[C2D] Missing 'sensor' object in JSON");
                                     }
                                 } else {
-                                    ESP_LOGW(TAG, "[C2D] Cannot add sensor - limit reached (20 max)");
+                                    ESP_LOGW(TAG, "[C2D] Cannot add sensor - limit reached (10 max)");
                                 }
                             }
                             else if (strcmp(cmd, "update_sensor") == 0) {
@@ -1859,7 +1860,7 @@ static void create_telemetry_payload(char* payload, size_t payload_size) {
     memset(temp_json, 0, sizeof(telemetry_temp_json));
 
     int actual_count = 0;
-    esp_err_t ret = sensor_read_all_configured(readings, 20, &actual_count);
+    esp_err_t ret = sensor_read_all_configured(readings, 10, &actual_count);
     
     if (ret == ESP_OK && actual_count > 0) {
         ESP_LOGI(TAG, "[FLOW] Creating merged JSON for %d sensors", actual_count);
@@ -2738,10 +2739,22 @@ static void handle_device_twin_desired_properties(const char *data, int data_len
     }
 
     // Process web_server_enabled - toggle web server remotely
+    // But don't start if OTA update will be triggered (need memory for OTA)
     cJSON *web_server = cJSON_GetObjectItem(root, "web_server_enabled");
     if (web_server && cJSON_IsBool(web_server)) {
         bool should_enable = cJSON_IsTrue(web_server);
-        if (should_enable != web_server_running) {
+
+        // Check if OTA will be triggered in this same update
+        cJSON *ota_url_check = cJSON_GetObjectItem(root, "ota_url");
+        cJSON *ota_enable_check = cJSON_GetObjectItem(root, "ota_enabled");
+        bool ota_will_trigger = ota_url_check && cJSON_IsString(ota_url_check) &&
+                                strlen(ota_url_check->valuestring) > 10 &&
+                                strcmp(ota_url_check->valuestring, ota_url) != 0 &&  // New URL
+                                (!ota_enable_check || cJSON_IsTrue(ota_enable_check));  // OTA enabled
+
+        if (should_enable && ota_will_trigger) {
+            ESP_LOGW(TAG, "[TWIN] Skipping web server start - OTA update will be triggered");
+        } else if (should_enable != web_server_running) {
             if (should_enable) {
                 ESP_LOGI(TAG, "[TWIN] Starting web server...");
                 esp_err_t ret = web_config_start_server_only();
@@ -2829,6 +2842,44 @@ static void handle_device_twin_desired_properties(const char *data, int data_len
                     ESP_LOGI(TAG, "[TWIN] OTA update triggered from Device Twin");
                     ESP_LOGI(TAG, "[TWIN] Starting OTA from: %s", ota_url);
 
+                    // Check heap and stop web server if needed - OTA requires ~50KB for HTTPS/TLS
+                    size_t free_heap = esp_get_free_heap_size();
+                    ESP_LOGI(TAG, "[TWIN] Current free heap: %u bytes", free_heap);
+
+                    if (free_heap < 60000 || web_server_running) {
+                        if (web_server_running) {
+                            ESP_LOGW(TAG, "[TWIN] Stopping web server to free memory for OTA...");
+                            web_config_stop();
+                            web_server_running = false;
+                        }
+                        // Wait for memory to be freed
+                        vTaskDelay(pdMS_TO_TICKS(1000));
+                        free_heap = esp_get_free_heap_size();
+                        ESP_LOGI(TAG, "[TWIN] After cleanup - Free heap: %u bytes", free_heap);
+                    }
+
+                    // Final heap check before starting OTA
+                    if (free_heap < 40000) {
+                        ESP_LOGE(TAG, "[TWIN] Not enough memory for OTA! Need 40KB, have %u", free_heap);
+                        // Report failure
+                        cJSON *fail_json = cJSON_CreateObject();
+                        if (fail_json) {
+                            cJSON_AddStringToObject(fail_json, "ota_status", "failed");
+                            cJSON_AddStringToObject(fail_json, "ota_error", "Insufficient memory");
+                            char *fail_str = cJSON_PrintUnformatted(fail_json);
+                            if (fail_str) {
+                                device_twin_request_id++;
+                                snprintf(device_twin_reported_topic, sizeof(device_twin_reported_topic),
+                                         "$iothub/twin/PATCH/properties/reported/?$rid=%d", device_twin_request_id);
+                                esp_mqtt_client_publish(mqtt_client, device_twin_reported_topic, fail_str, strlen(fail_str), 1, 0);
+                                free(fail_str);
+                            }
+                            cJSON_Delete(fail_json);
+                        }
+                        // Skip OTA, continue with rest of processing
+                        goto skip_ota;
+                    }
+
                     // Report OTA starting status
                     cJSON *ota_status_json = cJSON_CreateObject();
                     if (ota_status_json) {
@@ -2865,6 +2916,8 @@ static void handle_device_twin_desired_properties(const char *data, int data_len
                         }
                     }
                 }
+skip_ota:       // Label for skipping OTA when memory is insufficient
+                (void)0;  // Empty statement after label
             }
         } else {
             ESP_LOGW(TAG, "[TWIN] ota_url too long or empty");
@@ -2960,6 +3013,63 @@ static void report_device_twin_properties(void) {
 
     free(json_str);
     cJSON_Delete(reported);
+}
+
+// OTA status callback - reports OTA status changes to Azure Device Twin
+static void ota_status_callback(ota_status_t status, const char* message)
+{
+    if (!mqtt_connected || !mqtt_client) {
+        ESP_LOGW(TAG, "[OTA] Cannot report status - MQTT not connected");
+        return;
+    }
+
+    ESP_LOGI(TAG, "[OTA] Status changed: %s - %s", ota_status_to_string(status), message ? message : "");
+
+    // Build OTA status JSON
+    cJSON *ota_json = cJSON_CreateObject();
+    if (!ota_json) {
+        ESP_LOGE(TAG, "[OTA] Failed to create JSON object");
+        return;
+    }
+
+    cJSON_AddStringToObject(ota_json, "ota_status", ota_status_to_string(status));
+    if (message && strlen(message) > 0) {
+        cJSON_AddStringToObject(ota_json, "ota_message", message);
+    }
+
+    // Add progress info for downloading/installing states
+    if (status == OTA_STATUS_DOWNLOADING || status == OTA_STATUS_INSTALLING) {
+        ota_info_t* info = ota_get_info();
+        if (info) {
+            cJSON_AddNumberToObject(ota_json, "ota_progress", info->progress);
+            cJSON_AddNumberToObject(ota_json, "ota_bytes_downloaded", info->bytes_downloaded);
+            cJSON_AddNumberToObject(ota_json, "ota_total_bytes", info->total_bytes);
+        }
+    }
+
+    char *json_str = cJSON_PrintUnformatted(ota_json);
+    if (!json_str) {
+        ESP_LOGE(TAG, "[OTA] Failed to serialize JSON");
+        cJSON_Delete(ota_json);
+        return;
+    }
+
+    // Publish to Device Twin reported properties
+    device_twin_request_id++;
+    snprintf(device_twin_reported_topic, sizeof(device_twin_reported_topic),
+             "$iothub/twin/PATCH/properties/reported/?$rid=%d", device_twin_request_id);
+
+    int msg_id = esp_mqtt_client_publish(mqtt_client, device_twin_reported_topic,
+                                          json_str, strlen(json_str), 1, 0);
+
+    if (msg_id >= 0) {
+        ESP_LOGI(TAG, "[OTA] Status reported to Azure (msg_id=%d)", msg_id);
+    } else {
+        ESP_LOGE(TAG, "[OTA] Failed to report status to Azure");
+    }
+
+    free(json_str);
+    cJSON_Delete(ota_json);
 }
 
 // MQTT handling task (Core 1)
@@ -3507,6 +3617,9 @@ void app_main(void) {
     ret = ota_init();
     if (ret == ESP_OK) {
         ESP_LOGI(TAG, "[OTA] Module initialized - Firmware v%s", ota_get_version());
+        // Set up OTA status callback for Azure Device Twin reporting
+        ota_set_status_callback(ota_status_callback);
+        ESP_LOGI(TAG, "[OTA] Status callback registered for Azure reporting");
         if (ota_is_rollback()) {
             ESP_LOGW(TAG, "[OTA] ⚠️ RUNNING AFTER ROLLBACK - Previous firmware failed!");
             ESP_LOGW(TAG, "[OTA] Please verify system functionality before confirming.");

@@ -2,6 +2,9 @@
 // Fluxgen ESP32 Modbus IoT Gateway - Version 1.0.0 (Production Ready - Complete Implementation)
 // Professional industrial IoT gateway with real-time RS485 Modbus communication
 
+// Feature flags - set to 0 to disable and reduce memory usage
+#define ENABLE_CALCULATION_UI 0  // Calculation engine UI disabled to save memory (set to 1 to enable)
+
 #include "web_config.h"
 #include "modbus.h"
 #include "sensor_manager.h"
@@ -1891,6 +1894,23 @@ static esp_err_t favicon_handler(httpd_req_t *req)
 // Configuration page HTML
 static esp_err_t config_page_handler(httpd_req_t *req)
 {
+    // Check available heap before processing - need at least 15KB free
+    size_t free_heap = esp_get_free_heap_size();
+    if (free_heap < 15000) {
+        ESP_LOGW(TAG, "Low memory (%d bytes) - sending minimal page", free_heap);
+        httpd_resp_set_type(req, "text/html");
+        httpd_resp_sendstr(req,
+            "<!DOCTYPE html><html><head><title>Low Memory</title></head>"
+            "<body style='font-family:Arial;text-align:center;padding:50px'>"
+            "<h1>&#9888; Low Memory</h1>"
+            "<p>Free heap: <b>" __FILE__ "</b></p>"
+            "<p>Please wait and refresh, or reboot the device.</p>"
+            "<button onclick='location.reload()'>Refresh</button> "
+            "<button onclick=\"fetch('/api/system/reboot',{method:'POST'}).then(()=>alert('Rebooting...'))\">Reboot</button>"
+            "</body></html>");
+        return ESP_OK;
+    }
+
     httpd_resp_set_type(req, "text/html; charset=UTF-8");
 
     // Generate escaped values for HTML safety
@@ -1900,9 +1920,9 @@ static esp_err_t config_page_handler(httpd_req_t *req)
 
     // Send HTML header
     httpd_resp_sendstr_chunk(req, html_header);
-    
+
     // Send main form HTML in chunks
-    char chunk[5120];  // Increased buffer size to accommodate larger HTML content
+    char chunk[5120];  // Buffer for HTML chunks with dynamic content
     
     // Overview Section with Real-time System Resources
     httpd_resp_sendstr_chunk(req,
@@ -3447,6 +3467,7 @@ static esp_err_t config_page_handler(httpd_req_t *req)
         "formHtml += '<p style=\"color:#28a745;font-size:13px;margin:15px 0;padding:10px;background:#f0fff4;border:1px solid #28a745;border-radius:4px\"><strong>Fixed format - UINT16_HI (16-bit) - no data type selection needed</strong></p>';"
         "}"
 
+#if ENABLE_CALCULATION_UI
         // ========== CALCULATION ENGINE UI (Dropdown Design) ==========
         "formHtml += '<div style=\"margin-top:20px;padding:15px;background:#f8f9fa;border:1px solid #dee2e6;border-radius:8px\">';"
 
@@ -3471,6 +3492,7 @@ static esp_err_t config_page_handler(httpd_req_t *req)
 
         "formHtml += '</div>';"
         // ========== END CALCULATION ENGINE UI ==========
+#endif
 
         "formHtml += '<br><p style=\"color:#dc3545;font-size:12px;margin:5px 0\"><strong>* Required fields</strong> - Name and Unit ID must be filled</p>';"
         "formDiv.innerHTML = formHtml;"
@@ -3639,6 +3661,7 @@ static esp_err_t config_page_handler(httpd_req_t *req)
         "}"
         "}"
 
+#if ENABLE_CALCULATION_UI
         // ========== CALCULATION ENGINE JAVASCRIPT FUNCTIONS ==========
         "function showCalcFields(select, sensorId) {"
         "const container = document.getElementById('calc-fields-' + sensorId);"
@@ -3782,6 +3805,7 @@ static esp_err_t config_page_handler(httpd_req_t *req)
         "container.innerHTML = fieldsHtml;"
         "}"
         // ========== END CALCULATION ENGINE JAVASCRIPT ==========
+#endif
 
         "function saveSingleSensor(sensorId) {"
         "console.log('Saving sensor:', sensorId);"
@@ -5497,7 +5521,7 @@ static esp_err_t config_page_handler(httpd_req_t *req)
         "const file=fileInput.files[0];"
         "if(!file.name.endsWith('.bin')){alert('Please select a .bin firmware file');return;}"
         "if(!confirm('Upload firmware file:\\n'+file.name+' ('+Math.round(file.size/1024)+' KB)\\n\\nProceed with OTA update?')){return;}"
-        "const formData=new FormData();formData.append('firmware',file);"
+        "/* Raw binary upload - no FormData */"
         "const resultDiv=document.getElementById('ota_result');"
         "const progressDiv=document.getElementById('ota_upload_progress');"
         "const progressBar=document.getElementById('ota_upload_bar');"
@@ -5509,13 +5533,14 @@ static esp_err_t config_page_handler(httpd_req_t *req)
         "xhr.onload=function(){"
         "if(xhr.status===200){"
         "const data=JSON.parse(xhr.responseText);"
-        "if(data.status==='success'){"
-        "resultDiv.innerHTML='<div style=\"background:#d4edda;padding:10px;border-radius:4px;color:#155724\">Firmware uploaded successfully! Please confirm and reboot.</div>';"
+        "if(data.success){"
+        "resultDiv.innerHTML='<div style=\"background:#d4edda;padding:10px;border-radius:4px;color:#155724\">Firmware uploaded successfully! Rebooting in 3 seconds...</div>';"
+        "setTimeout(function(){if(confirm('Firmware uploaded! Reboot now to apply update?')){fetch('/api/ota/reboot',{method:'POST'});}},1000);"
         "}else{resultDiv.innerHTML='<div style=\"background:#f8d7da;padding:10px;border-radius:4px;color:#721c24\">ERROR: '+(data.message||'Upload failed')+'</div>';}"
         "}else{resultDiv.innerHTML='<div style=\"background:#f8d7da;padding:10px;border-radius:4px;color:#721c24\">HTTP ERROR: '+xhr.status+'</div>';}"
         "};"
         "xhr.onerror=function(){resultDiv.innerHTML='<div style=\"background:#f8d7da;padding:10px;border-radius:4px;color:#721c24\">Network error during upload</div>';};"
-        "xhr.open('POST','/api/ota/upload',true);xhr.send(formData);}"
+        "xhr.open('POST','/api/ota/upload',true);xhr.setRequestHeader('Content-Type','application/octet-stream');xhr.send(file);}"
         "function confirmOta(){"
         "if(!confirm('Confirm the current firmware as valid?\\n\\nThis makes the update permanent.')){return;}"
         "const resultDiv=document.getElementById('ota_result');"
@@ -9415,18 +9440,18 @@ static esp_err_t start_webserver(void)
     httpd_config_t config = HTTPD_DEFAULT_CONFIG();
     config.server_port = 80;
     config.max_uri_handlers = 50; // Increased to accommodate all 45+ handlers (SIM/SD/RTC/Modbus endpoints)
-    config.max_open_sockets = 7;      // Maximum allowed by LWIP configuration
-    config.stack_size = 16384;        // Increased to 16KB to handle large stack buffers safely
+    config.max_open_sockets = 4;      // Reduced from 7 to save memory (~3KB per socket)
+    config.stack_size = 12288;        // 12KB stack for 5KB chunk buffer + overhead
     config.task_priority = 5;
-    config.recv_wait_timeout = 20;    // Reduced from 60 to 20 seconds for faster error detection
-    config.send_wait_timeout = 20;    // Reduced from 60 to 20 seconds for faster error detection
+    config.recv_wait_timeout = 15;    // Reduced timeout for faster cleanup
+    config.send_wait_timeout = 15;    // Reduced timeout for faster cleanup
     config.lru_purge_enable = true;   // Enable LRU purging of connections
-    config.backlog_conn = 8;          // TCP listen backlog queue
+    config.backlog_conn = 4;          // Reduced from 8 to save memory
     config.enable_so_linger = false;  // Disable socket lingering to prevent TIME_WAIT issues
-    config.keep_alive_enable = true;  // Enable HTTP keep-alive for connection reuse
-    config.keep_alive_idle = 30;      // Keep-alive idle time (30 seconds)
+    config.keep_alive_enable = false; // Disabled to reduce memory and connection overhead
+    config.keep_alive_idle = 15;      // Reduced keep-alive idle time
     config.keep_alive_interval = 5;   // Keep-alive probe interval (5 seconds)
-    config.keep_alive_count = 3;      // Keep-alive probe count (3 attempts)
+    config.keep_alive_count = 2;      // Reduced probe count
 
     if (httpd_start(&g_server, &config) == ESP_OK) {
         // Main configuration page
@@ -11340,7 +11365,7 @@ esp_err_t config_load_from_nvs(system_config_t *config)
                                       ? core.device_twin_version : 0;
 
         // Load individual sensors
-        for (int i = 0; i < config->sensor_count && i < 20; i++) {
+        for (int i = 0; i < config->sensor_count && i < 10; i++) {
             char key[24];
             snprintf(key, sizeof(key), "sensor_%d", i);
             size_t sensor_size = sizeof(sensor_config_t);
@@ -11433,7 +11458,7 @@ esp_err_t config_save_to_nvs(const system_config_t *config)
 
     // Save each sensor individually (~1500 bytes each, under NVS limit)
     int sensors_saved = 0;
-    for (int i = 0; i < config->sensor_count && i < 20; i++) {
+    for (int i = 0; i < config->sensor_count && i < 10; i++) {
         char key[24];
         snprintf(key, sizeof(key), "sensor_%d", i);
 
@@ -11446,7 +11471,7 @@ esp_err_t config_save_to_nvs(const system_config_t *config)
     }
 
     // Clean up old sensor entries if sensor count decreased
-    for (int i = config->sensor_count; i < 20; i++) {
+    for (int i = config->sensor_count; i < 10; i++) {
         char key[24];
         snprintf(key, sizeof(key), "sensor_%d", i);
         nvs_erase_key(nvs_handle, key);  // Ignore errors - key may not exist
@@ -11534,8 +11559,8 @@ esp_err_t config_reset_to_defaults(void)
     // Device Twin settings
     g_system_config.device_twin_version = 0;  // Track applied desired properties version
 
-    // Initialize all sensors with default values (20 sensors supported)
-    for (int i = 0; i < 20; i++) {
+    // Initialize all sensors with default values (10 sensors supported)
+    for (int i = 0; i < 10; i++) {
         g_system_config.sensors[i].enabled = false;
         strcpy(g_system_config.sensors[i].data_type, "UINT16_HI");
         strcpy(g_system_config.sensors[i].register_type, "HOLDING");
