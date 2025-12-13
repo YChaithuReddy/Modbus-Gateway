@@ -223,6 +223,9 @@ static void ota_download_task(void *pvParameter)
     system_config_t *sys_config = get_system_config();
     bool is_sim_mode = (sys_config != NULL && sys_config->network_mode == NETWORK_MODE_SIM);
 
+    // Store PPP interface name for HTTP client binding (SIM mode only)
+    char ppp_if_name[16] = {0};
+
     if (is_sim_mode) {
         ESP_LOGI(TAG, "========================================");
         ESP_LOGI(TAG, "SIM Mode - Using ESP32 HTTP over PPP");
@@ -236,6 +239,15 @@ static void ota_download_task(void *pvParameter)
         if (ppp_netif != NULL) {
             esp_netif_set_default_netif(ppp_netif);
             ESP_LOGI(TAG, "PPP set as default network interface for OTA");
+
+            // Get interface name for HTTP client binding
+            esp_err_t ret = esp_netif_get_netif_impl_name(ppp_netif, ppp_if_name);
+            if (ret == ESP_OK && strlen(ppp_if_name) > 0) {
+                ESP_LOGI(TAG, "PPP interface name: %s", ppp_if_name);
+            } else {
+                ESP_LOGW(TAG, "Could not get PPP interface name, using default routing");
+                ppp_if_name[0] = '\0';
+            }
         } else {
             ESP_LOGW(TAG, "PPP netif not available - HTTP may not route correctly");
         }
@@ -320,8 +332,9 @@ static void ota_download_task(void *pvParameter)
             .buffer_size = 4096,
             .buffer_size_tx = 1024,
             .skip_cert_common_name_check = true,  // Allow redirects to different domains
-            .crt_bundle_attach = esp_crt_bundle_attach,  // sdkconfig skips verification
+            .crt_bundle_attach = esp_crt_bundle_attach,  // Use certificate bundle (like MQTT)
             .event_handler = http_event_handler,  // Capture Location header via events
+            .if_name = (is_sim_mode && ppp_if_name[0]) ? ppp_if_name : NULL,  // Bind to PPP interface
         };
 
         // Create HTTP client
