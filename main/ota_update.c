@@ -311,7 +311,8 @@ static void ota_download_task(void *pvParameter)
         int max_connect_retries = is_sim_mode ? 5 : 1;  // 5 retries for SIM mode
 
         // Configure HTTP client for this URL
-        // Use event handler to capture Location header during redirects
+        // Match the config from commit ed2bc9a that fixed WiFi mode
+        // Simplified config - let ESP-IDF handle transport type from URL
         esp_http_client_config_t http_config = {
             .url = current_url,
             .timeout_ms = connection_timeout,
@@ -319,12 +320,8 @@ static void ota_download_task(void *pvParameter)
             .buffer_size = 4096,
             .buffer_size_tx = 1024,
             .skip_cert_common_name_check = true,  // Allow redirects to different domains
+            .crt_bundle_attach = esp_crt_bundle_attach,  // sdkconfig skips verification
             .event_handler = http_event_handler,  // Capture Location header via events
-            .is_async = false,                    // Synchronous mode
-            .use_global_ca_store = false,         // Don't use global CA store
-            .crt_bundle_attach = esp_crt_bundle_attach,
-            .cert_pem = NULL,
-            .transport_type = HTTP_TRANSPORT_OVER_SSL,
         };
 
         // Create HTTP client
@@ -340,9 +337,9 @@ static void ota_download_task(void *pvParameter)
         }
 
         // Set User-Agent header (required by GitHub)
-        esp_http_client_set_header(client, "User-Agent", "Mozilla/5.0 (Linux; Android 10) AppleWebKit/537.36");
+        // Use simple User-Agent like in commit ed2bc9a
+        esp_http_client_set_header(client, "User-Agent", "ESP32-OTA/1.0");
         esp_http_client_set_header(client, "Accept", "*/*");
-        esp_http_client_set_header(client, "Connection", "close");
 
         // Open HTTP connection with retry logic for SIM/PPP mode
         // TLS handshake can fail on mobile networks due to latency/packet loss
@@ -375,9 +372,8 @@ static void ota_download_task(void *pvParameter)
                     ESP_LOGE(TAG, "Failed to recreate HTTP client");
                     break;
                 }
-                esp_http_client_set_header(client, "User-Agent", "Mozilla/5.0 (Linux; Android 10) AppleWebKit/537.36");
+                esp_http_client_set_header(client, "User-Agent", "ESP32-OTA/1.0");
                 esp_http_client_set_header(client, "Accept", "*/*");
-                esp_http_client_set_header(client, "Connection", "close");
             }
         }
 
