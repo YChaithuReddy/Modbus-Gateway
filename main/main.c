@@ -1267,6 +1267,21 @@ static void mqtt_event_handler(void *handler_args, esp_event_base_t base, int32_
 
                                     ESP_LOGI(TAG, "[C2D] OTA update requested: %s (v%s)", fw_url, fw_version);
 
+                                    // Stop web server and WiFi in SIM mode to free memory and avoid routing conflicts
+                                    system_config_t *cfg = get_system_config();
+                                    if (web_server_running) {
+                                        ESP_LOGW(TAG, "[C2D] Stopping web server for OTA...");
+                                        web_config_stop();
+                                        web_server_running = false;
+                                    }
+                                    if (cfg && cfg->network_mode == NETWORK_MODE_SIM && wifi_initialized_for_sim_mode) {
+                                        ESP_LOGI(TAG, "[C2D] SIM mode - stopping WiFi for OTA...");
+                                        esp_wifi_stop();
+                                        esp_wifi_deinit();
+                                        wifi_initialized_for_sim_mode = false;
+                                    }
+                                    vTaskDelay(pdMS_TO_TICKS(500));
+
                                     esp_err_t ret = ota_start_update(fw_url, fw_version);
                                     if (ret == ESP_OK) {
                                         ESP_LOGI(TAG, "[C2D] OTA update started successfully");
@@ -2851,6 +2866,14 @@ static void handle_device_twin_desired_properties(const char *data, int data_len
                             ESP_LOGW(TAG, "[TWIN] Stopping web server to free memory for OTA...");
                             web_config_stop();
                             web_server_running = false;
+                        }
+                        // In SIM mode, also stop WiFi completely to avoid interface conflicts
+                        if (config->network_mode == NETWORK_MODE_SIM && wifi_initialized_for_sim_mode) {
+                            ESP_LOGI(TAG, "[TWIN] SIM mode - stopping WiFi to avoid routing conflicts...");
+                            esp_wifi_stop();
+                            esp_wifi_deinit();
+                            wifi_initialized_for_sim_mode = false;
+                            ESP_LOGI(TAG, "[TWIN] WiFi stopped and deinitialized for OTA");
                         }
                         // Wait for memory to be freed
                         vTaskDelay(pdMS_TO_TICKS(1000));

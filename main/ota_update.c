@@ -5,6 +5,8 @@
 
 #include "ota_update.h"
 #include "iot_configs.h"
+#include "web_config.h"
+#include "a7670c_ppp.h"
 
 #include <string.h>
 #include "freertos/FreeRTOS.h"
@@ -18,6 +20,7 @@
 #include "nvs_flash.h"
 #include "nvs.h"
 #include "esp_crt_bundle.h"
+#include "esp_netif.h"
 
 static const char *TAG = "OTA_UPDATE";
 
@@ -240,6 +243,21 @@ static void ota_download_task(void *pvParameter)
     int status_code = 0;
     int content_length = 0;
 
+    // Check if we're in SIM mode and need to use PPP interface
+    system_config_t *sys_config = get_system_config();
+    bool use_ppp = (sys_config != NULL && sys_config->network_mode == NETWORK_MODE_SIM);
+    const char *if_name = NULL;
+
+    if (use_ppp) {
+        esp_netif_t *ppp_netif = a7670c_ppp_get_netif();
+        if (ppp_netif != NULL) {
+            if_name = esp_netif_get_ifkey(ppp_netif);
+            ESP_LOGI(TAG, "SIM mode detected - using PPP interface: %s", if_name ? if_name : "default");
+        } else {
+            ESP_LOGW(TAG, "SIM mode but PPP netif not available - using default interface");
+        }
+    }
+
     while (redirect_count < MAX_REDIRECTS) {
         // Clear redirect location from previous iteration
         redirect_location[0] = '\0';
@@ -266,6 +284,7 @@ static void ota_download_task(void *pvParameter)
             .skip_cert_common_name_check = true,  // Allow redirects to different domains
             .crt_bundle_attach = esp_crt_bundle_attach,  // Always attach - sdkconfig skips verification
             .event_handler = http_event_handler,  // Capture Location header via events
+            .if_name = if_name,                   // Use PPP interface in SIM mode
         };
 
         // Create HTTP client
