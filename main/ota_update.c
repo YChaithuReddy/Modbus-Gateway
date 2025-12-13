@@ -230,29 +230,19 @@ static void ota_download_task(void *pvParameter)
         ESP_LOGI(TAG, "PPP connection remains active during OTA.");
         ESP_LOGI(TAG, "MQTT reconnection is suppressed until OTA completes.");
 
-        // Give PPP connection time to stabilize before starting TLS
-        // Cellular networks need time for routing to settle
-        ESP_LOGI(TAG, "Waiting 10 seconds for PPP connection to stabilize...");
-        vTaskDelay(pdMS_TO_TICKS(10000));
-
-        // Do a simple HTTP request first to "warm up" DNS and network path
-        // This helps ensure the cellular network is ready for TLS
-        ESP_LOGI(TAG, "Warming up network connection...");
-        esp_http_client_config_t warmup_config = {
-            .url = "http://detectportal.firefox.com/success.txt",  // Simple HTTP endpoint
-            .timeout_ms = 15000,
-        };
-        esp_http_client_handle_t warmup_client = esp_http_client_init(&warmup_config);
-        if (warmup_client) {
-            esp_err_t warmup_err = esp_http_client_perform(warmup_client);
-            if (warmup_err == ESP_OK) {
-                ESP_LOGI(TAG, "Network warmup successful (HTTP %d)", esp_http_client_get_status_code(warmup_client));
-            } else {
-                ESP_LOGW(TAG, "Network warmup failed: %s (continuing anyway)", esp_err_to_name(warmup_err));
-            }
-            esp_http_client_cleanup(warmup_client);
-            vTaskDelay(pdMS_TO_TICKS(2000));  // Short delay after warmup
+        // CRITICAL: Set PPP as the default network interface for HTTP client
+        // Without this, HTTP client may try to route through WiFi interface
+        esp_netif_t *ppp_netif = a7670c_ppp_get_netif();
+        if (ppp_netif != NULL) {
+            esp_netif_set_default_netif(ppp_netif);
+            ESP_LOGI(TAG, "PPP set as default network interface for OTA");
+        } else {
+            ESP_LOGW(TAG, "PPP netif not available - HTTP may not route correctly");
         }
+
+        // Give PPP connection time to stabilize before starting TLS
+        ESP_LOGI(TAG, "Waiting 2 seconds for PPP interface to stabilize...");
+        vTaskDelay(pdMS_TO_TICKS(2000));
 
         ESP_LOGI(TAG, "PPP stabilization complete, starting OTA download...");
     }
