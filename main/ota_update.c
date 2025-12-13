@@ -246,15 +246,15 @@ static void ota_download_task(void *pvParameter)
     // Check if we're in SIM mode and need to use PPP interface
     system_config_t *sys_config = get_system_config();
     bool use_ppp = (sys_config != NULL && sys_config->network_mode == NETWORK_MODE_SIM);
-    const char *if_name = NULL;
 
     if (use_ppp) {
         esp_netif_t *ppp_netif = a7670c_ppp_get_netif();
         if (ppp_netif != NULL) {
-            if_name = esp_netif_get_ifkey(ppp_netif);
-            ESP_LOGI(TAG, "SIM mode detected - using PPP interface: %s", if_name ? if_name : "default");
+            // Set PPP as the default network interface for routing
+            esp_netif_set_default_netif(ppp_netif);
+            ESP_LOGI(TAG, "SIM mode detected - set PPP as default network interface");
         } else {
-            ESP_LOGW(TAG, "SIM mode but PPP netif not available - using default interface");
+            ESP_LOGW(TAG, "SIM mode but PPP netif not available - using default routing");
         }
     }
 
@@ -284,7 +284,6 @@ static void ota_download_task(void *pvParameter)
             .skip_cert_common_name_check = true,  // Allow redirects to different domains
             .crt_bundle_attach = esp_crt_bundle_attach,  // Always attach - sdkconfig skips verification
             .event_handler = http_event_handler,  // Capture Location header via events
-            .if_name = if_name,                   // Use PPP interface in SIM mode
         };
 
         // Create HTTP client
