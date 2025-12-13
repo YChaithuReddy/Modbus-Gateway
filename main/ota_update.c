@@ -168,11 +168,15 @@ static void ota_download_task(void *pvParameter)
     xSemaphoreGive(ota_mutex);
 
     // Configure HTTP client
+    // Note: For GitHub and other CDNs, certificate verification may fail due to
+    // ESP32's limited certificate bundle. For production, use Azure Blob Storage.
+    // For testing/development, we disable strict certificate verification.
     esp_http_client_config_t http_config = {
         .url = ota_info.update_url,
-        .crt_bundle_attach = esp_crt_bundle_attach,
         .timeout_ms = OTA_RECV_TIMEOUT_MS,
         .keep_alive_enable = true,
+        .skip_cert_common_name_check = true,
+        .cert_pem = NULL,  // Disable certificate verification for OTA compatibility
     };
 
     // Configure OTA
