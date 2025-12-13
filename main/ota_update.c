@@ -253,10 +253,17 @@ static void ota_download_task(void *pvParameter)
             // Set PPP as the default network interface for routing
             esp_netif_set_default_netif(ppp_netif);
             ESP_LOGI(TAG, "SIM mode detected - set PPP as default network interface");
+            // Give PPP interface time to stabilize before HTTPS request
+            ESP_LOGI(TAG, "Waiting 2 seconds for PPP interface to stabilize...");
+            vTaskDelay(pdMS_TO_TICKS(2000));
         } else {
             ESP_LOGW(TAG, "SIM mode but PPP netif not available - using default routing");
         }
     }
+
+    // Connection retry settings (especially important for SIM/PPP mode)
+    const int MAX_CONNECT_RETRIES = use_ppp ? 3 : 1;
+    const int RETRY_DELAY_MS = 3000;
 
     while (redirect_count < MAX_REDIRECTS) {
         // Clear redirect location from previous iteration
@@ -275,40 +282,63 @@ static void ota_download_task(void *pvParameter)
 
         // Configure HTTP client for this URL
         // Use event handler to capture Location header during redirects
+        // For SIM/PPP mode, use smaller buffers and longer timeout
         esp_http_client_config_t http_config = {
             .url = current_url,
-            .timeout_ms = OTA_RECV_TIMEOUT_MS,
+            .timeout_ms = use_ppp ? 60000 : OTA_RECV_TIMEOUT_MS,  // Longer timeout for PPP
             .keep_alive_enable = false,           // Don't keep alive for redirects
-            .buffer_size = 4096,                  // Larger buffer for HTTP headers
-            .buffer_size_tx = 1024,
+            .buffer_size = use_ppp ? 2048 : 4096, // Smaller buffer for PPP (less memory, more compatible)
+            .buffer_size_tx = use_ppp ? 512 : 1024,
             .skip_cert_common_name_check = true,  // Allow redirects to different domains
-            .crt_bundle_attach = esp_crt_bundle_attach,  // Always attach - sdkconfig skips verification
+            .crt_bundle_attach = esp_crt_bundle_attach,  // Use cert bundle for verification
             .event_handler = http_event_handler,  // Capture Location header via events
+            .is_async = false,                    // Synchronous mode
+            .use_global_ca_store = false,         // Don't use global CA store
         };
 
-        // Create HTTP client
-        client = esp_http_client_init(&http_config);
-        if (!client) {
-            ESP_LOGE(TAG, "Failed to create HTTP client");
-            xSemaphoreTake(ota_mutex, portMAX_DELAY);
-            ota_info.status = OTA_STATUS_FAILED;
-            snprintf(ota_info.error_msg, sizeof(ota_info.error_msg), "HTTP client init failed");
-            xSemaphoreGive(ota_mutex);
-            free(current_url);
-            goto cleanup;
+        // Connection retry loop for PPP mode
+        bool connected = false;
+        for (int retry = 0; retry < MAX_CONNECT_RETRIES && !connected; retry++) {
+            if (retry > 0) {
+                ESP_LOGW(TAG, "Connection retry %d/%d after %dms delay...",
+                         retry + 1, MAX_CONNECT_RETRIES, RETRY_DELAY_MS);
+                // Clean up previous client
+                if (client) {
+                    esp_http_client_cleanup(client);
+                    client = NULL;
+                }
+                vTaskDelay(pdMS_TO_TICKS(RETRY_DELAY_MS));
+            }
+
+            // Create HTTP client
+            client = esp_http_client_init(&http_config);
+            if (!client) {
+                ESP_LOGE(TAG, "Failed to create HTTP client");
+                continue;
+            }
+
+            // Set User-Agent header (required by GitHub)
+            esp_http_client_set_header(client, "User-Agent", "ESP32-OTA/1.0");
+            esp_http_client_set_header(client, "Accept", "*/*");
+            // Add Connection header to explicitly request close after response
+            esp_http_client_set_header(client, "Connection", "close");
+
+            // Open HTTP connection
+            ESP_LOGI(TAG, "Attempting HTTPS connection (attempt %d/%d)...", retry + 1, MAX_CONNECT_RETRIES);
+            err = esp_http_client_open(client, 0);
+            if (err == ESP_OK) {
+                connected = true;
+                ESP_LOGI(TAG, "HTTPS connection established successfully");
+            } else {
+                ESP_LOGW(TAG, "Connection attempt %d failed: %s", retry + 1, esp_err_to_name(err));
+            }
         }
 
-        // Set User-Agent header (required by GitHub)
-        esp_http_client_set_header(client, "User-Agent", "ESP32-OTA/1.0");
-        esp_http_client_set_header(client, "Accept", "*/*");
-
-        // Open HTTP connection
-        err = esp_http_client_open(client, 0);
-        if (err != ESP_OK) {
-            ESP_LOGE(TAG, "Failed to open HTTP connection: %s", esp_err_to_name(err));
+        if (!connected) {
+            ESP_LOGE(TAG, "Failed to open HTTP connection after %d attempts", MAX_CONNECT_RETRIES);
             xSemaphoreTake(ota_mutex, portMAX_DELAY);
             ota_info.status = OTA_STATUS_FAILED;
-            snprintf(ota_info.error_msg, sizeof(ota_info.error_msg), "Connection failed: %s", esp_err_to_name(err));
+            snprintf(ota_info.error_msg, sizeof(ota_info.error_msg), "Connection failed after %d retries", MAX_CONNECT_RETRIES);
             xSemaphoreGive(ota_mutex);
             free(current_url);
             goto cleanup;
