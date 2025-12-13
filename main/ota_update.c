@@ -289,11 +289,15 @@ static void ota_download_task(void *pvParameter)
             ESP_LOGW(TAG, "GitHub/CDN URL - cert verification skipped via sdkconfig");
         }
 
-        // Configure HTTP client for this URL (WiFi mode only)
+        // SIM mode needs longer timeouts and more retries due to PPP latency
+        int connection_timeout = is_sim_mode ? 60000 : OTA_RECV_TIMEOUT_MS;
+        int max_connect_retries = is_sim_mode ? 3 : 1;
+
+        // Configure HTTP client for this URL
         // Use event handler to capture Location header during redirects
         esp_http_client_config_t http_config = {
             .url = current_url,
-            .timeout_ms = OTA_RECV_TIMEOUT_MS,
+            .timeout_ms = connection_timeout,
             .keep_alive_enable = false,           // Don't keep alive for redirects
             .buffer_size = 4096,
             .buffer_size_tx = 1024,
@@ -323,17 +327,52 @@ static void ota_download_task(void *pvParameter)
         esp_http_client_set_header(client, "Accept", "*/*");
         esp_http_client_set_header(client, "Connection", "close");
 
-        // Open HTTP connection
-        ESP_LOGI(TAG, "Attempting HTTPS connection...");
-        err = esp_http_client_open(client, 0);
-        if (err != ESP_OK) {
-            ESP_LOGE(TAG, "Failed to open HTTP connection: %s", esp_err_to_name(err));
+        // Open HTTP connection with retry logic for SIM/PPP mode
+        // TLS handshake can fail on mobile networks due to latency/packet loss
+        bool connection_success = false;
+        for (int connect_attempt = 1; connect_attempt <= max_connect_retries; connect_attempt++) {
+            ESP_LOGI(TAG, "Attempting HTTPS connection (attempt %d/%d)...", connect_attempt, max_connect_retries);
+
+            err = esp_http_client_open(client, 0);
+            if (err == ESP_OK) {
+                connection_success = true;
+                break;
+            }
+
+            ESP_LOGW(TAG, "Connection attempt %d failed: %s", connect_attempt, esp_err_to_name(err));
+
+            if (connect_attempt < max_connect_retries) {
+                // Clean up and recreate client for retry
+                esp_http_client_cleanup(client);
+                client = NULL;
+
+                // Delay before retry - give network time to recover
+                int retry_delay = is_sim_mode ? 5000 : 2000;
+                ESP_LOGI(TAG, "Waiting %d ms before retry...", retry_delay);
+                vTaskDelay(pdMS_TO_TICKS(retry_delay));
+
+                // Recreate HTTP client
+                client = esp_http_client_init(&http_config);
+                if (!client) {
+                    ESP_LOGE(TAG, "Failed to recreate HTTP client");
+                    break;
+                }
+                esp_http_client_set_header(client, "User-Agent", "Mozilla/5.0 (Linux; Android 10) AppleWebKit/537.36");
+                esp_http_client_set_header(client, "Accept", "*/*");
+                esp_http_client_set_header(client, "Connection", "close");
+            }
+        }
+
+        if (!connection_success) {
+            ESP_LOGE(TAG, "Failed to open HTTP connection after %d attempts: %s", max_connect_retries, esp_err_to_name(err));
             xSemaphoreTake(ota_mutex, portMAX_DELAY);
             ota_info.status = OTA_STATUS_FAILED;
-            snprintf(ota_info.error_msg, sizeof(ota_info.error_msg), "Connection failed: %s", esp_err_to_name(err));
+            snprintf(ota_info.error_msg, sizeof(ota_info.error_msg), "Connection failed after %d retries", max_connect_retries);
             xSemaphoreGive(ota_mutex);
-            esp_http_client_cleanup(client);
-            client = NULL;
+            if (client) {
+                esp_http_client_cleanup(client);
+                client = NULL;
+            }
             free(current_url);
             goto cleanup;
         }
