@@ -3171,7 +3171,8 @@ static void mqtt_task(void *pvParameters)
         check_ntp_resync();
 
         // Handle MQTT events and maintain connection
-        if (mqtt_initialized && !mqtt_connected) {
+        // Skip reconnection warnings during OTA to reduce noise
+        if (mqtt_initialized && !mqtt_connected && !ota_is_in_progress()) {
             ESP_LOGW(TAG, "[WARN] MQTT disconnected, checking connection...");
         }
 
@@ -3560,8 +3561,8 @@ static bool send_telemetry(void) {
         ESP_LOGE(TAG, "   Payload size: %d bytes", strlen(telemetry_payload));
         ESP_LOGE(TAG, "   MQTT connected: %s", mqtt_connected ? "YES" : "NO");
 
-        // Try to reconnect MQTT if disconnected
-        if (!mqtt_connected && mqtt_client != NULL) {
+        // Try to reconnect MQTT if disconnected (but not during OTA)
+        if (!mqtt_connected && mqtt_client != NULL && !ota_is_in_progress()) {
             ESP_LOGW(TAG, "[WARN] Attempting MQTT reconnection...");
             esp_mqtt_client_reconnect(mqtt_client);
         }

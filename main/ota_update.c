@@ -7,7 +7,8 @@
 #include "iot_configs.h"
 #include "web_config.h"
 #include "a7670c_ppp.h"
-#include "a7670c_http.h"
+// Note: a7670c_http.h removed - using ESP32 HTTP client for both WiFi and SIM modes
+// The A7670C modem's AT+HTTP* commands don't support HTTPS properly
 
 #include <string.h>
 #include "freertos/FreeRTOS.h"
@@ -201,18 +202,13 @@ esp_err_t ota_start_update(const char* firmware_url, const char* version)
     return ESP_OK;
 }
 
-// Progress callback for modem HTTP OTA
-static void modem_http_ota_progress(int progress, int bytes_downloaded, int total_bytes)
-{
-    xSemaphoreTake(ota_mutex, portMAX_DELAY);
-    ota_info.progress = progress;
-    ota_info.bytes_downloaded = bytes_downloaded;
-    ota_info.total_bytes = total_bytes;
-    xSemaphoreGive(ota_mutex);
+// Flag to indicate OTA is in progress - used to suppress MQTT reconnection
+static volatile bool ota_in_progress = false;
 
-    if (progress_callback) {
-        progress_callback(progress, bytes_downloaded, total_bytes);
-    }
+// Public function to check if OTA is active (called from mqtt module)
+bool ota_is_in_progress(void)
+{
+    return ota_in_progress;
 }
 
 static void ota_download_task(void *pvParameter)
@@ -220,66 +216,24 @@ static void ota_download_task(void *pvParameter)
     ESP_LOGI(TAG, "OTA download task started");
     esp_err_t err;
 
-    // Check if we're in SIM mode - use modem HTTP which is more reliable for mobile networks
+    // Set OTA in progress flag - MQTT should not reconnect during OTA
+    ota_in_progress = true;
+
+    // Check network mode for logging only
     system_config_t *sys_config = get_system_config();
-    bool use_modem_http = (sys_config != NULL && sys_config->network_mode == NETWORK_MODE_SIM);
+    bool is_sim_mode = (sys_config != NULL && sys_config->network_mode == NETWORK_MODE_SIM);
 
-    if (use_modem_http) {
+    if (is_sim_mode) {
         ESP_LOGI(TAG, "========================================");
-        ESP_LOGI(TAG, "SIM Mode Detected - Using Modem HTTP");
+        ESP_LOGI(TAG, "SIM Mode - Using ESP32 HTTP over PPP");
         ESP_LOGI(TAG, "========================================");
-        ESP_LOGI(TAG, "Modem HTTP uses the A7670C's built-in HTTPS stack");
-        ESP_LOGI(TAG, "which is more reliable over mobile networks.");
-
-        xSemaphoreTake(ota_mutex, portMAX_DELAY);
-        ota_info.status = OTA_STATUS_DOWNLOADING;
-        xSemaphoreGive(ota_mutex);
-        notify_status_change(OTA_STATUS_DOWNLOADING, "Using modem HTTP for download");
-
-        // Use modem HTTP for OTA download
-        err = a7670c_http_download_ota(ota_info.update_url, modem_http_ota_progress);
-
-        if (err == ESP_OK) {
-            // Success!
-            xSemaphoreTake(ota_mutex, portMAX_DELAY);
-            ota_info.status = OTA_STATUS_PENDING_REBOOT;
-            ota_info.progress = 100;
-            strncpy(ota_info.current_version, ota_info.new_version, sizeof(ota_info.current_version) - 1);
-            xSemaphoreGive(ota_mutex);
-            notify_status_change(OTA_STATUS_PENDING_REBOOT, "Update successful, rebooting...");
-
-            ESP_LOGI(TAG, "========================================");
-            ESP_LOGI(TAG, "OTA Update Successful (Modem HTTP)!");
-            ESP_LOGI(TAG, "Rebooting in 5 seconds...");
-            ESP_LOGI(TAG, "========================================");
-
-            vTaskDelay(pdMS_TO_TICKS(5000));
-            esp_restart();
-        } else {
-            // Failed - need to recover PPP connection
-            ESP_LOGE(TAG, "Modem HTTP OTA failed: %s", esp_err_to_name(err));
-            xSemaphoreTake(ota_mutex, portMAX_DELAY);
-            ota_info.status = OTA_STATUS_FAILED;
-            snprintf(ota_info.error_msg, sizeof(ota_info.error_msg), "Modem HTTP failed: %s", esp_err_to_name(err));
-            xSemaphoreGive(ota_mutex);
-            notify_status_change(OTA_STATUS_FAILED, ota_info.error_msg);
-
-            // Recovery: Reboot to restore PPP connection cleanly
-            // The modem HTTP process disrupts PPP, so cleanest recovery is reboot
-            ESP_LOGW(TAG, "========================================");
-            ESP_LOGW(TAG, "OTA Failed - Rebooting to recover PPP");
-            ESP_LOGW(TAG, "========================================");
-            vTaskDelay(pdMS_TO_TICKS(3000));
-            esp_restart();
-        }
-
-        ota_task_handle = NULL;
-        vTaskDelete(NULL);
-        return;  // Exit task - modem HTTP handles everything
+        ESP_LOGI(TAG, "PPP connection remains active during OTA.");
+        ESP_LOGI(TAG, "MQTT reconnection is suppressed until OTA completes.");
     }
 
-    // WiFi mode - use ESP32 HTTP client (original implementation)
-    ESP_LOGI(TAG, "WiFi Mode - Using ESP32 HTTP client");
+    // Both WiFi and SIM mode use ESP32 HTTP client
+    // For SIM mode, it works over the PPP connection
+    ESP_LOGI(TAG, "%s - Using ESP32 HTTP client", is_sim_mode ? "SIM Mode" : "WiFi Mode");
 
     esp_http_client_handle_t client = NULL;
     char *download_buffer = NULL;
@@ -633,6 +587,10 @@ cleanup:
     if (download_buffer) {
         free(download_buffer);
     }
+
+    // Clear OTA in progress flag - MQTT can reconnect now
+    ota_in_progress = false;
+
     ota_task_handle = NULL;
     vTaskDelete(NULL);
 }

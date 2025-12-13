@@ -120,6 +120,15 @@ void ota_mark_valid(void);
 bool ota_is_rollback(void);
 
 /**
+ * @brief Check if OTA update is in progress
+ *
+ * Use this to suppress MQTT reconnection during OTA downloads.
+ *
+ * @return true if OTA download is active
+ */
+bool ota_is_in_progress(void);
+
+/**
  * @brief Get current firmware version string
  *
  * @return Version string (e.g., "1.2.0")
