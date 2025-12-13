@@ -290,10 +290,14 @@ static void ota_download_task(void *pvParameter)
             .buffer_size = use_ppp ? 2048 : 4096, // Smaller buffer for PPP (less memory, more compatible)
             .buffer_size_tx = use_ppp ? 512 : 1024,
             .skip_cert_common_name_check = true,  // Allow redirects to different domains
-            .crt_bundle_attach = esp_crt_bundle_attach,  // Use cert bundle for verification
             .event_handler = http_event_handler,  // Capture Location header via events
             .is_async = false,                    // Synchronous mode
             .use_global_ca_store = false,         // Don't use global CA store
+            // For SIM/PPP mode: Skip cert bundle to avoid TLS issues with carrier networks
+            // WiFi mode: Use cert bundle for full verification
+            .crt_bundle_attach = use_ppp ? NULL : esp_crt_bundle_attach,
+            .cert_pem = NULL,                     // No custom cert
+            .transport_type = HTTP_TRANSPORT_OVER_SSL,
         };
 
         // Connection retry loop for PPP mode
@@ -318,13 +322,20 @@ static void ota_download_task(void *pvParameter)
             }
 
             // Set User-Agent header (required by GitHub)
-            esp_http_client_set_header(client, "User-Agent", "ESP32-OTA/1.0");
+            // Use a common browser-like User-Agent to avoid being blocked
+            esp_http_client_set_header(client, "User-Agent", "Mozilla/5.0 (Linux; Android 10) AppleWebKit/537.36");
             esp_http_client_set_header(client, "Accept", "*/*");
             // Add Connection header to explicitly request close after response
             esp_http_client_set_header(client, "Connection", "close");
+            // Add Host header explicitly for some servers
+            // esp_http_client_set_header(client, "Accept-Encoding", "identity");
 
             // Open HTTP connection
             ESP_LOGI(TAG, "Attempting HTTPS connection (attempt %d/%d)...", retry + 1, MAX_CONNECT_RETRIES);
+            if (use_ppp) {
+                ESP_LOGI(TAG, "PPP mode: timeout=%dms, buffer=%d, no cert bundle",
+                         http_config.timeout_ms, http_config.buffer_size);
+            }
             err = esp_http_client_open(client, 0);
             if (err == ESP_OK) {
                 connected = true;
