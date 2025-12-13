@@ -1058,7 +1058,11 @@ static void mqtt_event_handler(void *handler_args, esp_event_base_t base, int32_
                     // Parse JSON command
                     cJSON *root = cJSON_Parse(json_start);
                     if (root) {
+                        // Support both "command" and "cmd" field names
                         cJSON *command = cJSON_GetObjectItem(root, "command");
+                        if (!command) {
+                            command = cJSON_GetObjectItem(root, "cmd");
+                        }
 
                         if (command && cJSON_IsString(command)) {
                             const char *cmd = command->valuestring;
