@@ -1062,7 +1062,7 @@ int a7670c_get_uart_num(void) {
 esp_err_t a7670c_ppp_pause_for_at(void) {
     ESP_LOGI(TAG, "🔄 Pausing PPP for AT command operations...");
 
-    // Step 1: Stop UART RX task FIRST (critical - must stop before sending +++)
+    // Step 1: Stop UART RX task FIRST (critical - must stop before any modem operations)
     if (uart_rx_task_handle != NULL) {
         ESP_LOGI(TAG, "   Stopping UART RX task...");
         uart_rx_task_running = false;
@@ -1082,71 +1082,69 @@ esp_err_t a7670c_ppp_pause_for_at(void) {
         ESP_LOGI(TAG, "   UART RX task stopped");
     }
 
-    // Step 2: Flush UART to clear any pending data
-    uart_flush(modem_config.uart_num);
-    vTaskDelay(pdMS_TO_TICKS(100));
-
-    // Step 3: Guard time before escape sequence (must be silent for 1+ second)
-    ESP_LOGI(TAG, "   Guard time before +++ (1.2s)...");
-    vTaskDelay(pdMS_TO_TICKS(1200));
-
-    // Step 4: Send PPP escape sequence: +++ (without CR/LF)
-    uart_write_bytes(modem_config.uart_num, "+++", 3);
-    ESP_LOGI(TAG, "   Sent +++ escape sequence");
-
-    // Step 5: Guard time after escape sequence (1+ second)
-    vTaskDelay(pdMS_TO_TICKS(1200));
-
-    // Step 6: Flush and read any response
-    uint8_t buf[256];
-    int len = uart_read_bytes(modem_config.uart_num, buf, sizeof(buf) - 1, pdMS_TO_TICKS(500));
-    if (len > 0) {
-        buf[len] = '\0';
-        ESP_LOGI(TAG, "   Response after +++: %s", buf);
+    // Step 2: Stop the PPP netif to prevent it from sending any more frames
+    if (ppp_netif != NULL) {
+        ESP_LOGI(TAG, "   Stopping PPP netif...");
+        esp_netif_action_disconnected(ppp_netif, NULL, 0, NULL);
+        esp_netif_action_stop(ppp_netif, NULL, 0, NULL);
+        vTaskDelay(pdMS_TO_TICKS(500));
     }
 
-    // Step 7: Send ATH to hang up the data call
-    ESP_LOGI(TAG, "   Sending ATH to hang up...");
-    uart_write_bytes(modem_config.uart_num, "ATH\r\n", 5);
-    vTaskDelay(pdMS_TO_TICKS(1000));
+    // Step 3: Power cycle the modem - this is more reliable than +++ escape sequence
+    // The +++ escape doesn't work reliably on all modems, especially when PPP is active
+    ESP_LOGI(TAG, "   Power cycling modem for clean AT mode...");
 
-    len = uart_read_bytes(modem_config.uart_num, buf, sizeof(buf) - 1, pdMS_TO_TICKS(500));
-    if (len > 0) {
-        buf[len] = '\0';
-        ESP_LOGI(TAG, "   ATH response: %s", buf);
-    }
+    // Power off (pulse LOW)
+    gpio_set_level(modem_config.pwr_pin, 0);
+    vTaskDelay(pdMS_TO_TICKS(1500));
+    gpio_set_level(modem_config.pwr_pin, 1);
 
-    // Step 8: Verify modem is responding to AT commands
-    ESP_LOGI(TAG, "   Verifying AT command mode...");
+    // Wait for modem to fully power down
+    ESP_LOGI(TAG, "   Waiting for modem to power down...");
+    vTaskDelay(pdMS_TO_TICKS(3000));
+
+    // Power on (pulse LOW again)
+    ESP_LOGI(TAG, "   Powering modem back on...");
+    gpio_set_level(modem_config.pwr_pin, 0);
+    vTaskDelay(pdMS_TO_TICKS(1500));
+    gpio_set_level(modem_config.pwr_pin, 1);
+
+    // Wait for modem to boot (8 seconds)
+    ESP_LOGI(TAG, "   Waiting for modem to boot (8s)...");
+    vTaskDelay(pdMS_TO_TICKS(8000));
+
+    // Step 4: Flush UART and verify modem is responding
     uart_flush(modem_config.uart_num);
-    uart_write_bytes(modem_config.uart_num, "AT\r\n", 4);
     vTaskDelay(pdMS_TO_TICKS(500));
 
-    len = uart_read_bytes(modem_config.uart_num, buf, sizeof(buf) - 1, pdMS_TO_TICKS(1000));
-    if (len > 0) {
-        buf[len] = '\0';
-        if (strstr((char*)buf, "OK")) {
-            ESP_LOGI(TAG, "✅ PPP paused - modem ready for AT commands");
-            return ESP_OK;
+    uint8_t buf[256];
+    int len;
+
+    // Try AT command multiple times
+    for (int attempt = 1; attempt <= 5; attempt++) {
+        ESP_LOGI(TAG, "   Verifying AT command mode (attempt %d/5)...", attempt);
+        uart_flush(modem_config.uart_num);
+        uart_write_bytes(modem_config.uart_num, "AT\r\n", 4);
+        vTaskDelay(pdMS_TO_TICKS(500));
+
+        len = uart_read_bytes(modem_config.uart_num, buf, sizeof(buf) - 1, pdMS_TO_TICKS(1000));
+        if (len > 0) {
+            buf[len] = '\0';
+            if (strstr((char*)buf, "OK")) {
+                ESP_LOGI(TAG, "✅ Modem ready for AT commands!");
+
+                // Disable echo
+                uart_write_bytes(modem_config.uart_num, "ATE0\r\n", 6);
+                vTaskDelay(pdMS_TO_TICKS(500));
+                uart_flush(modem_config.uart_num);
+
+                return ESP_OK;
+            }
         }
-        ESP_LOGW(TAG, "   AT response (no OK): %s", buf);
+        vTaskDelay(pdMS_TO_TICKS(1000));
     }
 
-    // Try one more time
-    uart_flush(modem_config.uart_num);
-    uart_write_bytes(modem_config.uart_num, "AT\r\n", 4);
-    vTaskDelay(pdMS_TO_TICKS(1000));
-
-    len = uart_read_bytes(modem_config.uart_num, buf, sizeof(buf) - 1, pdMS_TO_TICKS(1000));
-    if (len > 0) {
-        buf[len] = '\0';
-        if (strstr((char*)buf, "OK")) {
-            ESP_LOGI(TAG, "✅ PPP paused - modem ready for AT commands (2nd attempt)");
-            return ESP_OK;
-        }
-    }
-
-    ESP_LOGE(TAG, "❌ Failed to enter AT command mode");
+    ESP_LOGE(TAG, "❌ Failed to enter AT command mode after power cycle");
     return ESP_FAIL;
 }
 

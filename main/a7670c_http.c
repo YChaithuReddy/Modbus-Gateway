@@ -119,18 +119,78 @@ esp_err_t a7670c_http_init(void)
         return ESP_ERR_INVALID_STATE;
     }
 
-    // Exit PPP mode if needed
+    // Exit PPP mode - this will power cycle the modem
     esp_err_t ret = exit_ppp_for_http();
     if (ret != ESP_OK) {
         ESP_LOGE(TAG, "Failed to exit PPP mode");
         return ret;
     }
 
+    // After power cycle, we need to set up SIM and network
+    ESP_LOGI(TAG, "Setting up modem for HTTP...");
+
+    // Check SIM
+    ESP_LOGI(TAG, "Checking SIM card...");
+    int sim_retries = 10;
+    while (sim_retries-- > 0) {
+        ret = send_at_simple("AT+CPIN?", "READY", 2000);
+        if (ret == ESP_OK) {
+            ESP_LOGI(TAG, "SIM OK");
+            break;
+        }
+        ESP_LOGW(TAG, "SIM not ready, retrying... (%d/10)", 10 - sim_retries);
+        vTaskDelay(pdMS_TO_TICKS(1000));
+    }
+
+    if (sim_retries <= 0) {
+        ESP_LOGE(TAG, "SIM card not ready");
+        return ESP_FAIL;
+    }
+
+    // Wait for network registration
+    ESP_LOGI(TAG, "Waiting for network registration...");
+    int net_retries = 30;
+    while (net_retries-- > 0) {
+        if (send_at_simple("AT+CREG?", ",1", 2000) == ESP_OK ||
+            send_at_simple("AT+CREG?", ",5", 2000) == ESP_OK ||
+            send_at_simple("AT+CREG?", ",6", 2000) == ESP_OK) {
+            ESP_LOGI(TAG, "Network registered");
+            break;
+        }
+        vTaskDelay(pdMS_TO_TICKS(2000));
+    }
+
+    if (net_retries <= 0) {
+        ESP_LOGE(TAG, "Network registration timeout");
+        return ESP_ERR_TIMEOUT;
+    }
+
+    // Get APN from system config
+    system_config_t *config = get_system_config();
+    const char *apn = (config && strlen(config->sim_apn) > 0) ? config->sim_apn : "airteliot";
+
+    // Set APN
+    ESP_LOGI(TAG, "Setting APN: %s", apn);
+    char apn_cmd[128];
+    snprintf(apn_cmd, sizeof(apn_cmd), "AT+CGDCONT=1,\"IP\",\"%s\"", apn);
+    send_at_simple(apn_cmd, "OK", 2000);
+
+    // Attach to packet service
+    ESP_LOGI(TAG, "Attaching to packet service...");
+    send_at_simple("AT+CGATT=1", "OK", 10000);
+    vTaskDelay(pdMS_TO_TICKS(2000));
+
+    // Activate PDP context
+    ESP_LOGI(TAG, "Activating PDP context...");
+    send_at_simple("AT+CGACT=1,1", "OK", 10000);
+    vTaskDelay(pdMS_TO_TICKS(2000));
+
     // Terminate any existing HTTP session
     send_at_simple("AT+HTTPTERM", "OK", 2000);
     vTaskDelay(pdMS_TO_TICKS(500));
 
     // Initialize HTTP service
+    ESP_LOGI(TAG, "Initializing HTTP service...");
     ret = send_at_simple("AT+HTTPINIT", "OK", 5000);
     if (ret != ESP_OK) {
         ESP_LOGE(TAG, "Failed to initialize HTTP service");
@@ -138,10 +198,10 @@ esp_err_t a7670c_http_init(void)
     }
 
     // Configure SSL for HTTPS
-    // SSL context 0, verify mode 0 (no verify - for CDN compatibility)
-    send_at_simple("AT+CSSLCFG=\"sslversion\",0,4", "OK", 2000);  // TLS 1.2
+    // SSL context 0, TLS 1.2
+    send_at_simple("AT+CSSLCFG=\"sslversion\",0,4", "OK", 2000);
     send_at_simple("AT+CSSLCFG=\"ignorelocaltime\",0,1", "OK", 2000);
-    send_at_simple("AT+CSSLCFG=\"enableSNI\",0,1", "OK", 2000);  // Enable SNI
+    send_at_simple("AT+CSSLCFG=\"enableSNI\",0,1", "OK", 2000);
 
     // Enable HTTPS
     ret = send_at_simple("AT+HTTPSSL=1", "OK", 2000);
@@ -155,11 +215,13 @@ esp_err_t a7670c_http_init(void)
     // Set content type
     send_at_simple("AT+HTTPPARA=\"CONTENT\",\"application/octet-stream\"", "OK", 2000);
 
-    // Enable redirect following (if supported)
+    // Enable redirect following
     send_at_simple("AT+HTTPPARA=\"REDIR\",1", "OK", 2000);
 
     http_initialized = true;
-    ESP_LOGI(TAG, "Modem HTTP service initialized");
+    ESP_LOGI(TAG, "========================================");
+    ESP_LOGI(TAG, "Modem HTTP service initialized successfully!");
+    ESP_LOGI(TAG, "========================================");
     return ESP_OK;
 }
 
