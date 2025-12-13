@@ -114,6 +114,13 @@ static char telemetry_topic[256];
 static char telemetry_payload[8192];  // Increased to support up to 20 sensors
 static char c2d_topic[256];
 
+// Device Twin topic patterns for Azure IoT Hub
+static const char *DEVICE_TWIN_DESIRED_TOPIC = "$iothub/twin/PATCH/properties/desired/#";
+static const char *DEVICE_TWIN_RES_TOPIC = "$iothub/twin/res/#";
+static char device_twin_reported_topic[128];
+static int device_twin_request_id = 0;
+
+
 // Static buffers for telemetry to prevent heap fragmentation
 // These replace malloc/free calls that were causing memory exhaustion
 static sensor_reading_t telemetry_readings[20];  // Pre-allocated sensor readings
@@ -125,6 +132,11 @@ static volatile bool web_server_toggle_requested = false;
 static volatile bool system_shutdown_requested = false;
 static volatile bool web_server_running = false;
 static volatile bool wifi_initialized_for_sim_mode = false;  // Track if WiFi was init'd in SIM mode
+
+// Device Twin remote control variables
+static volatile bool maintenance_mode = false;    // Pause all telemetry when true
+static volatile bool ota_enabled = true;          // Allow/block OTA updates
+static char ota_url[256] = "";                    // Remote OTA firmware URL
 
 // Modem control variables
 static bool modem_reset_enabled = false;
@@ -163,6 +175,8 @@ static void modem_reset_task(void *pvParameters);
 static void mqtt_task(void *pvParameters);
 static void telemetry_task(void *pvParameters);
 static void mqtt_event_handler(void *handler_args, esp_event_base_t base, int32_t event_id, void *event_data);
+static void handle_device_twin_desired_properties(const char *data, int data_len);
+static void report_device_twin_properties(void);
 
 // Function to add telemetry to history buffer
 static void add_telemetry_to_history(const char *payload, bool success) {
@@ -902,7 +916,18 @@ static void mqtt_event_handler(void *handler_args, esp_event_base_t base, int32_
             snprintf(c2d_topic, sizeof(c2d_topic), "devices/%s/messages/devicebound/#", config->azure_device_id);
             esp_mqtt_client_subscribe(mqtt_client, c2d_topic, 1);
             ESP_LOGI(TAG, "[MAIL] Subscribed to C2D messages: %s", c2d_topic);
-            
+
+            // Subscribe to Device Twin desired properties updates
+            esp_mqtt_client_subscribe(mqtt_client, DEVICE_TWIN_DESIRED_TOPIC, 1);
+            ESP_LOGI(TAG, "[TWIN] Subscribed to Device Twin desired properties: %s", DEVICE_TWIN_DESIRED_TOPIC);
+
+            // Subscribe to Device Twin response topic (for GET requests)
+            esp_mqtt_client_subscribe(mqtt_client, DEVICE_TWIN_RES_TOPIC, 1);
+            ESP_LOGI(TAG, "[TWIN] Subscribed to Device Twin responses: %s", DEVICE_TWIN_RES_TOPIC);
+
+            // Report current device properties to Azure
+            report_device_twin_properties();
+
             ESP_LOGI(TAG, "[OK] MQTT connected successfully");
             break;
             
@@ -979,15 +1004,37 @@ static void mqtt_event_handler(void *handler_args, esp_event_base_t base, int32_
             break;
             
         case MQTT_EVENT_PUBLISHED:
+            // Note: Don't increment total_telemetry_sent here - it's done in send_telemetry()
+            // This event fires for ALL publishes including Device Twin reports
             ESP_LOGI(TAG, "[OK] TELEMETRY PUBLISHED SUCCESSFULLY! msg_id=%d", event->msg_id);
-            total_telemetry_sent++;
-            last_telemetry_time = esp_timer_get_time() / 1000000;  // Record last telemetry time in seconds
             break;
             
         case MQTT_EVENT_DATA:
-            ESP_LOGI(TAG, "[MSG] CLOUD-TO-DEVICE MESSAGE RECEIVED:");
+            ESP_LOGI(TAG, "[MSG] MQTT MESSAGE RECEIVED:");
             printf("TOPIC=%.*s\r\n", event->topic_len, event->topic);
             printf("DATA=%.*s\r\n", event->data_len, event->data);
+
+            // Check if this is a Device Twin desired properties update
+            if (event->topic_len > 0 && strncmp(event->topic, "$iothub/twin/PATCH/properties/desired", 37) == 0) {
+                ESP_LOGI(TAG, "[TWIN] Device Twin desired properties update received");
+                handle_device_twin_desired_properties(event->data, event->data_len);
+                break;
+            }
+
+            // Check if this is a Device Twin response (for GET requests)
+            if (event->topic_len > 0 && strncmp(event->topic, "$iothub/twin/res/", 17) == 0) {
+                ESP_LOGI(TAG, "[TWIN] Device Twin response received");
+                // Extract status code from topic: $iothub/twin/res/{status}/?$rid={request_id}
+                int status_code = 0;
+                if (sscanf(event->topic + 17, "%d", &status_code) == 1) {
+                    if (status_code >= 200 && status_code < 300) {
+                        ESP_LOGI(TAG, "[TWIN] Device Twin operation successful (status: %d)", status_code);
+                    } else {
+                        ESP_LOGW(TAG, "[TWIN] Device Twin operation failed (status: %d)", status_code);
+                    }
+                }
+                break;
+            }
 
             // Process C2D command
             if (event->data_len > 0 && event->data_len < 1024) {
@@ -1192,6 +1239,173 @@ static void mqtt_event_handler(void *handler_args, esp_event_base_t base, int32_
                                              ota_status_to_string(info->status));
                                 }
                             }
+                            // ==================== NEW COMMANDS ====================
+                            else if (strcmp(cmd, "ping") == 0) {
+                                // Simple health check - responds with pong
+                                ESP_LOGI(TAG, "[C2D] PING received - device is alive!");
+                            }
+                            else if (strcmp(cmd, "get_config") == 0) {
+                                // Return current configuration summary
+                                system_config_t *cfg = get_system_config();
+                                ESP_LOGI(TAG, "[C2D] === CURRENT CONFIGURATION ===");
+                                ESP_LOGI(TAG, "[C2D] Telemetry interval: %d sec", cfg->telemetry_interval);
+                                ESP_LOGI(TAG, "[C2D] Modbus retries: %d (delay: %d ms)", cfg->modbus_retry_count, cfg->modbus_retry_delay);
+                                ESP_LOGI(TAG, "[C2D] Batch telemetry: %s", cfg->batch_telemetry ? "enabled" : "disabled");
+                                ESP_LOGI(TAG, "[C2D] Sensor count: %d", cfg->sensor_count);
+                                ESP_LOGI(TAG, "[C2D] Network mode: %s", cfg->network_mode == NETWORK_MODE_SIM ? "SIM" : "WiFi");
+                                // Report via Device Twin
+                                report_device_twin_properties();
+                            }
+                            else if (strcmp(cmd, "get_heap") == 0) {
+                                // Memory status
+                                ESP_LOGI(TAG, "[C2D] === HEAP MEMORY STATUS ===");
+                                ESP_LOGI(TAG, "[C2D] Free heap: %lu bytes", (unsigned long)esp_get_free_heap_size());
+                                ESP_LOGI(TAG, "[C2D] Min free heap: %lu bytes", (unsigned long)esp_get_minimum_free_heap_size());
+                                ESP_LOGI(TAG, "[C2D] Largest free block: %lu bytes", (unsigned long)heap_caps_get_largest_free_block(MALLOC_CAP_8BIT));
+                            }
+                            else if (strcmp(cmd, "get_network") == 0) {
+                                // Network status
+                                system_config_t *cfg = get_system_config();
+                                ESP_LOGI(TAG, "[C2D] === NETWORK STATUS ===");
+                                ESP_LOGI(TAG, "[C2D] Mode: %s", cfg->network_mode == NETWORK_MODE_SIM ? "4G/LTE (SIM)" : "WiFi");
+                                ESP_LOGI(TAG, "[C2D] MQTT connected: %s", mqtt_connected ? "YES" : "NO");
+                                ESP_LOGI(TAG, "[C2D] Total telemetry sent: %lu", (unsigned long)total_telemetry_sent);
+                                ESP_LOGI(TAG, "[C2D] MQTT reconnects: %lu", (unsigned long)mqtt_reconnect_count);
+                                if (cfg->network_mode == NETWORK_MODE_WIFI) {
+                                    ESP_LOGI(TAG, "[C2D] WiFi SSID: %s", cfg->wifi_ssid);
+                                }
+                            }
+                            else if (strcmp(cmd, "get_sensors") == 0) {
+                                // List all configured sensors
+                                system_config_t *cfg = get_system_config();
+                                ESP_LOGI(TAG, "[C2D] === CONFIGURED SENSORS (%d) ===", cfg->sensor_count);
+                                for (int i = 0; i < cfg->sensor_count; i++) {
+                                    sensor_config_t *s = &cfg->sensors[i];
+                                    if (s->enabled) {
+                                        ESP_LOGI(TAG, "[C2D] [%d] %s (ID:%d, Reg:%d, Type:%s)",
+                                                 i, s->name, s->slave_id, s->register_address, s->sensor_type);
+                                    }
+                                }
+                            }
+                            else if (strcmp(cmd, "set_modbus_retry") == 0) {
+                                // Set Modbus retry settings
+                                cJSON *count = cJSON_GetObjectItem(root, "count");
+                                cJSON *delay = cJSON_GetObjectItem(root, "delay");
+                                system_config_t *cfg = get_system_config();
+                                bool changed = false;
+                                if (count && cJSON_IsNumber(count)) {
+                                    int new_count = count->valueint;
+                                    if (new_count >= 0 && new_count <= 3) {
+                                        cfg->modbus_retry_count = new_count;
+                                        changed = true;
+                                        ESP_LOGI(TAG, "[C2D] Modbus retry count set to %d", new_count);
+                                    }
+                                }
+                                if (delay && cJSON_IsNumber(delay)) {
+                                    int new_delay = delay->valueint;
+                                    if (new_delay >= 10 && new_delay <= 500) {
+                                        cfg->modbus_retry_delay = new_delay;
+                                        changed = true;
+                                        ESP_LOGI(TAG, "[C2D] Modbus retry delay set to %d ms", new_delay);
+                                    }
+                                }
+                                if (changed) {
+                                    config_save_to_nvs(cfg);
+                                    report_device_twin_properties();
+                                }
+                            }
+                            else if (strcmp(cmd, "set_batch_mode") == 0) {
+                                // Enable/disable batch telemetry
+                                cJSON *enabled = cJSON_GetObjectItem(root, "enabled");
+                                if (enabled && cJSON_IsBool(enabled)) {
+                                    system_config_t *cfg = get_system_config();
+                                    cfg->batch_telemetry = cJSON_IsTrue(enabled);
+                                    config_save_to_nvs(cfg);
+                                    ESP_LOGI(TAG, "[C2D] Batch telemetry %s", cfg->batch_telemetry ? "enabled" : "disabled");
+                                    report_device_twin_properties();
+                                }
+                            }
+                            else if (strcmp(cmd, "sync_time") == 0) {
+                                // Trigger NTP time sync
+                                ESP_LOGI(TAG, "[C2D] Triggering NTP time sync...");
+                                esp_sntp_restart();
+                                ESP_LOGI(TAG, "[C2D] NTP sync initiated");
+                            }
+                            else if (strcmp(cmd, "read_sensor") == 0) {
+                                // Read a specific sensor immediately
+                                cJSON *sensor_idx = cJSON_GetObjectItem(root, "index");
+                                if (sensor_idx && cJSON_IsNumber(sensor_idx)) {
+                                    int idx = sensor_idx->valueint;
+                                    system_config_t *cfg = get_system_config();
+                                    if (idx >= 0 && idx < cfg->sensor_count && cfg->sensors[idx].enabled) {
+                                        ESP_LOGI(TAG, "[C2D] Reading sensor %d: %s", idx, cfg->sensors[idx].name);
+                                        sensor_reading_t reading;
+                                        esp_err_t result = sensor_read_single(&cfg->sensors[idx], &reading);
+                                        if (result == ESP_OK && reading.valid) {
+                                            ESP_LOGI(TAG, "[C2D] Sensor %s = %.4f",
+                                                     cfg->sensors[idx].name, reading.value);
+                                        } else {
+                                            ESP_LOGW(TAG, "[C2D] Sensor read failed for %s", cfg->sensors[idx].name);
+                                        }
+                                    } else {
+                                        ESP_LOGW(TAG, "[C2D] Invalid sensor index: %d", idx);
+                                    }
+                                }
+                            }
+                            else if (strcmp(cmd, "reset_stats") == 0) {
+                                // Reset telemetry statistics
+                                total_telemetry_sent = 0;
+                                mqtt_reconnect_count = 0;
+                                telemetry_failure_count = 0;
+                                ESP_LOGI(TAG, "[C2D] Statistics reset to zero");
+                            }
+                            else if (strcmp(cmd, "led_test") == 0) {
+                                // Test all LEDs
+                                ESP_LOGI(TAG, "[C2D] Testing LEDs...");
+                                gpio_set_level(MQTT_LED_GPIO_PIN, 1);
+                                gpio_set_level(WEBSERVER_LED_GPIO_PIN, 1);
+                                gpio_set_level(SENSOR_LED_GPIO_PIN, 1);
+                                vTaskDelay(pdMS_TO_TICKS(2000));
+                                gpio_set_level(MQTT_LED_GPIO_PIN, 0);
+                                gpio_set_level(WEBSERVER_LED_GPIO_PIN, 0);
+                                gpio_set_level(SENSOR_LED_GPIO_PIN, 0);
+                                ESP_LOGI(TAG, "[C2D] LED test complete");
+                            }
+                            else if (strcmp(cmd, "factory_reset") == 0) {
+                                // Factory reset (requires confirmation key)
+                                cJSON *confirm = cJSON_GetObjectItem(root, "confirm");
+                                if (confirm && cJSON_IsString(confirm) && strcmp(confirm->valuestring, "CONFIRM_RESET") == 0) {
+                                    ESP_LOGW(TAG, "[C2D] FACTORY RESET INITIATED!");
+                                    config_reset_to_defaults();
+                                    ESP_LOGW(TAG, "[C2D] Configuration reset. Restarting in 3 seconds...");
+                                    vTaskDelay(pdMS_TO_TICKS(3000));
+                                    esp_restart();
+                                } else {
+                                    ESP_LOGW(TAG, "[C2D] Factory reset requires confirm: \"CONFIRM_RESET\"");
+                                }
+                            }
+                            else if (strcmp(cmd, "help") == 0) {
+                                // List available commands
+                                ESP_LOGI(TAG, "[C2D] === AVAILABLE COMMANDS ===");
+                                ESP_LOGI(TAG, "[C2D] ping - Health check");
+                                ESP_LOGI(TAG, "[C2D] restart - Restart device");
+                                ESP_LOGI(TAG, "[C2D] get_status - Get device status");
+                                ESP_LOGI(TAG, "[C2D] get_config - Get current configuration");
+                                ESP_LOGI(TAG, "[C2D] get_heap - Get memory status");
+                                ESP_LOGI(TAG, "[C2D] get_network - Get network status");
+                                ESP_LOGI(TAG, "[C2D] get_sensors - List configured sensors");
+                                ESP_LOGI(TAG, "[C2D] set_telemetry_interval {interval} - Set interval (30-3600)");
+                                ESP_LOGI(TAG, "[C2D] set_modbus_retry {count, delay} - Set retry settings");
+                                ESP_LOGI(TAG, "[C2D] set_batch_mode {enabled} - Enable/disable batch mode");
+                                ESP_LOGI(TAG, "[C2D] read_sensor {index} - Read specific sensor");
+                                ESP_LOGI(TAG, "[C2D] sync_time - Trigger NTP sync");
+                                ESP_LOGI(TAG, "[C2D] reset_stats - Reset statistics");
+                                ESP_LOGI(TAG, "[C2D] led_test - Test all LEDs");
+                                ESP_LOGI(TAG, "[C2D] toggle_webserver - Toggle web server");
+                                ESP_LOGI(TAG, "[C2D] factory_reset {confirm} - Reset to defaults");
+                                ESP_LOGI(TAG, "[C2D] OTA: ota_update, ota_status, ota_cancel, ota_confirm, ota_reboot");
+                            }
+                            // ==================== END NEW COMMANDS ====================
                             else {
                                 ESP_LOGW(TAG, "[C2D] Unknown command: %s", cmd);
                             }
@@ -2347,6 +2561,334 @@ static void modbus_task(void *pvParameters)
     vTaskDelete(NULL);
 }
 
+// =============================================================================
+// DEVICE TWIN - Handle desired properties from Azure IoT Hub
+// =============================================================================
+
+// Handle incoming Device Twin desired properties
+static void handle_device_twin_desired_properties(const char *data, int data_len) {
+    if (!data || data_len <= 0) {
+        ESP_LOGW(TAG, "[TWIN] Empty desired properties received");
+        return;
+    }
+
+    // Parse JSON payload
+    char *json_str = (char *)malloc(data_len + 1);
+    if (!json_str) {
+        ESP_LOGE(TAG, "[TWIN] Failed to allocate memory for JSON parsing");
+        return;
+    }
+    memcpy(json_str, data, data_len);
+    json_str[data_len] = '\0';
+
+    ESP_LOGI(TAG, "[TWIN] Parsing desired properties: %s", json_str);
+
+    cJSON *root = cJSON_Parse(json_str);
+    if (!root) {
+        ESP_LOGE(TAG, "[TWIN] Failed to parse JSON: %s", json_str);
+        free(json_str);
+        return;
+    }
+
+    system_config_t *config = get_system_config();
+    bool config_changed = false;
+
+    // Handle $version (Azure sends this with each update)
+    cJSON *version = cJSON_GetObjectItem(root, "$version");
+    if (version && cJSON_IsNumber(version)) {
+        int new_version = version->valueint;
+        if (new_version <= config->device_twin_version) {
+            ESP_LOGI(TAG, "[TWIN] Version %d already applied (current: %d), skipping",
+                     new_version, config->device_twin_version);
+            cJSON_Delete(root);
+            free(json_str);
+            return;
+        }
+        config->device_twin_version = new_version;
+        ESP_LOGI(TAG, "[TWIN] Applying version %d", new_version);
+    }
+
+    // Process telemetry_interval
+    cJSON *interval = cJSON_GetObjectItem(root, "telemetry_interval");
+    if (interval && cJSON_IsNumber(interval)) {
+        int new_interval = interval->valueint;
+        if (new_interval >= 30 && new_interval <= 3600) {
+            if (config->telemetry_interval != new_interval) {
+                config->telemetry_interval = new_interval;
+                config_changed = true;
+                ESP_LOGI(TAG, "[TWIN] telemetry_interval updated to %d seconds", new_interval);
+            }
+        } else {
+            ESP_LOGW(TAG, "[TWIN] Invalid telemetry_interval: %d (must be 30-3600)", new_interval);
+        }
+    }
+
+    // Process modbus_retry_count
+    cJSON *retry_count = cJSON_GetObjectItem(root, "modbus_retry_count");
+    if (retry_count && cJSON_IsNumber(retry_count)) {
+        int new_count = retry_count->valueint;
+        if (new_count >= 0 && new_count <= 3) {
+            if (config->modbus_retry_count != new_count) {
+                config->modbus_retry_count = new_count;
+                config_changed = true;
+                ESP_LOGI(TAG, "[TWIN] modbus_retry_count updated to %d", new_count);
+            }
+        } else {
+            ESP_LOGW(TAG, "[TWIN] Invalid modbus_retry_count: %d (must be 0-3)", new_count);
+        }
+    }
+
+    // Process modbus_retry_delay
+    cJSON *retry_delay = cJSON_GetObjectItem(root, "modbus_retry_delay");
+    if (retry_delay && cJSON_IsNumber(retry_delay)) {
+        int new_delay = retry_delay->valueint;
+        if (new_delay >= 10 && new_delay <= 500) {
+            if (config->modbus_retry_delay != new_delay) {
+                config->modbus_retry_delay = new_delay;
+                config_changed = true;
+                ESP_LOGI(TAG, "[TWIN] modbus_retry_delay updated to %d ms", new_delay);
+            }
+        } else {
+            ESP_LOGW(TAG, "[TWIN] Invalid modbus_retry_delay: %d (must be 10-500)", new_delay);
+        }
+    }
+
+    // Process batch_telemetry
+    cJSON *batch = cJSON_GetObjectItem(root, "batch_telemetry");
+    if (batch && cJSON_IsBool(batch)) {
+        bool new_batch = cJSON_IsTrue(batch);
+        if (config->batch_telemetry != new_batch) {
+            config->batch_telemetry = new_batch;
+            config_changed = true;
+            ESP_LOGI(TAG, "[TWIN] batch_telemetry updated to %s", new_batch ? "true" : "false");
+        }
+    }
+
+    // Process web_server_enabled - toggle web server remotely
+    cJSON *web_server = cJSON_GetObjectItem(root, "web_server_enabled");
+    if (web_server && cJSON_IsBool(web_server)) {
+        bool should_enable = cJSON_IsTrue(web_server);
+        if (should_enable != web_server_running) {
+            if (should_enable) {
+                ESP_LOGI(TAG, "[TWIN] Starting web server...");
+                esp_err_t ret = web_config_start_server_only();
+                if (ret == ESP_OK) {
+                    web_server_running = true;
+                    ESP_LOGI(TAG, "[TWIN] Web server STARTED");
+                } else {
+                    ESP_LOGE(TAG, "[TWIN] Failed to start web server: %s", esp_err_to_name(ret));
+                }
+            } else {
+                ESP_LOGI(TAG, "[TWIN] Stopping web server...");
+                web_config_stop();
+                web_server_running = false;
+                ESP_LOGI(TAG, "[TWIN] Web server STOPPED");
+            }
+            config_changed = true;
+        }
+    }
+
+    // Process maintenance_mode - pause all telemetry when true
+    cJSON *maint_mode = cJSON_GetObjectItem(root, "maintenance_mode");
+    if (maint_mode && cJSON_IsBool(maint_mode)) {
+        bool new_mode = cJSON_IsTrue(maint_mode);
+        if (maintenance_mode != new_mode) {
+            maintenance_mode = new_mode;
+            config_changed = true;
+            if (maintenance_mode) {
+                ESP_LOGW(TAG, "[TWIN] MAINTENANCE MODE ENABLED - Telemetry paused");
+            } else {
+                ESP_LOGI(TAG, "[TWIN] Maintenance mode disabled - Telemetry resumed");
+            }
+        }
+    }
+
+    // Process reboot_device - one-shot trigger for remote reboot
+    cJSON *reboot = cJSON_GetObjectItem(root, "reboot_device");
+    if (reboot && cJSON_IsBool(reboot) && cJSON_IsTrue(reboot)) {
+        ESP_LOGW(TAG, "[TWIN] REMOTE REBOOT REQUESTED");
+        ESP_LOGI(TAG, "[TWIN] Device will reboot in 3 seconds...");
+
+        // Report the reboot acknowledgment before rebooting
+        cJSON *ack = cJSON_CreateObject();
+        if (ack) {
+            cJSON_AddBoolToObject(ack, "reboot_device", false);  // Reset to false
+            cJSON_AddStringToObject(ack, "reboot_status", "rebooting");
+            char *ack_str = cJSON_PrintUnformatted(ack);
+            if (ack_str) {
+                device_twin_request_id++;
+                snprintf(device_twin_reported_topic, sizeof(device_twin_reported_topic),
+                         "$iothub/twin/PATCH/properties/reported/?$rid=%d", device_twin_request_id);
+                esp_mqtt_client_publish(mqtt_client, device_twin_reported_topic, ack_str, strlen(ack_str), 1, 0);
+                free(ack_str);
+            }
+            cJSON_Delete(ack);
+        }
+
+        vTaskDelay(pdMS_TO_TICKS(3000));  // Wait 3 seconds for message to be sent
+        esp_restart();
+    }
+
+    // Process ota_enabled - allow/block OTA updates
+    cJSON *ota_enable = cJSON_GetObjectItem(root, "ota_enabled");
+    if (ota_enable && cJSON_IsBool(ota_enable)) {
+        bool new_ota_enabled = cJSON_IsTrue(ota_enable);
+        if (ota_enabled != new_ota_enabled) {
+            ota_enabled = new_ota_enabled;
+            config_changed = true;
+            ESP_LOGI(TAG, "[TWIN] ota_enabled updated to %s", ota_enabled ? "true" : "false");
+        }
+    }
+
+    // Process ota_url - remote OTA firmware URL
+    cJSON *ota_url_json = cJSON_GetObjectItem(root, "ota_url");
+    if (ota_url_json && cJSON_IsString(ota_url_json)) {
+        const char *new_url = ota_url_json->valuestring;
+        if (new_url && strlen(new_url) < sizeof(ota_url)) {
+            if (strcmp(ota_url, new_url) != 0) {
+                strncpy(ota_url, new_url, sizeof(ota_url) - 1);
+                ota_url[sizeof(ota_url) - 1] = '\0';
+                config_changed = true;
+                ESP_LOGI(TAG, "[TWIN] ota_url updated to: %s", ota_url);
+
+                // If OTA is enabled and URL is set, trigger OTA update
+                if (ota_enabled && strlen(ota_url) > 10) {
+                    ESP_LOGI(TAG, "[TWIN] OTA update triggered from Device Twin");
+                    ESP_LOGI(TAG, "[TWIN] Starting OTA from: %s", ota_url);
+
+                    // Report OTA starting status
+                    cJSON *ota_status_json = cJSON_CreateObject();
+                    if (ota_status_json) {
+                        cJSON_AddStringToObject(ota_status_json, "ota_status", "downloading");
+                        char *status_str = cJSON_PrintUnformatted(ota_status_json);
+                        if (status_str) {
+                            device_twin_request_id++;
+                            snprintf(device_twin_reported_topic, sizeof(device_twin_reported_topic),
+                                     "$iothub/twin/PATCH/properties/reported/?$rid=%d", device_twin_request_id);
+                            esp_mqtt_client_publish(mqtt_client, device_twin_reported_topic, status_str, strlen(status_str), 1, 0);
+                            free(status_str);
+                        }
+                        cJSON_Delete(ota_status_json);
+                    }
+
+                    // Start OTA update (runs in background, reboots on success)
+                    esp_err_t ota_result = ota_start_update(ota_url, "remote");
+                    if (ota_result != ESP_OK) {
+                        ESP_LOGE(TAG, "[TWIN] OTA update failed to start: %s", esp_err_to_name(ota_result));
+                        // Report OTA failure
+                        cJSON *ota_fail = cJSON_CreateObject();
+                        if (ota_fail) {
+                            cJSON_AddStringToObject(ota_fail, "ota_status", "failed");
+                            cJSON_AddStringToObject(ota_fail, "ota_error", esp_err_to_name(ota_result));
+                            char *fail_str = cJSON_PrintUnformatted(ota_fail);
+                            if (fail_str) {
+                                device_twin_request_id++;
+                                snprintf(device_twin_reported_topic, sizeof(device_twin_reported_topic),
+                                         "$iothub/twin/PATCH/properties/reported/?$rid=%d", device_twin_request_id);
+                                esp_mqtt_client_publish(mqtt_client, device_twin_reported_topic, fail_str, strlen(fail_str), 1, 0);
+                                free(fail_str);
+                            }
+                            cJSON_Delete(ota_fail);
+                        }
+                    }
+                }
+            }
+        } else {
+            ESP_LOGW(TAG, "[TWIN] ota_url too long or empty");
+        }
+    }
+
+    // Save configuration to NVS if changed
+    if (config_changed) {
+        esp_err_t save_result = config_save_to_nvs(config);
+        if (save_result == ESP_OK) {
+            ESP_LOGI(TAG, "[TWIN] Configuration saved to NVS");
+        } else {
+            ESP_LOGE(TAG, "[TWIN] Failed to save config: %s", esp_err_to_name(save_result));
+        }
+
+        // Report the applied changes back to Azure
+        report_device_twin_properties();
+    }
+
+    cJSON_Delete(root);
+    free(json_str);
+}
+
+// Report current device properties to Azure IoT Hub (reported properties)
+static void report_device_twin_properties(void) {
+    if (!mqtt_connected || !mqtt_client) {
+        ESP_LOGW(TAG, "[TWIN] Cannot report properties - MQTT not connected");
+        return;
+    }
+
+    system_config_t *config = get_system_config();
+
+    // Build reported properties JSON
+    cJSON *reported = cJSON_CreateObject();
+    if (!reported) {
+        ESP_LOGE(TAG, "[TWIN] Failed to create JSON object");
+        return;
+    }
+
+    // Add current configuration values
+    cJSON_AddNumberToObject(reported, "telemetry_interval", config->telemetry_interval);
+    cJSON_AddNumberToObject(reported, "modbus_retry_count", config->modbus_retry_count);
+    cJSON_AddNumberToObject(reported, "modbus_retry_delay", config->modbus_retry_delay);
+    cJSON_AddBoolToObject(reported, "batch_telemetry", config->batch_telemetry);
+    cJSON_AddNumberToObject(reported, "sensor_count", config->sensor_count);
+
+    // Add firmware version and device info
+    cJSON_AddStringToObject(reported, "firmware_version", "1.0.0");
+    cJSON_AddStringToObject(reported, "device_id", config->azure_device_id);
+    cJSON_AddNumberToObject(reported, "last_boot_time", (double)esp_timer_get_time() / 1000000.0);
+
+    // Add network mode
+    cJSON_AddStringToObject(reported, "network_mode",
+        config->network_mode == NETWORK_MODE_SIM ? "SIM" : "WiFi");
+
+    // Add web server status
+    cJSON_AddBoolToObject(reported, "web_server_enabled", web_server_running);
+
+    // Add remote control properties
+    cJSON_AddBoolToObject(reported, "maintenance_mode", maintenance_mode);
+    cJSON_AddBoolToObject(reported, "ota_enabled", ota_enabled);
+    if (strlen(ota_url) > 0) {
+        cJSON_AddStringToObject(reported, "ota_url", ota_url);
+    }
+    cJSON_AddStringToObject(reported, "ota_status", "idle");  // idle, downloading, success, failed
+
+    // Add system health info
+    cJSON_AddNumberToObject(reported, "free_heap", esp_get_free_heap_size());
+    cJSON_AddNumberToObject(reported, "uptime_sec", (double)(esp_timer_get_time() - system_uptime_start) / 1000000.0);
+
+    char *json_str = cJSON_PrintUnformatted(reported);
+    if (!json_str) {
+        ESP_LOGE(TAG, "[TWIN] Failed to serialize JSON");
+        cJSON_Delete(reported);
+        return;
+    }
+
+    // Build the topic: $iothub/twin/PATCH/properties/reported/?$rid={request_id}
+    device_twin_request_id++;
+    snprintf(device_twin_reported_topic, sizeof(device_twin_reported_topic),
+             "$iothub/twin/PATCH/properties/reported/?$rid=%d", device_twin_request_id);
+
+    int msg_id = esp_mqtt_client_publish(mqtt_client, device_twin_reported_topic,
+                                          json_str, strlen(json_str), 1, 0);
+
+    if (msg_id >= 0) {
+        ESP_LOGI(TAG, "[TWIN] Reported properties published (msg_id=%d, rid=%d)",
+                 msg_id, device_twin_request_id);
+        ESP_LOGI(TAG, "[TWIN] Payload: %s", json_str);
+    } else {
+        ESP_LOGE(TAG, "[TWIN] Failed to publish reported properties");
+    }
+
+    free(json_str);
+    cJSON_Delete(reported);
+}
+
 // MQTT handling task (Core 1)
 static void mqtt_task(void *pvParameters)
 {
@@ -2482,6 +3024,21 @@ static void telemetry_task(void *pvParameters)
         if (system_shutdown_requested) {
             ESP_LOGI(TAG, "[DATA] Telemetry task exiting due to shutdown request");
             break;
+        }
+
+        // Check for maintenance mode - skip telemetry but keep task alive
+        if (maintenance_mode) {
+            static bool maintenance_logged = false;
+            if (!maintenance_logged) {
+                ESP_LOGW(TAG, "[DATA] Maintenance mode active - telemetry paused");
+                maintenance_logged = true;
+            }
+            vTaskDelay(pdMS_TO_TICKS(5000));  // Check every 5 seconds
+            if (!maintenance_mode) {
+                ESP_LOGI(TAG, "[DATA] Maintenance mode ended - resuming telemetry");
+                maintenance_logged = false;
+            }
+            continue;
         }
 
         TickType_t current_time = xTaskGetTickCount();

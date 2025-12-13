@@ -30,7 +30,7 @@
 #define HEARTBEAT_LOG_INTERVAL_SEC 300    // 5 minutes - log heartbeat to SD card
 
 // Device Twin Configuration
-#define DEVICE_TWIN_UPDATE_INTERVAL_SEC 60  // 1 minute - report device status to Azure
+#define DEVICE_TWIN_UPDATE_INTERVAL_SEC 300  // 5 minutes - report device status to Azure
 
 // OTA Configuration
 #define OTA_RECV_TIMEOUT_MS 5000          // HTTP receive timeout

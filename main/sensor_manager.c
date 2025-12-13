@@ -2,8 +2,11 @@
 
 #include "sensor_manager.h"
 #include "modbus.h"
+#include "web_config.h"
 #include "esp_log.h"
 #include "esp_timer.h"
+#include "freertos/FreeRTOS.h"
+#include "freertos/task.h"
 #include <string.h>
 #include <time.h>
 #include <math.h>
@@ -255,28 +258,49 @@ esp_err_t sensor_test_live(const sensor_config_t *sensor, sensor_test_result_t *
         // Continue anyway with current baud rate
     }
     
-    if (strcmp(reg_type, "HOLDING") == 0) {
-        modbus_result = modbus_read_holding_registers(sensor->slave_id, 
-                                                     sensor->register_address, 
-                                                     quantity_to_read);
-    } else if (strcmp(reg_type, "INPUT") == 0) {
-        modbus_result = modbus_read_input_registers(sensor->slave_id, 
-                                                   sensor->register_address, 
-                                                   quantity_to_read);
-    } else {
-        snprintf(result->error_message, sizeof(result->error_message), 
-                "Unknown register type: %s", reg_type);
-        return ESP_ERR_INVALID_ARG;
-    }
+    // Get retry settings from system config
+    system_config_t *sys_config = get_system_config();
+    int retry_count = sys_config ? sys_config->modbus_retry_count : 1;
+    int retry_delay_ms = sys_config ? sys_config->modbus_retry_delay : 50;
+
+    // Perform Modbus read with retry logic
+    int attempt = 0;
+    do {
+        if (attempt > 0) {
+            ESP_LOGW(TAG, "Retry %d/%d for sensor '%s' after %d ms delay",
+                     attempt, retry_count, sensor->name, retry_delay_ms);
+            vTaskDelay(pdMS_TO_TICKS(retry_delay_ms));
+        }
+
+        if (strcmp(reg_type, "HOLDING") == 0) {
+            modbus_result = modbus_read_holding_registers(sensor->slave_id,
+                                                         sensor->register_address,
+                                                         quantity_to_read);
+        } else if (strcmp(reg_type, "INPUT") == 0) {
+            modbus_result = modbus_read_input_registers(sensor->slave_id,
+                                                       sensor->register_address,
+                                                       quantity_to_read);
+        } else {
+            snprintf(result->error_message, sizeof(result->error_message),
+                    "Unknown register type: %s", reg_type);
+            return ESP_ERR_INVALID_ARG;
+        }
+
+        attempt++;
+    } while (modbus_result != MODBUS_SUCCESS && attempt <= retry_count);
 
     result->response_time_ms = (esp_timer_get_time() / 1000) - start_time;
 
     if (modbus_result != MODBUS_SUCCESS) {
         result->success = false;
-        snprintf(result->error_message, sizeof(result->error_message), 
-                "Modbus error: %d (timeout/CRC/communication)", modbus_result);
-        ESP_LOGE(TAG, "Modbus read failed: %d", modbus_result);
+        snprintf(result->error_message, sizeof(result->error_message),
+                "Modbus error: %d after %d attempt(s)", modbus_result, attempt);
+        ESP_LOGE(TAG, "Modbus read failed after %d attempt(s): %d", attempt, modbus_result);
         return ESP_FAIL;
+    }
+
+    if (attempt > 1) {
+        ESP_LOGI(TAG, "Modbus read succeeded on attempt %d/%d", attempt, retry_count + 1);
     }
 
     // Get the raw register values

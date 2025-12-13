@@ -2511,6 +2511,21 @@ static esp_err_t config_page_handler(httpd_req_t *req)
         "</label>"
         "<small style='color:#888;display:block;margin-top:5px;font-size:13px'>When enabled, all sensor data is sent as one message with \"body\" array. When disabled, each sensor is sent separately.</small>"
         "</div>"
+        "<label style='font-weight:600;padding-top:10px'>Modbus Retries:</label>"
+        "<div>"
+        "<select name='modbus_retry_count' style='width:100%%;padding:10px;border:1px solid #e0e0e0;border-radius:6px;font-size:15px'>"
+        "<option value='0' %s>No retries (fastest)</option>"
+        "<option value='1' %s>1 retry (recommended)</option>"
+        "<option value='2' %s>2 retries</option>"
+        "<option value='3' %s>3 retries (most reliable)</option>"
+        "</select>"
+        "<small style='color:#888;display:block;margin-top:5px;font-size:13px'>Number of retry attempts when a Modbus sensor read fails</small>"
+        "</div>"
+        "<label style='font-weight:600;padding-top:10px'>Retry Delay:</label>"
+        "<div>"
+        "<input type='number' name='modbus_retry_delay' value='%d' min='10' max='500' style='width:100%%;padding:10px;border:1px solid #e0e0e0;border-radius:6px;font-size:15px'>"
+        "<small style='color:#888;display:block;margin-top:5px;font-size:13px'>Delay in milliseconds between retry attempts (10-500ms)</small>"
+        "</div>"
         "</div>"
         "<div style='margin-top:25px;padding:20px;background:#f8f9fa;border-radius:8px;text-align:center'>"
         "<button type='button' onclick='saveAzureConfig()' style='background:#28a745;color:white;padding:12px 30px;border:none;border-radius:6px;font-weight:bold;font-size:16px;cursor:pointer'>Save Azure Configuration</button>"
@@ -2520,7 +2535,12 @@ static esp_err_t config_page_handler(httpd_req_t *req)
         "</form>"
         "</div>",
         g_system_config.telemetry_interval,
-        g_system_config.batch_telemetry ? "checked" : "");
+        g_system_config.batch_telemetry ? "checked" : "",
+        g_system_config.modbus_retry_count == 0 ? "selected" : "",
+        g_system_config.modbus_retry_count == 1 ? "selected" : "",
+        g_system_config.modbus_retry_count == 2 ? "selected" : "",
+        g_system_config.modbus_retry_count == 3 ? "selected" : "",
+        g_system_config.modbus_retry_delay);
     httpd_resp_sendstr_chunk(req, chunk);
 
     // Telemetry Monitor section
@@ -4294,9 +4314,11 @@ static esp_err_t config_page_handler(httpd_req_t *req)
         "const deviceKey=document.getElementById('azure_device_key').value;"
         "const telemetryInterval=document.querySelector('input[name=\"telemetry_interval\"]').value;"
         "const batchTelemetry=document.querySelector('input[name=\"batch_telemetry\"]').checked?'1':'0';"
+        "const modbusRetryCount=document.querySelector('select[name=\"modbus_retry_count\"]').value;"
+        "const modbusRetryDelay=document.querySelector('input[name=\"modbus_retry_delay\"]').value;"
         "if(!deviceId){alert('ERROR: Please enter the Azure device ID');return;}"
         "if(!deviceKey){alert('ERROR: Please enter the Azure device key');return;}"
-        "const formData='azure_device_id='+encodeURIComponent(deviceId)+'&azure_device_key='+encodeURIComponent(deviceKey)+'&telemetry_interval='+telemetryInterval+'&batch_telemetry='+batchTelemetry;"
+        "const formData='azure_device_id='+encodeURIComponent(deviceId)+'&azure_device_key='+encodeURIComponent(deviceKey)+'&telemetry_interval='+telemetryInterval+'&batch_telemetry='+batchTelemetry+'&modbus_retry_count='+modbusRetryCount+'&modbus_retry_delay='+modbusRetryDelay;"
         "fetch('/save_azure_config',{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},body:formData})"
         ".then(r=>r.json()).then(data=>{"
         "if(data.status==='success'){alert('SUCCESS: Azure configuration saved successfully!\\n\\nDevice ID, device key, and telemetry interval updated.');}else{alert('ERROR: '+data.message);}"
@@ -6019,6 +6041,18 @@ static esp_err_t save_azure_config_handler(httpd_req_t *req)
         } else if (strncmp(param, "batch_telemetry=", 16) == 0) {
             g_system_config.batch_telemetry = (atoi(param + 16) == 1);
             ESP_LOGI(TAG, "Batch telemetry: %s", g_system_config.batch_telemetry ? "enabled" : "disabled");
+        } else if (strncmp(param, "modbus_retry_count=", 19) == 0) {
+            int retry_count = atoi(param + 19);
+            if (retry_count >= 0 && retry_count <= 3) {
+                g_system_config.modbus_retry_count = retry_count;
+                ESP_LOGI(TAG, "Modbus retry count: %d", g_system_config.modbus_retry_count);
+            }
+        } else if (strncmp(param, "modbus_retry_delay=", 19) == 0) {
+            int retry_delay = atoi(param + 19);
+            if (retry_delay >= 10 && retry_delay <= 500) {
+                g_system_config.modbus_retry_delay = retry_delay;
+                ESP_LOGI(TAG, "Modbus retry delay: %d ms", g_system_config.modbus_retry_delay);
+            }
         }
         param = strtok(NULL, "&");
     }
@@ -11252,6 +11286,9 @@ typedef struct {
     int modem_reset_gpio_pin;
     int trigger_gpio_pin;
     bool batch_telemetry;
+    int modbus_retry_count;    // Number of retries on failure (0-3)
+    int modbus_retry_delay;    // Delay between retries in ms
+    int device_twin_version;   // Track applied desired properties version
 } core_config_t;
 
 esp_err_t config_load_from_nvs(system_config_t *config)
@@ -11270,6 +11307,7 @@ esp_err_t config_load_from_nvs(system_config_t *config)
 
     // Try loading new split format first (core + individual sensors)
     core_config_t core;
+    memset(&core, 0, sizeof(core_config_t));  // Initialize to zeros to handle new fields
     size_t core_size = sizeof(core_config_t);
     err = nvs_get_blob(nvs_handle, "sys_core", &core, &core_size);
 
@@ -11295,6 +11333,11 @@ esp_err_t config_load_from_nvs(system_config_t *config)
         config->modem_reset_gpio_pin = core.modem_reset_gpio_pin;
         config->trigger_gpio_pin = core.trigger_gpio_pin;
         config->batch_telemetry = core.batch_telemetry;
+        config->modbus_retry_count = core.modbus_retry_count > 0 ? core.modbus_retry_count : 1;
+        config->modbus_retry_delay = core.modbus_retry_delay > 0 ? core.modbus_retry_delay : 50;
+        // Sanity check: device_twin_version should be reasonable (0 to 1 million)
+        config->device_twin_version = (core.device_twin_version >= 0 && core.device_twin_version < 1000000)
+                                      ? core.device_twin_version : 0;
 
         // Load individual sensors
         for (int i = 0; i < config->sensor_count && i < 20; i++) {
@@ -11375,6 +11418,9 @@ esp_err_t config_save_to_nvs(const system_config_t *config)
     core.modem_reset_gpio_pin = config->modem_reset_gpio_pin;
     core.trigger_gpio_pin = config->trigger_gpio_pin;
     core.batch_telemetry = config->batch_telemetry;
+    core.modbus_retry_count = config->modbus_retry_count;
+    core.modbus_retry_delay = config->modbus_retry_delay;
+    core.device_twin_version = config->device_twin_version;
 
     // Save core config (~700 bytes, well under NVS limit)
     err = nvs_set_blob(nvs_handle, "sys_core", &core, sizeof(core_config_t));
@@ -11480,6 +11526,13 @@ esp_err_t config_reset_to_defaults(void)
 
     // Telemetry options
     g_system_config.batch_telemetry = true;  // Default: send all sensors in single JSON message
+
+    // Modbus retry settings
+    g_system_config.modbus_retry_count = 1;   // Default: 1 retry on failure
+    g_system_config.modbus_retry_delay = 50;  // Default: 50ms delay between retries
+
+    // Device Twin settings
+    g_system_config.device_twin_version = 0;  // Track applied desired properties version
 
     // Initialize all sensors with default values (20 sensors supported)
     for (int i = 0; i < 20; i++) {

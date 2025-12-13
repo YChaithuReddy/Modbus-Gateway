@@ -218,6 +218,13 @@ typedef struct {
 
     // Telemetry options
     bool batch_telemetry;      // Send all sensors in single JSON message (default: true)
+
+    // Modbus retry settings
+    int modbus_retry_count;    // Number of retries on failure (0-3, default: 1)
+    int modbus_retry_delay;    // Delay between retries in ms (default: 50)
+
+    // Device Twin settings
+    int device_twin_version;   // Track last applied desired properties version
 } system_config_t;
 
 // Function prototypes
