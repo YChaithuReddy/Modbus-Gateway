@@ -377,8 +377,8 @@ static void ota_download_task(void *pvParameter)
             .url = current_url,
             .timeout_ms = connection_timeout,
             .keep_alive_enable = false,           // Don't keep alive for redirects
-            .buffer_size = 4096,
-            .buffer_size_tx = 1024,
+            .buffer_size = 8192,                  // Increased for long GitHub CDN headers
+            .buffer_size_tx = 2048,
             .skip_cert_common_name_check = true,  // Allow redirects to different domains
             .crt_bundle_attach = esp_crt_bundle_attach,  // Use certificate bundle (like MQTT)
             .event_handler = http_event_handler,  // Capture Location header via events

@@ -178,6 +178,7 @@ static void mqtt_event_handler(void *handler_args, esp_event_base_t base, int32_
 static void handle_device_twin_desired_properties(const char *data, int data_len);
 static void report_device_twin_properties(void);
 static void ota_status_callback(ota_status_t status, const char* message);
+static int initialize_mqtt_client(void);
 
 // Function to add telemetry to history buffer
 static void add_telemetry_to_history(const char *payload, bool success) {
@@ -709,8 +710,10 @@ void mqtt_stop_for_ota(void) {
 
     if (mqtt_client != NULL) {
         esp_mqtt_client_stop(mqtt_client);
+        esp_mqtt_client_destroy(mqtt_client);
+        mqtt_client = NULL;
         mqtt_connected = false;
-        ESP_LOGI(TAG, "[OTA] MQTT stopped - PPP now available for OTA");
+        ESP_LOGI(TAG, "[OTA] MQTT stopped and destroyed - PPP now available for OTA");
     } else {
         ESP_LOGW(TAG, "[OTA] MQTT client was not running");
     }
@@ -723,15 +726,19 @@ void mqtt_stop_for_ota(void) {
 void mqtt_restart_after_ota(void) {
     ESP_LOGI(TAG, "[OTA] Restarting MQTT after OTA...");
 
-    if (mqtt_client != NULL) {
-        esp_err_t result = esp_mqtt_client_start(mqtt_client);
-        if (result == ESP_OK) {
-            ESP_LOGI(TAG, "[OTA] MQTT client restarted successfully");
+    if (mqtt_client == NULL) {
+        ESP_LOGI(TAG, "[OTA] Re-initializing MQTT client...");
+        if (initialize_mqtt_client() == 0) {
+            ESP_LOGI(TAG, "[OTA] MQTT client re-initialized successfully");
         } else {
-            ESP_LOGE(TAG, "[OTA] Failed to restart MQTT: %s", esp_err_to_name(result));
+            ESP_LOGE(TAG, "[OTA] Failed to re-initialize MQTT adapter");
         }
     } else {
-        ESP_LOGW(TAG, "[OTA] MQTT client is NULL - cannot restart");
+        ESP_LOGW(TAG, "[OTA] MQTT client already exists - restarting...");
+        esp_err_t result = esp_mqtt_client_start(mqtt_client);
+        if (result != ESP_OK) {
+             ESP_LOGE(TAG, "[OTA] Failed to restart MQTT: %s", esp_err_to_name(result));
+        }
     }
 }
 
@@ -3193,7 +3200,8 @@ static void mqtt_task(void *pvParameters)
 
         // Check SAS token expiry and refresh if needed (before it expires)
         // This prevents MQTT disconnection due to expired authentication
-        if (mqtt_initialized && is_network_connected() && sas_token_needs_refresh()) {
+        // CRITICAL: Do NOT refresh SAS token if OTA is in progress (prevents MQTT restart during OTA)
+        if (mqtt_initialized && is_network_connected() && sas_token_needs_refresh() && !ota_is_in_progress()) {
             ESP_LOGI(TAG, "[SAS] 🔄 SAS token expiring soon - initiating refresh...");
             if (refresh_sas_token_and_reconnect() == ESP_OK) {
                 ESP_LOGI(TAG, "[SAS] ✅ SAS token refreshed successfully - MQTT will reconnect");
