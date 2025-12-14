@@ -1913,6 +1913,9 @@ static esp_err_t config_page_handler(httpd_req_t *req)
 
     httpd_resp_set_type(req, "text/html; charset=UTF-8");
 
+    // Cache static content for 1 hour - dramatically speeds up page reloads
+    httpd_resp_set_hdr(req, "Cache-Control", "public, max-age=3600");
+
     // Generate escaped values for HTML safety
     char escaped_ssid[64], escaped_password[128];
     html_escape(escaped_ssid, g_system_config.wifi_ssid, sizeof(escaped_ssid));
