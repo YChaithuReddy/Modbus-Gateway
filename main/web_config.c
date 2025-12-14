@@ -9452,18 +9452,18 @@ static esp_err_t start_webserver(void)
     httpd_config_t config = HTTPD_DEFAULT_CONFIG();
     config.server_port = 80;
     config.max_uri_handlers = 50; // Increased to accommodate all 45+ handlers (SIM/SD/RTC/Modbus endpoints)
-    config.max_open_sockets = 4;      // Reduced from 7 to save memory (~3KB per socket)
+    config.max_open_sockets = 5;      // Slightly increased for better concurrent handling
     config.stack_size = 12288;        // 12KB stack for 5KB chunk buffer + overhead
-    config.task_priority = 5;
-    config.recv_wait_timeout = 15;    // Reduced timeout for faster cleanup
-    config.send_wait_timeout = 15;    // Reduced timeout for faster cleanup
+    config.task_priority = 6;         // Higher priority for faster response (was 5)
+    config.recv_wait_timeout = 5;     // Faster timeout for quicker response (was 15)
+    config.send_wait_timeout = 5;     // Faster timeout for quicker response (was 15)
     config.lru_purge_enable = true;   // Enable LRU purging of connections
-    config.backlog_conn = 4;          // Reduced from 8 to save memory
+    config.backlog_conn = 5;          // Allow more pending connections
     config.enable_so_linger = false;  // Disable socket lingering to prevent TIME_WAIT issues
-    config.keep_alive_enable = false; // Disabled to reduce memory and connection overhead
-    config.keep_alive_idle = 15;      // Reduced keep-alive idle time
-    config.keep_alive_interval = 5;   // Keep-alive probe interval (5 seconds)
-    config.keep_alive_count = 2;      // Reduced probe count
+    config.keep_alive_enable = true;  // Enable keep-alive for faster subsequent requests
+    config.keep_alive_idle = 5;       // Start keep-alive probes after 5 seconds idle
+    config.keep_alive_interval = 3;   // Keep-alive probe interval (3 seconds)
+    config.keep_alive_count = 3;      // Allow 3 probes before closing
 
     if (httpd_start(&g_server, &config) == ESP_OK) {
         // Main configuration page
