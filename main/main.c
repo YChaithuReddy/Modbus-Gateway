@@ -1140,7 +1140,9 @@ static void mqtt_event_handler(void *handler_args, esp_event_base_t base, int32_
                                 ESP_LOGI(TAG, "[C2D] Toggling web server");
                                 web_server_running = !web_server_running;
                                 if (web_server_running) {
-                                    web_config_start_ap_mode();
+                                    // Use web_config_start_server_only() to start AP+STA mode
+                                    // This creates SoftAP (ModbusIoT-Config) for both WiFi and SIM modes
+                                    web_config_start_server_only();
                                 } else {
                                     web_config_stop();
                                 }
