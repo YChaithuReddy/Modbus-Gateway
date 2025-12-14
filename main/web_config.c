@@ -757,7 +757,7 @@ static const char* html_header =
 "});"
 "}"
 
-"window.onload=function(){const savedSection=sessionStorage.getItem('showSection');if(savedSection){sessionStorage.removeItem('showSection');if(savedSection==='azure'){showAzureSection();}else{showSection(savedSection);}}else{const hash=window.location.hash.substring(1);if(hash&&hash!==''){if(hash==='azure'){showAzureSection();}else{showSection(hash);}}else{showSection('overview');}}toggleNetworkMode();toggleSDOptions();toggleRTCOptions();updateSystemStatus();setInterval(updateSystemStatus,5000);if(document.getElementById('wd-uptime')){updateWatchdogStatus();setInterval(updateWatchdogStatus,30000);}}"
+"window.onload=function(){const savedSection=sessionStorage.getItem('showSection');if(savedSection){sessionStorage.removeItem('showSection');if(savedSection==='azure'){showAzureSection();}else{showSection(savedSection);}}else{const hash=window.location.hash.substring(1);if(hash&&hash!==''){if(hash==='azure'){showAzureSection();}else{showSection(hash);}}else{showSection('overview');}}toggleNetworkMode();toggleSDOptions();toggleRTCOptions();updateSystemStatus();setInterval(updateSystemStatus,5000);refreshOtaStatus();if(document.getElementById('wd-uptime')){updateWatchdogStatus();setInterval(updateWatchdogStatus,30000);}}"
 "</script>"
 "</head><body>"
 "<div class=waves>"
@@ -9271,19 +9271,25 @@ static esp_err_t gpio_trigger_handler(httpd_req_t *req)
 static esp_err_t api_ota_status_handler(httpd_req_t *req) {
     ota_info_t* info = ota_get_info();
 
-    char response[512];
+    // Get running partition info
+    const esp_partition_t *running = esp_ota_get_running_partition();
+    const char *partition_label = running ? running->label : "unknown";
+
+    char response[640];
     snprintf(response, sizeof(response),
-        "{\"status\":\"%s\","
-        "\"currentVersion\":\"%s\","
-        "\"newVersion\":\"%s\","
+        "{\"state\":\"%s\","
+        "\"current_version\":\"%s\","
+        "\"running_partition\":\"%s\","
+        "\"new_version\":\"%s\","
         "\"progress\":%d,"
-        "\"bytesDownloaded\":%lu,"
-        "\"totalBytes\":%lu,"
-        "\"isRollback\":%s,"
-        "\"bootCount\":%d,"
-        "\"errorMsg\":\"%s\"}",
+        "\"bytes_downloaded\":%lu,"
+        "\"total_bytes\":%lu,"
+        "\"is_rollback\":%s,"
+        "\"boot_count\":%d,"
+        "\"error\":\"%s\"}",
         ota_status_to_string(info->status),
         info->current_version,
+        partition_label,
         info->new_version,
         info->progress,
         info->bytes_downloaded,
