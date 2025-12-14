@@ -12,7 +12,7 @@
  *   4. Call AzureOTA.loop() in loop()
  *
  * REQUIREMENTS:
- *   - Arduino ESP32 Board (2.x or 3.x)
+ *   - Arduino ESP32 Board (1.x, 2.x or 3.x)
  *   - Board: ESP32 Dev Module (or similar)
  *   - Partition Scheme: "Minimal SPIFFS (Large APP with OTA)"
  *   - Libraries: PubSubClient, ArduinoJson (install via Library Manager)
@@ -42,8 +42,8 @@
 #include <Update.h>
 #include <PubSubClient.h>
 #include <ArduinoJson.h>
-#include <base64.h>
 #include <mbedtls/md.h>
+#include <mbedtls/base64.h>
 #include <time.h>
 
 class AzureOTAClass {
@@ -63,13 +63,64 @@ private:
     String _otaUrl;
     bool _otaInProgress = false;
 
-    // SAS Token generation
+    // ========================================================================
+    // Built-in Base64 functions (compatible with all ESP32 Arduino versions)
+    // ========================================================================
+
+    int base64_encode_len(int inputLen) {
+        return ((inputLen + 2) / 3) * 4 + 1;
+    }
+
+    int base64_decode_len(const char* input, int inputLen) {
+        int padding = 0;
+        if (inputLen >= 2) {
+            if (input[inputLen - 1] == '=') padding++;
+            if (input[inputLen - 2] == '=') padding++;
+        }
+        return (inputLen * 3) / 4 - padding;
+    }
+
+    int base64_encode(char* output, const uint8_t* input, int inputLen) {
+        size_t outputLen = 0;
+        int ret = mbedtls_base64_encode(
+            (unsigned char*)output,
+            base64_encode_len(inputLen),
+            &outputLen,
+            input,
+            inputLen
+        );
+        if (ret == 0) {
+            output[outputLen] = '\0';
+            return outputLen;
+        }
+        return 0;
+    }
+
+    int base64_decode(uint8_t* output, const char* input, int inputLen) {
+        size_t outputLen = 0;
+        int ret = mbedtls_base64_decode(
+            output,
+            base64_decode_len(input, inputLen) + 1,
+            &outputLen,
+            (const unsigned char*)input,
+            inputLen
+        );
+        if (ret == 0) {
+            return outputLen;
+        }
+        return 0;
+    }
+
+    // ========================================================================
+    // URL Encoding
+    // ========================================================================
+
     String urlEncode(const String& str) {
         String encoded = "";
         char c;
         char code0;
         char code1;
-        for (int i = 0; i < str.length(); i++) {
+        for (unsigned int i = 0; i < str.length(); i++) {
             c = str.charAt(i);
             if (isalnum(c) || c == '-' || c == '_' || c == '.' || c == '~') {
                 encoded += c;
@@ -87,6 +138,10 @@ private:
         return encoded;
     }
 
+    // ========================================================================
+    // SAS Token Generation
+    // ========================================================================
+
     String generateSasToken(unsigned long expirySeconds = 86400) {
         String resourceUri = _hubHost + "/devices/" + _deviceId;
         String encodedUri = urlEncode(resourceUri);
@@ -94,26 +149,25 @@ private:
         unsigned long expiry = time(nullptr) + expirySeconds;
         String toSign = encodedUri + "\n" + String(expiry);
 
-        // Decode key
-        int keyLen = base64_dec_len((char*)_deviceKey.c_str(), _deviceKey.length());
-        uint8_t* decodedKey = new uint8_t[keyLen];
-        base64_decode((char*)decodedKey, (char*)_deviceKey.c_str(), _deviceKey.length());
+        // Decode the device key from base64
+        int keyLen = base64_decode_len(_deviceKey.c_str(), _deviceKey.length());
+        uint8_t* decodedKey = new uint8_t[keyLen + 1];
+        int actualKeyLen = base64_decode(decodedKey, _deviceKey.c_str(), _deviceKey.length());
 
         // HMAC-SHA256
         uint8_t hmacResult[32];
         mbedtls_md_hmac(
             mbedtls_md_info_from_type(MBEDTLS_MD_SHA256),
-            decodedKey, keyLen,
+            decodedKey, actualKeyLen,
             (const uint8_t*)toSign.c_str(), toSign.length(),
             hmacResult
         );
         delete[] decodedKey;
 
-        // Base64 encode
-        int encodedLen = base64_enc_len(32);
+        // Base64 encode the signature
+        int encodedLen = base64_encode_len(32);
         char* signature = new char[encodedLen + 1];
-        base64_encode(signature, (char*)hmacResult, 32);
-        signature[encodedLen] = '\0';
+        base64_encode(signature, hmacResult, 32);
 
         String encodedSignature = urlEncode(String(signature));
         delete[] signature;
@@ -123,7 +177,10 @@ private:
                "&se=" + String(expiry);
     }
 
+    // ========================================================================
     // MQTT Callback
+    // ========================================================================
+
     static AzureOTAClass* _instance;
 
     static void mqttCallback(char* topic, byte* payload, unsigned int length) {
@@ -144,16 +201,17 @@ private:
 
             Serial.println("[AZURE] Device Twin update received");
 
-            // Parse JSON
-            DynamicJsonDocument doc(2048);
+            // Parse JSON - use StaticJsonDocument for better compatibility
+            StaticJsonDocument<2048> doc;
             DeserializationError error = deserializeJson(doc, message);
 
             if (error) {
-                Serial.println("[AZURE] JSON parse error");
+                Serial.print("[AZURE] JSON parse error: ");
+                Serial.println(error.c_str());
                 return;
             }
 
-            // Check for OTA URL
+            // Check for OTA URL in root
             if (doc.containsKey("ota_url")) {
                 _otaUrl = doc["ota_url"].as<String>();
                 if (_otaUrl.length() > 0) {
@@ -161,8 +219,20 @@ private:
                     startOTA();
                 }
             }
+            // Also check in desired properties (full twin response)
+            else if (doc.containsKey("desired") && doc["desired"].containsKey("ota_url")) {
+                _otaUrl = doc["desired"]["ota_url"].as<String>();
+                if (_otaUrl.length() > 0) {
+                    Serial.println("[AZURE] OTA URL found in desired: " + _otaUrl);
+                    startOTA();
+                }
+            }
         }
     }
+
+    // ========================================================================
+    // OTA Update
+    // ========================================================================
 
     void startOTA() {
         if (_otaInProgress) {
@@ -181,12 +251,21 @@ private:
         // Handle redirects (GitHub releases)
         String currentUrl = _otaUrl;
         HTTPClient http;
+        WiFiClientSecure httpsClient;
+        httpsClient.setInsecure();  // Skip certificate verification
 
         for (int redirect = 0; redirect < 5; redirect++) {
             Serial.println("[OTA] Connecting to: " + currentUrl);
 
-            http.begin(currentUrl);
+            // Use secure client for HTTPS
+            if (currentUrl.startsWith("https://")) {
+                http.begin(httpsClient, currentUrl);
+            } else {
+                http.begin(currentUrl);
+            }
+
             http.setFollowRedirects(HTTPC_DISABLE_FOLLOW_REDIRECTS);
+            http.setTimeout(30000);  // 30 second timeout
 
             int httpCode = http.GET();
             Serial.println("[OTA] HTTP Code: " + String(httpCode));
@@ -223,6 +302,7 @@ private:
             // Start OTA update
             if (!Update.begin(contentLength)) {
                 Serial.println("[OTA] Not enough space");
+                Update.printError(Serial);
                 http.end();
                 _otaInProgress = false;
                 return;
@@ -233,11 +313,14 @@ private:
             uint8_t buff[1024];
             int written = 0;
             int lastProgress = -1;
+            unsigned long lastActivity = millis();
 
             while (http.connected() && written < contentLength) {
                 size_t available = stream->available();
                 if (available) {
-                    int readBytes = stream->readBytes(buff, min(available, sizeof(buff)));
+                    lastActivity = millis();
+                    int toRead = min(available, sizeof(buff));
+                    int readBytes = stream->readBytes(buff, toRead);
                     int writeBytes = Update.write(buff, readBytes);
                     written += writeBytes;
 
@@ -246,6 +329,16 @@ private:
                         lastProgress = progress;
                         Serial.println("[OTA] Progress: " + String(progress) + "%");
                     }
+                } else {
+                    // Check for timeout
+                    if (millis() - lastActivity > 30000) {
+                        Serial.println("[OTA] Download timeout");
+                        Update.abort();
+                        http.end();
+                        _otaInProgress = false;
+                        return;
+                    }
+                    delay(10);
                 }
                 yield();
             }
@@ -264,7 +357,8 @@ private:
                     Serial.println("[OTA] Update not finished");
                 }
             } else {
-                Serial.println("[OTA] Update error: " + String(Update.getError()));
+                Serial.print("[OTA] Update error: ");
+                Update.printError(Serial);
             }
 
             break;
@@ -292,7 +386,7 @@ public:
         Serial.println("Hub: " + _hubHost);
         Serial.println("Device: " + _deviceId);
 
-        // Sync time
+        // Sync time via NTP
         Serial.println("[AZURE] Syncing time...");
         configTime(0, 0, "pool.ntp.org", "time.nist.gov");
 
@@ -302,8 +396,10 @@ public:
             delay(1000);
             now = time(nullptr);
             retry++;
+            Serial.print(".");
         }
-        Serial.println("[AZURE] Time: " + String(now));
+        Serial.println();
+        Serial.println("[AZURE] Time synced: " + String(now));
 
         // Generate SAS token
         _sasToken = generateSasToken();
@@ -314,6 +410,7 @@ public:
         _mqttClient.setServer(_hubHost.c_str(), 8883);
         _mqttClient.setCallback(mqttCallback);
         _mqttClient.setBufferSize(4096);
+        _mqttClient.setKeepAlive(60);
 
         Serial.println("[AZURE] Initialization complete");
     }
@@ -342,30 +439,52 @@ public:
             Serial.println("[AZURE] Connected!");
             _connected = true;
 
-            // Subscribe to Device Twin
-            String twinTopic = "$iothub/twin/PATCH/properties/desired/#";
-            _mqttClient.subscribe(twinTopic.c_str());
-            Serial.println("[AZURE] Subscribed to Device Twin");
+            // Subscribe to Device Twin desired property updates
+            String twinPatchTopic = "$iothub/twin/PATCH/properties/desired/#";
+            _mqttClient.subscribe(twinPatchTopic.c_str());
+            Serial.println("[AZURE] Subscribed to twin patches");
 
-            // Request full twin
-            String getTwin = "$iothub/twin/GET/?$rid=0";
+            // Subscribe to Device Twin response
+            String twinResponseTopic = "$iothub/twin/res/#";
+            _mqttClient.subscribe(twinResponseTopic.c_str());
+            Serial.println("[AZURE] Subscribed to twin responses");
+
+            // Request full Device Twin
+            String getTwin = "$iothub/twin/GET/?$rid=getTwin";
             _mqttClient.publish(getTwin.c_str(), "");
+            Serial.println("[AZURE] Requested Device Twin");
         } else {
-            Serial.println("[AZURE] Connection failed: " + String(_mqttClient.state()));
+            int state = _mqttClient.state();
+            Serial.print("[AZURE] Connection failed, state: ");
+            Serial.println(state);
+
+            // Print human-readable error
+            switch (state) {
+                case -4: Serial.println("  -> Connection timeout"); break;
+                case -3: Serial.println("  -> Connection lost"); break;
+                case -2: Serial.println("  -> Connect failed"); break;
+                case -1: Serial.println("  -> Disconnected"); break;
+                case 1:  Serial.println("  -> Bad protocol"); break;
+                case 2:  Serial.println("  -> Bad client ID"); break;
+                case 3:  Serial.println("  -> Unavailable"); break;
+                case 4:  Serial.println("  -> Bad credentials"); break;
+                case 5:  Serial.println("  -> Unauthorized"); break;
+            }
+
             _connected = false;
             delay(5000);
         }
     }
 
     /**
-     * Check if connected
+     * Check if connected to Azure
      */
     bool isConnected() {
         return _mqttClient.connected();
     }
 
     /**
-     * Manually trigger OTA
+     * Manually trigger OTA from URL
      */
     void triggerOTA(const char* url) {
         _otaUrl = String(url);

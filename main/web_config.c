@@ -107,7 +107,7 @@ static const char* html_header =
 "/* Semantic Colors */"
 "--color-primary:var(--primary-600);--color-primary-hover:var(--primary-700);--color-primary-light:var(--primary-100);"
 "--color-accent:var(--accent-500);--color-accent-hover:var(--accent-600);"
-"--color-success:var(--success-500);--color-warning:var(--warning-500);--color-error:var(--error-500);"
+"--color-success:var(--success-500);--color-warning:var(--warning-500);--color-error:var(--error-500);--color-danger:#dc2626;"
 "--color-text-primary:var(--gray-900);--color-text-secondary:var(--gray-700);--color-text-tertiary:var(--gray-500);--color-text-disabled:var(--gray-400);"
 "--color-bg-primary:#ffffff;--color-bg-secondary:var(--gray-50);--color-bg-tertiary:var(--gray-100);"
 "--color-border-light:var(--gray-200);--color-border-medium:var(--gray-300);--color-border-dark:var(--gray-400);"
@@ -5533,7 +5533,7 @@ static esp_err_t config_page_handler(httpd_req_t *req)
         "xhr.onload=function(){"
         "if(xhr.status===200){"
         "const data=JSON.parse(xhr.responseText);"
-        "if(data.success){"
+        "if(data.status==='success'){"
         "resultDiv.innerHTML='<div style=\"background:#d4edda;padding:10px;border-radius:4px;color:#155724\">Firmware uploaded successfully! Rebooting in 3 seconds...</div>';"
         "setTimeout(function(){if(confirm('Firmware uploaded! Reboot now to apply update?')){fetch('/api/ota/reboot',{method:'POST'});}},1000);"
         "}else{resultDiv.innerHTML='<div style=\"background:#f8d7da;padding:10px;border-radius:4px;color:#721c24\">ERROR: '+(data.message||'Upload failed')+'</div>';}"
@@ -9345,11 +9345,11 @@ static esp_err_t api_ota_start_handler(httpd_req_t *req) {
 
     httpd_resp_set_type(req, "application/json");
     if (ota_ret == ESP_OK) {
-        httpd_resp_sendstr(req, "{\"success\":true,\"message\":\"OTA update started\"}");
+        httpd_resp_sendstr(req, "{\"status\":\"success\",\"message\":\"OTA update started\"}");
     } else {
         char error_response[128];
         snprintf(error_response, sizeof(error_response),
-            "{\"success\":false,\"message\":\"Failed to start OTA: %s\"}", esp_err_to_name(ota_ret));
+            "{\"status\":\"error\",\"message\":\"Failed to start OTA: %s\"}", esp_err_to_name(ota_ret));
         httpd_resp_sendstr(req, error_response);
     }
     return ESP_OK;
@@ -9361,9 +9361,9 @@ static esp_err_t api_ota_cancel_handler(httpd_req_t *req) {
 
     httpd_resp_set_type(req, "application/json");
     if (ret == ESP_OK) {
-        httpd_resp_sendstr(req, "{\"success\":true,\"message\":\"OTA update cancelled\"}");
+        httpd_resp_sendstr(req, "{\"status\":\"success\",\"message\":\"OTA update cancelled\"}");
     } else {
-        httpd_resp_sendstr(req, "{\"success\":false,\"message\":\"No update in progress\"}");
+        httpd_resp_sendstr(req, "{\"status\":\"error\",\"message\":\"No update in progress\"}");
     }
     return ESP_OK;
 }
@@ -9373,7 +9373,7 @@ static esp_err_t api_ota_confirm_handler(httpd_req_t *req) {
     ota_mark_valid();
 
     httpd_resp_set_type(req, "application/json");
-    httpd_resp_sendstr(req, "{\"success\":true,\"message\":\"Firmware marked as valid\"}");
+    httpd_resp_sendstr(req, "{\"status\":\"success\",\"message\":\"Firmware marked as valid\"}");
     return ESP_OK;
 }
 
@@ -9383,11 +9383,14 @@ static esp_err_t api_ota_reboot_handler(httpd_req_t *req) {
 
     httpd_resp_set_type(req, "application/json");
     if (info->status == OTA_STATUS_PENDING_REBOOT) {
-        httpd_resp_sendstr(req, "{\"success\":true,\"message\":\"Rebooting to apply update...\"}");
+        httpd_resp_sendstr(req, "{\"status\":\"success\",\"message\":\"Rebooting to apply update...\"}");
         vTaskDelay(pdMS_TO_TICKS(500));  // Give time for response to be sent
         ota_reboot();
     } else {
-        httpd_resp_sendstr(req, "{\"success\":false,\"message\":\"No pending update to apply\"}");
+        // Still allow reboot even without pending update
+        httpd_resp_sendstr(req, "{\"status\":\"success\",\"message\":\"Rebooting device...\"}");
+        vTaskDelay(pdMS_TO_TICKS(500));
+        esp_restart();
     }
     return ESP_OK;
 }
@@ -9436,7 +9439,7 @@ static esp_err_t api_ota_upload_handler(httpd_req_t *req) {
     ESP_LOGI(TAG, "[OTA] Upload complete - %d bytes received", total_received);
 
     httpd_resp_set_type(req, "application/json");
-    httpd_resp_sendstr(req, "{\"success\":true,\"message\":\"Firmware uploaded. Reboot to apply.\"}");
+    httpd_resp_sendstr(req, "{\"status\":\"success\",\"message\":\"Firmware uploaded. Reboot to apply.\"}");
     return ESP_OK;
 }
 
