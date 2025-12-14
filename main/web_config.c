@@ -11774,14 +11774,42 @@ esp_err_t web_config_stop(void)
 esp_err_t web_config_start_server_only(void)
 {
     ESP_LOGI(TAG, "Starting web server with SoftAP (AP+STA mode)");
-    
+
+    // Initialize WiFi infrastructure if not already done (needed for SIM mode)
+    esp_err_t ret = esp_netif_init();
+    if (ret != ESP_OK && ret != ESP_ERR_INVALID_STATE) {
+        ESP_LOGE(TAG, "Failed to initialize netif: %s", esp_err_to_name(ret));
+        return ret;
+    }
+
+    ret = esp_event_loop_create_default();
+    if (ret != ESP_OK && ret != ESP_ERR_INVALID_STATE) {
+        ESP_LOGE(TAG, "Failed to create event loop: %s", esp_err_to_name(ret));
+        return ret;
+    }
+
+    // Create STA interface if it doesn't exist (required for WiFi init)
+    esp_netif_t *sta_netif = esp_netif_get_handle_from_ifkey("WIFI_STA_DEF");
+    if (sta_netif == NULL) {
+        sta_netif = esp_netif_create_default_wifi_sta();
+        ESP_LOGI(TAG, "Created new WiFi STA interface");
+    }
+
+    // Initialize WiFi driver if not already done
+    wifi_init_config_t cfg = WIFI_INIT_CONFIG_DEFAULT();
+    ret = esp_wifi_init(&cfg);
+    if (ret != ESP_OK && ret != ESP_ERR_INVALID_STATE) {
+        ESP_LOGE(TAG, "Failed to initialize WiFi driver: %s", esp_err_to_name(ret));
+        return ret;
+    }
+
     // Set WiFi mode to AP+STA (dual mode)
-    esp_err_t ret = esp_wifi_set_mode(WIFI_MODE_APSTA);
+    ret = esp_wifi_set_mode(WIFI_MODE_APSTA);
     if (ret != ESP_OK) {
         ESP_LOGE(TAG, "Failed to set AP+STA mode: %s", esp_err_to_name(ret));
         return ret;
     }
-    
+
     // Create AP network interface if it doesn't exist
     esp_netif_t *ap_netif = esp_netif_get_handle_from_ifkey("WIFI_AP_DEF");
     if (ap_netif == NULL) {
