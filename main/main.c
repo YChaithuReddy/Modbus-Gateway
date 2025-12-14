@@ -699,6 +699,42 @@ static esp_err_t refresh_sas_token_and_reconnect(void) {
     return ESP_OK;  // MQTT client will auto-reconnect
 }
 
+// ============================================================================
+// MQTT Stop/Start functions for OTA (SIM mode needs exclusive PPP access)
+// ============================================================================
+
+// Stop MQTT temporarily for OTA - frees PPP for exclusive OTA use
+void mqtt_stop_for_ota(void) {
+    ESP_LOGI(TAG, "[OTA] Stopping MQTT to free PPP for OTA download...");
+
+    if (mqtt_client != NULL) {
+        esp_mqtt_client_stop(mqtt_client);
+        mqtt_connected = false;
+        ESP_LOGI(TAG, "[OTA] MQTT stopped - PPP now available for OTA");
+    } else {
+        ESP_LOGW(TAG, "[OTA] MQTT client was not running");
+    }
+
+    // Give network time to settle
+    vTaskDelay(pdMS_TO_TICKS(2000));
+}
+
+// Restart MQTT after OTA completes or fails
+void mqtt_restart_after_ota(void) {
+    ESP_LOGI(TAG, "[OTA] Restarting MQTT after OTA...");
+
+    if (mqtt_client != NULL) {
+        esp_err_t result = esp_mqtt_client_start(mqtt_client);
+        if (result == ESP_OK) {
+            ESP_LOGI(TAG, "[OTA] MQTT client restarted successfully");
+        } else {
+            ESP_LOGE(TAG, "[OTA] Failed to restart MQTT: %s", esp_err_to_name(result));
+        }
+    } else {
+        ESP_LOGW(TAG, "[OTA] MQTT client is NULL - cannot restart");
+    }
+}
+
 // Callback function for replaying cached SD card messages to MQTT
 static void replay_message_callback(const pending_message_t* msg) {
     if (!msg || !mqtt_client) {

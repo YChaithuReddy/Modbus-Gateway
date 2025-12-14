@@ -236,6 +236,13 @@ static void ota_download_task(void *pvParameter)
         // Log memory status
         ESP_LOGI(TAG, "Free heap before SIM OTA: %lu bytes", esp_get_free_heap_size());
 
+        // CRITICAL: Stop MQTT to free PPP for exclusive OTA use
+        // Two concurrent TLS sessions over cellular PPP cause connection resets
+        extern void mqtt_stop_for_ota(void);
+        ESP_LOGI(TAG, "Stopping MQTT to free PPP connection for OTA...");
+        mqtt_stop_for_ota();
+        ESP_LOGI(TAG, "Free heap after stopping MQTT: %lu bytes", esp_get_free_heap_size());
+
         // CRITICAL: Verify PPP is actually connected before attempting OTA
         if (!a7670c_ppp_is_connected()) {
             ESP_LOGE(TAG, "PPP not connected - cannot perform OTA over SIM");
@@ -693,6 +700,14 @@ cleanup:
     }
     if (download_buffer) {
         free(download_buffer);
+    }
+
+    // For SIM mode: Restart MQTT after OTA cleanup
+    // (MQTT was stopped to free PPP for exclusive OTA use)
+    if (is_sim_mode) {
+        extern void mqtt_restart_after_ota(void);
+        ESP_LOGI(TAG, "Restarting MQTT after SIM OTA cleanup...");
+        mqtt_restart_after_ota();
     }
 
     // Clear OTA in progress flag - MQTT can reconnect now
