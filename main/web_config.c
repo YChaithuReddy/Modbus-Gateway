@@ -11747,12 +11747,22 @@ esp_err_t web_config_stop(void)
     if (g_server) {
         httpd_stop(g_server);
         g_server = NULL;
+        ESP_LOGI(TAG, "HTTP server stopped");
     }
-    
-    // Check if WiFi STA is connected before disabling AP
+
+    // In SIM mode, stop WiFi completely since we don't need it for connectivity
+    if (g_system_config.network_mode == NETWORK_MODE_SIM) {
+        ESP_LOGI(TAG, "SIM mode: Stopping WiFi completely to free resources");
+        esp_wifi_stop();
+        esp_wifi_deinit();
+        ESP_LOGI(TAG, "WiFi stopped and deinitialized");
+        return ESP_OK;
+    }
+
+    // In WiFi mode, check if STA is connected before disabling AP
     wifi_ap_record_t ap_info;
     esp_err_t conn_status = esp_wifi_sta_get_ap_info(&ap_info);
-    
+
     if (conn_status == ESP_OK) {
         // WiFi is connected, safe to switch to STA-only mode
         esp_err_t ret = esp_wifi_set_mode(WIFI_MODE_STA);
@@ -11766,7 +11776,7 @@ esp_err_t web_config_stop(void)
         ESP_LOGW(TAG, "WiFi not connected, maintaining AP+STA mode for continued access");
         ESP_LOGI(TAG, "SoftAP 'ModbusIoT-Config' remains active at 192.168.4.1");
     }
-    
+
     return ESP_OK;
 }
 
