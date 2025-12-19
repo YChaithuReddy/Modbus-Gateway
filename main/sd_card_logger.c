@@ -36,6 +36,86 @@ static const char* temp_messages_file = "/sdcard/tmp.txt";  // Even shorter
 // Maximum message file size (10MB)
 #define MAX_MESSAGE_FILE_SIZE (10 * 1024 * 1024)
 
+// Helper function to detect corrupted/binary data in a string
+// Returns true if the string contains non-printable or invalid characters
+static bool is_corrupted_line(const char* line) {
+    if (line == NULL || *line == '\0') {
+        return true;
+    }
+
+    int corrupt_count = 0;
+    int total_chars = 0;
+
+    for (const char* p = line; *p != '\0'; p++) {
+        total_chars++;
+        unsigned char c = (unsigned char)*p;
+
+        // Valid characters: printable ASCII (32-126), tab (9), newline (10), carriage return (13)
+        // Also allow common extended ASCII for UTF-8 compatibility (but not garbage 0x80-0x9F range)
+        if (c < 32 && c != 9 && c != 10 && c != 13) {
+            corrupt_count++;  // Control characters (except tab, newline, CR)
+        } else if (c == 127) {
+            corrupt_count++;  // DEL character
+        } else if (c >= 0x80 && c <= 0x9F) {
+            corrupt_count++;  // Invalid UTF-8 continuation bytes used alone
+        } else if (c == 0xFF) {
+            corrupt_count++;  // Common SD card corruption pattern
+        }
+    }
+
+    // If more than 10% of characters are corrupt, consider the line corrupted
+    // Or if there are more than 5 corrupt characters
+    if (corrupt_count > 5 || (total_chars > 0 && (corrupt_count * 100 / total_chars) > 10)) {
+        return true;
+    }
+
+    return false;
+}
+
+// Helper function to check if a message ID is valid (numeric)
+static bool is_valid_message_id(const char* id_str) {
+    if (id_str == NULL || *id_str == '\0') {
+        return false;
+    }
+
+    for (const char* p = id_str; *p != '\0'; p++) {
+        if (*p < '0' || *p > '9') {
+            return false;  // Non-numeric character found
+        }
+    }
+
+    return true;
+}
+
+// Helper function to validate timestamp format (YYYY-MM-DDTHH:MM:SSZ)
+static bool is_valid_timestamp(const char* timestamp) {
+    if (timestamp == NULL || strlen(timestamp) < 19) {
+        return false;
+    }
+
+    // Check basic format: should start with 20XX- (years 2000-2099)
+    if (timestamp[0] != '2' || timestamp[1] != '0') {
+        return false;
+    }
+
+    // Check for year 1970 (invalid RTC)
+    if (strncmp(timestamp, "1970-", 5) == 0) {
+        return false;
+    }
+
+    // Check for year 2000 (invalid RTC)
+    if (strncmp(timestamp, "2000-", 5) == 0) {
+        return false;
+    }
+
+    // Basic format check: YYYY-MM-DDTHH:MM:SS
+    if (timestamp[4] != '-' || timestamp[7] != '-' || timestamp[10] != 'T') {
+        return false;
+    }
+
+    return true;
+}
+
 // Initialize SD card with SPI interface
 esp_err_t sd_card_init(void) {
     if (sd_initialized) {
@@ -522,15 +602,65 @@ esp_err_t sd_card_replay_messages(void (*publish_callback)(const pending_message
     ESP_LOGI(TAG, "📤 Found %lu pending messages to replay", total_messages);
 
     char line[700];
+    char line_backup[700];  // Backup for logging corrupted lines
     uint32_t replayed_count = 0;
+    uint32_t deleted_corrupt_count = 0;
     const uint32_t MAX_REPLAY_BATCH = 20; // Limit messages per batch
 
     while (fgets(line, sizeof(line), file) != NULL && replayed_count < MAX_REPLAY_BATCH) {
+        // Make backup before modifying line (for logging)
+        strncpy(line_backup, line, sizeof(line_backup) - 1);
+        line_backup[sizeof(line_backup) - 1] = '\0';
+
         // Remove newline
         line[strcspn(line, "\r\n")] = 0;
 
+        // === CORRUPTION DETECTION: Check for binary/garbage data ===
+        if (is_corrupted_line(line)) {
+            deleted_corrupt_count++;
+            ESP_LOGW(TAG, "🗑️ CORRUPTED LINE DETECTED - auto-deleting (corrupt #%lu)", deleted_corrupt_count);
+            ESP_LOGW(TAG, "   First 50 chars: %.50s...", line);
+
+            // We need to rebuild the file without this corrupted line
+            // Close current file, create temp without this line, replace original
+            fclose(file);
+
+            // Read all lines and rewrite without corrupted ones
+            FILE *src = fopen(pending_messages_file, "r");
+            FILE *dst = fopen(temp_messages_file, "w");
+            if (src && dst) {
+                char temp_line[700];
+                while (fgets(temp_line, sizeof(temp_line), src) != NULL) {
+                    // Only write non-corrupted lines
+                    if (!is_corrupted_line(temp_line)) {
+                        fputs(temp_line, dst);
+                    }
+                }
+                fclose(src);
+                fflush(dst);
+                fclose(dst);
+
+                // Replace original with cleaned file
+                remove(pending_messages_file);
+                rename(temp_messages_file, pending_messages_file);
+                ESP_LOGI(TAG, "✅ Corrupted lines removed from SD card");
+            } else {
+                if (src) fclose(src);
+                if (dst) fclose(dst);
+                ESP_LOGE(TAG, "❌ Failed to clean corrupted lines");
+            }
+
+            // Reopen file and restart
+            file = fopen(pending_messages_file, "r");
+            if (file == NULL) {
+                ESP_LOGI(TAG, "No more pending messages after corruption cleanup");
+                return ESP_OK;
+            }
+            continue;
+        }
+
         if (strlen(line) < 10) {
-            continue; // Skip invalid lines
+            continue; // Skip very short lines
         }
 
         // Parse line: ID|TIMESTAMP|TOPIC|PAYLOAD
@@ -560,32 +690,68 @@ esp_err_t sd_card_replay_messages(void (*publish_callback)(const pending_message
             payload = field_start;
         }
 
+        // === VALIDATION: Check for malformed messages and auto-delete ===
+        bool should_delete = false;
+        const char* delete_reason = NULL;
+
         if (id_str == NULL || timestamp == NULL || topic == NULL || payload == NULL) {
-            ESP_LOGW(TAG, "Malformed message line, skipping (ID=%s, TS=%s, Topic=%s, Payload=%s)",
-                     id_str ? id_str : "NULL",
-                     timestamp ? timestamp : "NULL",
-                     topic ? topic : "NULL",
-                     payload ? "NULL" : "empty");
-            continue;
+            should_delete = true;
+            delete_reason = "missing fields";
+        } else if (!is_valid_message_id(id_str)) {
+            should_delete = true;
+            delete_reason = "invalid message ID (non-numeric)";
+        } else if (!is_valid_timestamp(timestamp)) {
+            should_delete = true;
+            delete_reason = "invalid timestamp format";
+        } else if (*timestamp == '\0') {
+            should_delete = true;
+            delete_reason = "empty timestamp";
+        } else if (strstr(payload, "�") != NULL || is_corrupted_line(payload)) {
+            should_delete = true;
+            delete_reason = "corrupted payload data";
         }
 
-        // Additional validation: check timestamp isn't empty
-        if (*timestamp == '\0') {
-            ESP_LOGW(TAG, "Malformed message line, skipping (empty timestamp)");
-            continue;
-        }
+        if (should_delete) {
+            deleted_corrupt_count++;
+            if (id_str && is_valid_message_id(id_str)) {
+                uint32_t invalid_msg_id = atoi(id_str);
+                ESP_LOGW(TAG, "🗑️ Deleting message ID %lu - %s", invalid_msg_id, delete_reason);
+                fclose(file);
+                sd_card_remove_message(invalid_msg_id);
+            } else {
+                // Can't get valid ID, need to clean the whole file of corrupt lines
+                ESP_LOGW(TAG, "🗑️ Removing malformed line - %s", delete_reason);
+                fclose(file);
 
-        // Validate timestamp - delete messages from 1970 (invalid RTC time)
-        if (strncmp(timestamp, "1970-", 5) == 0) {
-            uint32_t invalid_msg_id = atoi(id_str);
-            ESP_LOGW(TAG, "🗑️ Deleting message ID %s - invalid timestamp from 1970 (RTC was not set)", id_str);
-            // Close file, delete invalid message, reopen and continue
-            fclose(file);
-            sd_card_remove_message(invalid_msg_id);
-            // Reopen file and restart from beginning
+                // Rewrite file without this line
+                FILE *src = fopen(pending_messages_file, "r");
+                FILE *dst = fopen(temp_messages_file, "w");
+                if (src && dst) {
+                    char temp_line[700];
+                    bool skipped_one = false;
+                    while (fgets(temp_line, sizeof(temp_line), src) != NULL) {
+                        // Skip the first matching corrupted line
+                        if (!skipped_one && strncmp(temp_line, line_backup, strlen(line_backup) - 1) == 0) {
+                            skipped_one = true;
+                            continue;
+                        }
+                        fputs(temp_line, dst);
+                    }
+                    fclose(src);
+                    fflush(dst);
+                    fclose(dst);
+                    remove(pending_messages_file);
+                    rename(temp_messages_file, pending_messages_file);
+                } else {
+                    if (src) fclose(src);
+                    if (dst) fclose(dst);
+                }
+            }
+
+            // Reopen file and continue
             file = fopen(pending_messages_file, "r");
             if (file == NULL) {
-                ESP_LOGI(TAG, "No more pending messages after cleanup");
+                ESP_LOGI(TAG, "No more pending messages after cleanup (deleted %lu corrupted)", deleted_corrupt_count);
                 return ESP_OK;
             }
             continue;
@@ -627,6 +793,9 @@ esp_err_t sd_card_replay_messages(void (*publish_callback)(const pending_message
 
     fclose(file);
 
+    if (deleted_corrupt_count > 0) {
+        ESP_LOGW(TAG, "🧹 Cleaned up %lu corrupted/invalid messages during replay", deleted_corrupt_count);
+    }
     ESP_LOGI(TAG, "✅ Replayed %lu messages", replayed_count);
     return ESP_OK;
 }

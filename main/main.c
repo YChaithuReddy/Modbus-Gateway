@@ -3513,21 +3513,53 @@ static bool send_telemetry(void) {
     
     ESP_LOGI(TAG, "[SEND] Sending telemetry message #%lu...", telemetry_send_count);
 
-    // IMPORTANT: Replay cached offline messages FIRST before sending live data
+    // IMPORTANT: Replay ALL cached offline messages FIRST before sending live data
     // This ensures chronological order - older cached data must be sent before newer live data
     // Otherwise cloud analytics will use live data as reference and cached data becomes useless
     if (config->sd_config.enabled) {
         uint32_t pending_count = 0;
         sd_card_get_pending_count(&pending_count);
+
         if (pending_count > 0) {
-            ESP_LOGI(TAG, "[SD] 📤 Found %lu cached messages - sending FIRST (before live data)", pending_count);
-            esp_err_t replay_ret = sd_card_replay_messages(replay_message_callback);
-            if (replay_ret == ESP_OK) {
-                ESP_LOGI(TAG, "[SD] ✅ Cached messages sent successfully - now sending live data");
-            } else {
-                ESP_LOGW(TAG, "[SD] ⚠️ Some cached messages failed: %s", esp_err_to_name(replay_ret));
+            uint32_t total_cached = pending_count;
+            ESP_LOGI(TAG, "[SD] 📤 Found %lu cached messages - sending ALL before live data", total_cached);
+
+            // Keep replaying until ALL cached messages are sent
+            uint32_t batches_sent = 0;
+            while (pending_count > 0) {
+                batches_sent++;
+                ESP_LOGI(TAG, "[SD] 📤 Sending batch %lu... (%lu messages remaining)", batches_sent, pending_count);
+
+                esp_err_t replay_ret = sd_card_replay_messages(replay_message_callback);
+
+                if (replay_ret != ESP_OK) {
+                    ESP_LOGW(TAG, "[SD] ⚠️ Batch replay failed: %s - will retry on next telemetry cycle", esp_err_to_name(replay_ret));
+                    break;  // Stop on error to avoid infinite loop, retry next cycle
+                }
+
+                // Update pending count after batch
+                uint32_t prev_count = pending_count;
+                sd_card_get_pending_count(&pending_count);
+
+                // Safety check: if count didn't decrease, something is wrong
+                if (pending_count >= prev_count && pending_count > 0) {
+                    ESP_LOGW(TAG, "[SD] ⚠️ Message count not decreasing, stopping to prevent infinite loop");
+                    break;
+                }
+
+                // Small delay between batches to avoid overwhelming MQTT broker
+                if (pending_count > 0) {
+                    vTaskDelay(pdMS_TO_TICKS(1000));  // 1 second between batches
+                }
             }
-            // Small delay to ensure cached messages are processed before live data
+
+            if (pending_count == 0) {
+                ESP_LOGI(TAG, "[SD] ✅ ALL %lu cached messages sent in %lu batches - now sending live data", total_cached, batches_sent);
+            } else {
+                ESP_LOGW(TAG, "[SD] ⚠️ %lu messages still pending - will continue on next cycle", pending_count);
+            }
+
+            // Delay before sending live data
             vTaskDelay(pdMS_TO_TICKS(500));
         }
     }
