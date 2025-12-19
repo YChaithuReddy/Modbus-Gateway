@@ -158,26 +158,223 @@ Add this to Device Twin desired properties:
 
 ### Supported Data Types
 
+#### Basic Data Types (16-bit)
+
 | Data Type | Registers | Description |
 |-----------|-----------|-------------|
-| `UINT16` | 1 | Unsigned 16-bit integer |
-| `INT16` | 1 | Signed 16-bit integer |
-| `UINT32` | 2 | Unsigned 32-bit integer |
-| `INT32` | 2 | Signed 32-bit integer |
-| `FLOAT32` | 2 | 32-bit floating point |
-| `FLOAT64` | 4 | 64-bit floating point |
-| `FLOAT64_78563412` | 4 | 64-bit with custom byte order |
-| `Panda_EMF` | 4 | Panda electromagnetic flow meter |
-| `ZEST_FIXED` | 2 | ZEST meter fixed-point format |
+| `UINT16` | 1 | Unsigned 16-bit integer (Big Endian) |
+| `UINT16_BE` | 1 | Unsigned 16-bit integer (Big Endian) |
+| `UINT16_LE` | 1 | Unsigned 16-bit integer (Little Endian) |
+| `UINT16_HI` | 1 | Unsigned 16-bit, high byte first |
+| `UINT16_LO` | 1 | Unsigned 16-bit, low byte first |
+| `INT16` | 1 | Signed 16-bit integer (Big Endian) |
+| `INT16_BE` | 1 | Signed 16-bit integer (Big Endian) |
+| `INT16_LE` | 1 | Signed 16-bit integer (Little Endian) |
+| `INT16_HI` | 1 | Signed 16-bit, high byte first |
+| `INT16_LO` | 1 | Signed 16-bit, low byte first |
+| `UINT8` | 1 | Unsigned 8-bit integer |
+| `INT8` | 1 | Signed 8-bit integer |
+| `BOOL` | 1 | Boolean (0 or 1) |
+
+#### 32-bit Integer Types
+
+| Data Type | Registers | Byte Order | Description |
+|-----------|-----------|------------|-------------|
+| `UINT32` | 2 | ABCD | Unsigned 32-bit (Big Endian, default) |
+| `UINT32_1234` | 2 | ABCD | Unsigned 32-bit (Big Endian) |
+| `UINT32_ABCD` | 2 | ABCD | Unsigned 32-bit (Big Endian) |
+| `UINT32_4321` | 2 | DCBA | Unsigned 32-bit (Little Endian) |
+| `UINT32_DCBA` | 2 | DCBA | Unsigned 32-bit (Little Endian) |
+| `UINT32_SWAP` | 2 | DCBA | Unsigned 32-bit (Byte Swapped) |
+| `UINT32_2143` | 2 | BADC | Unsigned 32-bit (Word Swapped) |
+| `UINT32_BADC` | 2 | BADC | Unsigned 32-bit (Word Swapped) |
+| `UINT32_3412` | 2 | CDAB | Unsigned 32-bit (Word Swapped LE) |
+| `UINT32_CDAB` | 2 | CDAB | Unsigned 32-bit (Word Swapped LE) |
+| `INT32` | 2 | ABCD | Signed 32-bit (Big Endian, default) |
+| `INT32_1234` | 2 | ABCD | Signed 32-bit (Big Endian) |
+| `INT32_ABCD` | 2 | ABCD | Signed 32-bit (Big Endian) |
+| `INT32_4321` | 2 | DCBA | Signed 32-bit (Little Endian) |
+| `INT32_DCBA` | 2 | DCBA | Signed 32-bit (Little Endian) |
+| `INT32_SWAP` | 2 | DCBA | Signed 32-bit (Byte Swapped) |
+| `INT32_2143` | 2 | BADC | Signed 32-bit (Word Swapped) |
+| `INT32_BADC` | 2 | BADC | Signed 32-bit (Word Swapped) |
+| `INT32_3412` | 2 | CDAB | Signed 32-bit (Word Swapped LE) |
+| `INT32_CDAB` | 2 | CDAB | Signed 32-bit (Word Swapped LE) |
+
+#### 32-bit Floating Point Types
+
+| Data Type | Registers | Byte Order | Description |
+|-----------|-----------|------------|-------------|
+| `FLOAT32` | 2 | ABCD | IEEE 754 Float (Big Endian, default) |
+| `FLOAT32_1234` | 2 | ABCD | IEEE 754 Float (Big Endian) |
+| `FLOAT32_ABCD` | 2 | ABCD | IEEE 754 Float (Big Endian) |
+| `FLOAT32_4321` | 2 | DCBA | IEEE 754 Float (Little Endian) |
+| `FLOAT32_DCBA` | 2 | DCBA | IEEE 754 Float (Little Endian) |
+| `FLOAT32_SWAP` | 2 | DCBA | IEEE 754 Float (Byte Swapped) |
+| `FLOAT32_2143` | 2 | BADC | IEEE 754 Float (Word Swapped) |
+| `FLOAT32_BADC` | 2 | BADC | IEEE 754 Float (Word Swapped) |
+| `FLOAT32_3412` | 2 | CDAB | IEEE 754 Float (Word Swapped LE) |
+| `FLOAT32_CDAB` | 2 | CDAB | IEEE 754 Float (Word Swapped LE) |
+
+#### 64-bit Types
+
+| Data Type | Registers | Byte Order | Description |
+|-----------|-----------|------------|-------------|
+| `FLOAT64` | 4 | 12345678 | 64-bit Double (Big Endian) |
+| `FLOAT64_12345678` | 4 | ABCDEFGH | 64-bit Double (Big Endian) |
+| `FLOAT64_87654321` | 4 | HGFEDCBA | 64-bit Double (Little Endian) |
+| `FLOAT64_78563412` | 4 | GHEFCDAB | 64-bit Double (Mixed byte order) |
+| `INT64_12345678` | 4 | ABCDEFGH | 64-bit Signed Integer (Big Endian) |
+| `INT64_87654321` | 4 | HGFEDCBA | 64-bit Signed Integer (Little Endian) |
+| `INT64_78563412` | 4 | GHEFCDAB | 64-bit Signed Integer (Mixed) |
+| `UINT64_12345678` | 4 | ABCDEFGH | 64-bit Unsigned Integer (Big Endian) |
+| `UINT64_87654321` | 4 | HGFEDCBA | 64-bit Unsigned Integer (Little Endian) |
+| `UINT64_78563412` | 4 | GHEFCDAB | 64-bit Unsigned Integer (Mixed) |
+
+#### Special Data Types
+
+| Data Type | Registers | Description |
+|-----------|-----------|-------------|
+| `HEX` | Variable | Raw hexadecimal data |
+| `ASCII` | Variable | ASCII string data |
+| `PDU` | Variable | Raw PDU data |
+
+### Supported Sensor Types (Flow Meters)
+
+Use `sensor_type` field to enable special handling for specific meter brands:
+
+| Sensor Type | Registers | Description | Register Format |
+|-------------|-----------|-------------|-----------------|
+| `Flow-Meter` | 4 | Generic flow meter | UINT32_BADC + FLOAT32_BADC (integer + decimal) |
+| `Panda_EMF` | 4 | Panda Electromagnetic | INT32_BE + FLOAT32_BE at reg 4114 (0x1012) |
+| `Panda_USM` | 4 | Panda Ultrasonic | FLOAT64 (64-bit double) |
+| `Panda_Level` | 1 | Panda Level Sensor | UINT16 at reg 1 (0x0001) |
+| `ZEST` | 4 | ZEST/AquaGen Flow | UINT16 + FLOAT32 at reg 4121 (0x1019) |
+| `Clampon` | 4 | Clampon Flow Meter | UINT32_BADC + FLOAT32_BADC |
+| `Dailian_EMF` | 2 | Dailian Electromagnetic | UINT32 word-swapped at reg 2006 (0x07D6) |
+| `Level` | Variable | Generic level sensor | Uses sensor_height & max_water_level |
+| `Radar Level` | Variable | Radar level sensor | Similar to Level |
+| `QUALITY` | Variable | Water quality multi-sensor | Uses sub_sensors array |
+| `ENERGY` | Variable | Energy meter | Uses meter_type field |
+
+### Flow Meter Configuration Examples
+
+#### Panda EMF (Electromagnetic Flow Meter)
+
+```json
+{
+  "name": "Panda EMF Meter",
+  "unit_id": "PANDA001",
+  "slave_id": 1,
+  "baud_rate": 9600,
+  "register_address": 4114,
+  "quantity": 4,
+  "sensor_type": "Panda_EMF",
+  "description": "Panda electromagnetic flow meter"
+}
+```
+
+#### ZEST/AquaGen Flow Meter
+
+```json
+{
+  "name": "ZEST Flow Meter",
+  "unit_id": "ZEST001",
+  "slave_id": 1,
+  "baud_rate": 9600,
+  "register_address": 4121,
+  "quantity": 4,
+  "sensor_type": "ZEST",
+  "description": "AquaGen ZEST flow meter"
+}
+```
+
+#### Panda USM (Ultrasonic Flow Meter)
+
+```json
+{
+  "name": "Panda USM Meter",
+  "unit_id": "USM001",
+  "slave_id": 1,
+  "baud_rate": 9600,
+  "register_address": 4,
+  "quantity": 4,
+  "sensor_type": "Panda_USM",
+  "description": "Panda ultrasonic flow meter (64-bit double)"
+}
+```
+
+#### Dailian EMF (Electromagnetic Flow Meter)
+
+```json
+{
+  "name": "Dailian EMF",
+  "unit_id": "DAILIAN001",
+  "slave_id": 1,
+  "baud_rate": 9600,
+  "register_address": 2006,
+  "quantity": 2,
+  "sensor_type": "Dailian_EMF",
+  "scale_factor": 0.001,
+  "description": "Dailian electromagnetic flow meter"
+}
+```
+
+#### Clampon Flow Meter
+
+```json
+{
+  "name": "Clampon Meter",
+  "unit_id": "CLAMP001",
+  "slave_id": 1,
+  "baud_rate": 9600,
+  "register_address": 0,
+  "quantity": 4,
+  "sensor_type": "Clampon",
+  "description": "Clampon clamp-on flow meter"
+}
+```
+
+#### Generic Flow Meter (UINT32 + FLOAT32)
+
+```json
+{
+  "name": "Generic Flow",
+  "unit_id": "FLOW001",
+  "slave_id": 1,
+  "baud_rate": 9600,
+  "register_address": 0,
+  "quantity": 4,
+  "sensor_type": "Flow-Meter",
+  "description": "Generic flow meter with BADC byte order"
+}
+```
+
+#### Panda Level Sensor
+
+```json
+{
+  "name": "Tank Level",
+  "unit_id": "LEVEL001",
+  "slave_id": 1,
+  "baud_rate": 9600,
+  "register_address": 1,
+  "quantity": 1,
+  "sensor_type": "Panda_Level",
+  "sensor_height": 5.0,
+  "max_water_level": 4.5,
+  "description": "Panda ultrasonic level sensor"
+}
+```
 
 ### Byte Order Options
 
-| Value | Description |
-|-------|-------------|
-| `BIG_ENDIAN` | Most significant byte first (default) |
-| `LITTLE_ENDIAN` | Least significant byte first |
-| `MID_BIG_ENDIAN` | Word-swapped big endian |
-| `MID_LITTLE_ENDIAN` | Word-swapped little endian |
+| Value | Description | Example |
+|-------|-------------|---------|
+| `BIG_ENDIAN` | Most significant byte first (ABCD) | 0x12345678 → [0x12, 0x34, 0x56, 0x78] |
+| `LITTLE_ENDIAN` | Least significant byte first (DCBA) | 0x12345678 → [0x78, 0x56, 0x34, 0x12] |
+| `MID_BIG_ENDIAN` | Word-swapped big endian (BADC) | 0x12345678 → [0x34, 0x12, 0x78, 0x56] |
+| `MID_LITTLE_ENDIAN` | Word-swapped little endian (CDAB) | 0x12345678 → [0x56, 0x78, 0x12, 0x34] |
 
 ### Multiple Sensors Example
 
