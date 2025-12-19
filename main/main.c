@@ -2992,6 +2992,290 @@ skip_ota:       // Label for skipping OTA when memory is insufficient
         }
     }
 
+    // Process sensors array - remote sensor configuration via Device Twin
+    cJSON *sensors_array = cJSON_GetObjectItem(root, "sensors");
+    if (sensors_array && cJSON_IsArray(sensors_array)) {
+        int sensor_count = cJSON_GetArraySize(sensors_array);
+        if (sensor_count > 10) {
+            ESP_LOGW(TAG, "[TWIN] Sensor count %d exceeds maximum (10), limiting", sensor_count);
+            sensor_count = 10;
+        }
+
+        ESP_LOGI(TAG, "[TWIN] Processing %d sensors from Device Twin", sensor_count);
+
+        // Clear existing sensors first
+        memset(config->sensors, 0, sizeof(config->sensors));
+        config->sensor_count = 0;
+
+        for (int i = 0; i < sensor_count; i++) {
+            cJSON *sensor_obj = cJSON_GetArrayItem(sensors_array, i);
+            if (!sensor_obj || !cJSON_IsObject(sensor_obj)) {
+                ESP_LOGW(TAG, "[TWIN] Sensor %d is not a valid object, skipping", i);
+                continue;
+            }
+
+            sensor_config_t *sensor = &config->sensors[config->sensor_count];
+            memset(sensor, 0, sizeof(sensor_config_t));
+
+            // Parse enabled (default: true)
+            cJSON *enabled = cJSON_GetObjectItem(sensor_obj, "enabled");
+            sensor->enabled = (!enabled || cJSON_IsTrue(enabled));
+
+            // Parse required string fields
+            cJSON *name = cJSON_GetObjectItem(sensor_obj, "name");
+            if (name && cJSON_IsString(name)) {
+                strncpy(sensor->name, name->valuestring, sizeof(sensor->name) - 1);
+            } else {
+                snprintf(sensor->name, sizeof(sensor->name), "Sensor_%d", i + 1);
+            }
+
+            cJSON *unit_id = cJSON_GetObjectItem(sensor_obj, "unit_id");
+            if (unit_id && cJSON_IsString(unit_id)) {
+                strncpy(sensor->unit_id, unit_id->valuestring, sizeof(sensor->unit_id) - 1);
+            }
+
+            // Parse Modbus configuration
+            cJSON *slave_id = cJSON_GetObjectItem(sensor_obj, "slave_id");
+            sensor->slave_id = (slave_id && cJSON_IsNumber(slave_id)) ? slave_id->valueint : 1;
+
+            cJSON *baud_rate = cJSON_GetObjectItem(sensor_obj, "baud_rate");
+            sensor->baud_rate = (baud_rate && cJSON_IsNumber(baud_rate)) ? baud_rate->valueint : 9600;
+
+            cJSON *parity = cJSON_GetObjectItem(sensor_obj, "parity");
+            if (parity && cJSON_IsString(parity)) {
+                strncpy(sensor->parity, parity->valuestring, sizeof(sensor->parity) - 1);
+            } else {
+                strcpy(sensor->parity, "none");
+            }
+
+            cJSON *register_address = cJSON_GetObjectItem(sensor_obj, "register_address");
+            sensor->register_address = (register_address && cJSON_IsNumber(register_address)) ? register_address->valueint : 0;
+
+            cJSON *quantity = cJSON_GetObjectItem(sensor_obj, "quantity");
+            sensor->quantity = (quantity && cJSON_IsNumber(quantity)) ? quantity->valueint : 1;
+
+            cJSON *data_type = cJSON_GetObjectItem(sensor_obj, "data_type");
+            if (data_type && cJSON_IsString(data_type)) {
+                strncpy(sensor->data_type, data_type->valuestring, sizeof(sensor->data_type) - 1);
+            } else {
+                strcpy(sensor->data_type, "UINT16");
+            }
+
+            cJSON *register_type = cJSON_GetObjectItem(sensor_obj, "register_type");
+            if (register_type && cJSON_IsString(register_type)) {
+                strncpy(sensor->register_type, register_type->valuestring, sizeof(sensor->register_type) - 1);
+            } else {
+                strcpy(sensor->register_type, "HOLDING");
+            }
+
+            cJSON *scale_factor = cJSON_GetObjectItem(sensor_obj, "scale_factor");
+            sensor->scale_factor = (scale_factor && cJSON_IsNumber(scale_factor)) ? (float)scale_factor->valuedouble : 1.0f;
+
+            cJSON *byte_order = cJSON_GetObjectItem(sensor_obj, "byte_order");
+            if (byte_order && cJSON_IsString(byte_order)) {
+                strncpy(sensor->byte_order, byte_order->valuestring, sizeof(sensor->byte_order) - 1);
+            } else {
+                strcpy(sensor->byte_order, "BIG_ENDIAN");
+            }
+
+            cJSON *description = cJSON_GetObjectItem(sensor_obj, "description");
+            if (description && cJSON_IsString(description)) {
+                strncpy(sensor->description, description->valuestring, sizeof(sensor->description) - 1);
+            }
+
+            // Parse sensor type and type-specific fields
+            cJSON *sensor_type = cJSON_GetObjectItem(sensor_obj, "sensor_type");
+            if (sensor_type && cJSON_IsString(sensor_type)) {
+                strncpy(sensor->sensor_type, sensor_type->valuestring, sizeof(sensor->sensor_type) - 1);
+            } else {
+                strcpy(sensor->sensor_type, "Flow-Meter");
+            }
+
+            cJSON *sensor_height = cJSON_GetObjectItem(sensor_obj, "sensor_height");
+            sensor->sensor_height = (sensor_height && cJSON_IsNumber(sensor_height)) ? (float)sensor_height->valuedouble : 0.0f;
+
+            cJSON *max_water_level = cJSON_GetObjectItem(sensor_obj, "max_water_level");
+            sensor->max_water_level = (max_water_level && cJSON_IsNumber(max_water_level)) ? (float)max_water_level->valuedouble : 0.0f;
+
+            cJSON *meter_type = cJSON_GetObjectItem(sensor_obj, "meter_type");
+            if (meter_type && cJSON_IsString(meter_type)) {
+                strncpy(sensor->meter_type, meter_type->valuestring, sizeof(sensor->meter_type) - 1);
+            }
+
+            // Parse sub-sensors for water quality sensors
+            cJSON *sub_sensors = cJSON_GetObjectItem(sensor_obj, "sub_sensors");
+            if (sub_sensors && cJSON_IsArray(sub_sensors)) {
+                int sub_count = cJSON_GetArraySize(sub_sensors);
+                if (sub_count > 8) sub_count = 8;
+                sensor->sub_sensor_count = 0;
+
+                for (int j = 0; j < sub_count; j++) {
+                    cJSON *sub_obj = cJSON_GetArrayItem(sub_sensors, j);
+                    if (!sub_obj || !cJSON_IsObject(sub_obj)) continue;
+
+                    sub_sensor_t *sub = &sensor->sub_sensors[sensor->sub_sensor_count];
+                    memset(sub, 0, sizeof(sub_sensor_t));
+
+                    cJSON *sub_enabled = cJSON_GetObjectItem(sub_obj, "enabled");
+                    sub->enabled = (!sub_enabled || cJSON_IsTrue(sub_enabled));
+
+                    cJSON *param_name = cJSON_GetObjectItem(sub_obj, "parameter_name");
+                    if (param_name && cJSON_IsString(param_name)) {
+                        strncpy(sub->parameter_name, param_name->valuestring, sizeof(sub->parameter_name) - 1);
+                    }
+
+                    cJSON *json_key = cJSON_GetObjectItem(sub_obj, "json_key");
+                    if (json_key && cJSON_IsString(json_key)) {
+                        strncpy(sub->json_key, json_key->valuestring, sizeof(sub->json_key) - 1);
+                    }
+
+                    cJSON *sub_slave = cJSON_GetObjectItem(sub_obj, "slave_id");
+                    sub->slave_id = (sub_slave && cJSON_IsNumber(sub_slave)) ? sub_slave->valueint : sensor->slave_id;
+
+                    cJSON *sub_reg = cJSON_GetObjectItem(sub_obj, "register_address");
+                    sub->register_address = (sub_reg && cJSON_IsNumber(sub_reg)) ? sub_reg->valueint : 0;
+
+                    cJSON *sub_qty = cJSON_GetObjectItem(sub_obj, "quantity");
+                    sub->quantity = (sub_qty && cJSON_IsNumber(sub_qty)) ? sub_qty->valueint : 1;
+
+                    cJSON *sub_dtype = cJSON_GetObjectItem(sub_obj, "data_type");
+                    if (sub_dtype && cJSON_IsString(sub_dtype)) {
+                        strncpy(sub->data_type, sub_dtype->valuestring, sizeof(sub->data_type) - 1);
+                    } else {
+                        strcpy(sub->data_type, "FLOAT32");
+                    }
+
+                    cJSON *sub_regtype = cJSON_GetObjectItem(sub_obj, "register_type");
+                    if (sub_regtype && cJSON_IsString(sub_regtype)) {
+                        strncpy(sub->register_type, sub_regtype->valuestring, sizeof(sub->register_type) - 1);
+                    } else {
+                        strcpy(sub->register_type, "HOLDING");
+                    }
+
+                    cJSON *sub_scale = cJSON_GetObjectItem(sub_obj, "scale_factor");
+                    sub->scale_factor = (sub_scale && cJSON_IsNumber(sub_scale)) ? (float)sub_scale->valuedouble : 1.0f;
+
+                    cJSON *sub_byte = cJSON_GetObjectItem(sub_obj, "byte_order");
+                    if (sub_byte && cJSON_IsString(sub_byte)) {
+                        strncpy(sub->byte_order, sub_byte->valuestring, sizeof(sub->byte_order) - 1);
+                    } else {
+                        strcpy(sub->byte_order, "BIG_ENDIAN");
+                    }
+
+                    cJSON *sub_units = cJSON_GetObjectItem(sub_obj, "units");
+                    if (sub_units && cJSON_IsString(sub_units)) {
+                        strncpy(sub->units, sub_units->valuestring, sizeof(sub->units) - 1);
+                    }
+
+                    sensor->sub_sensor_count++;
+                }
+            }
+
+            // Parse calculation parameters
+            cJSON *calc_obj = cJSON_GetObjectItem(sensor_obj, "calculation");
+            if (calc_obj && cJSON_IsObject(calc_obj)) {
+                calculation_params_t *calc = &sensor->calculation;
+                memset(calc, 0, sizeof(calculation_params_t));
+
+                cJSON *calc_type = cJSON_GetObjectItem(calc_obj, "calc_type");
+                if (calc_type && cJSON_IsNumber(calc_type)) {
+                    calc->calc_type = (calculation_type_t)calc_type->valueint;
+                }
+
+                // Scale/offset params
+                cJSON *scale = cJSON_GetObjectItem(calc_obj, "scale");
+                calc->scale = (scale && cJSON_IsNumber(scale)) ? (float)scale->valuedouble : 1.0f;
+
+                cJSON *offset = cJSON_GetObjectItem(calc_obj, "offset");
+                calc->offset = (offset && cJSON_IsNumber(offset)) ? (float)offset->valuedouble : 0.0f;
+
+                // Combine register params
+                cJSON *high_off = cJSON_GetObjectItem(calc_obj, "high_register_offset");
+                calc->high_register_offset = (high_off && cJSON_IsNumber(high_off)) ? high_off->valueint : 0;
+
+                cJSON *low_off = cJSON_GetObjectItem(calc_obj, "low_register_offset");
+                calc->low_register_offset = (low_off && cJSON_IsNumber(low_off)) ? low_off->valueint : 1;
+
+                cJSON *combine_mult = cJSON_GetObjectItem(calc_obj, "combine_multiplier");
+                calc->combine_multiplier = (combine_mult && cJSON_IsNumber(combine_mult)) ? (float)combine_mult->valuedouble : 100.0f;
+
+                // Level percentage params
+                cJSON *tank_empty = cJSON_GetObjectItem(calc_obj, "tank_empty_value");
+                calc->tank_empty_value = (tank_empty && cJSON_IsNumber(tank_empty)) ? (float)tank_empty->valuedouble : 0.0f;
+
+                cJSON *tank_full = cJSON_GetObjectItem(calc_obj, "tank_full_value");
+                calc->tank_full_value = (tank_full && cJSON_IsNumber(tank_full)) ? (float)tank_full->valuedouble : 100.0f;
+
+                cJSON *invert = cJSON_GetObjectItem(calc_obj, "invert_level");
+                calc->invert_level = (invert && cJSON_IsTrue(invert));
+
+                // Tank dimensions
+                cJSON *diameter = cJSON_GetObjectItem(calc_obj, "tank_diameter");
+                calc->tank_diameter = (diameter && cJSON_IsNumber(diameter)) ? (float)diameter->valuedouble : 0.0f;
+
+                cJSON *length = cJSON_GetObjectItem(calc_obj, "tank_length");
+                calc->tank_length = (length && cJSON_IsNumber(length)) ? (float)length->valuedouble : 0.0f;
+
+                cJSON *width = cJSON_GetObjectItem(calc_obj, "tank_width");
+                calc->tank_width = (width && cJSON_IsNumber(width)) ? (float)width->valuedouble : 0.0f;
+
+                cJSON *height = cJSON_GetObjectItem(calc_obj, "tank_height");
+                calc->tank_height = (height && cJSON_IsNumber(height)) ? (float)height->valuedouble : 0.0f;
+
+                cJSON *vol_unit = cJSON_GetObjectItem(calc_obj, "volume_unit");
+                calc->volume_unit = (vol_unit && cJSON_IsNumber(vol_unit)) ? vol_unit->valueint : 0;
+
+                // Secondary sensor for difference calc
+                cJSON *sec_idx = cJSON_GetObjectItem(calc_obj, "secondary_sensor_index");
+                calc->secondary_sensor_index = (sec_idx && cJSON_IsNumber(sec_idx)) ? sec_idx->valueint : 0;
+
+                // Pulse params
+                cJSON *ppu = cJSON_GetObjectItem(calc_obj, "pulses_per_unit");
+                calc->pulses_per_unit = (ppu && cJSON_IsNumber(ppu)) ? (float)ppu->valuedouble : 1.0f;
+
+                // Linear interpolation params
+                cJSON *in_min = cJSON_GetObjectItem(calc_obj, "input_min");
+                calc->input_min = (in_min && cJSON_IsNumber(in_min)) ? (float)in_min->valuedouble : 0.0f;
+
+                cJSON *in_max = cJSON_GetObjectItem(calc_obj, "input_max");
+                calc->input_max = (in_max && cJSON_IsNumber(in_max)) ? (float)in_max->valuedouble : 100.0f;
+
+                cJSON *out_min = cJSON_GetObjectItem(calc_obj, "output_min");
+                calc->output_min = (out_min && cJSON_IsNumber(out_min)) ? (float)out_min->valuedouble : 0.0f;
+
+                cJSON *out_max = cJSON_GetObjectItem(calc_obj, "output_max");
+                calc->output_max = (out_max && cJSON_IsNumber(out_max)) ? (float)out_max->valuedouble : 100.0f;
+
+                // Polynomial params
+                cJSON *poly_a = cJSON_GetObjectItem(calc_obj, "poly_a");
+                calc->poly_a = (poly_a && cJSON_IsNumber(poly_a)) ? (float)poly_a->valuedouble : 0.0f;
+
+                cJSON *poly_b = cJSON_GetObjectItem(calc_obj, "poly_b");
+                calc->poly_b = (poly_b && cJSON_IsNumber(poly_b)) ? (float)poly_b->valuedouble : 1.0f;
+
+                cJSON *poly_c = cJSON_GetObjectItem(calc_obj, "poly_c");
+                calc->poly_c = (poly_c && cJSON_IsNumber(poly_c)) ? (float)poly_c->valuedouble : 0.0f;
+
+                // Output unit
+                cJSON *out_unit = cJSON_GetObjectItem(calc_obj, "output_unit");
+                if (out_unit && cJSON_IsString(out_unit)) {
+                    strncpy(calc->output_unit, out_unit->valuestring, sizeof(calc->output_unit) - 1);
+                }
+
+                cJSON *decimals = cJSON_GetObjectItem(calc_obj, "decimal_places");
+                calc->decimal_places = (decimals && cJSON_IsNumber(decimals)) ? decimals->valueint : 2;
+            }
+
+            config->sensor_count++;
+            ESP_LOGI(TAG, "[TWIN] Sensor %d configured: %s (slave=%d, reg=%d, type=%s)",
+                     config->sensor_count, sensor->name, sensor->slave_id,
+                     sensor->register_address, sensor->data_type);
+        }
+
+        config_changed = true;
+        ESP_LOGI(TAG, "[TWIN] Total %d sensors configured from Device Twin", config->sensor_count);
+    }
+
     // Save configuration to NVS if changed
     if (config_changed) {
         esp_err_t save_result = config_save_to_nvs(config);
@@ -3055,6 +3339,25 @@ static void report_device_twin_properties(void) {
     // Add system health info
     cJSON_AddNumberToObject(reported, "free_heap", esp_get_free_heap_size());
     cJSON_AddNumberToObject(reported, "uptime_sec", (double)(esp_timer_get_time() - system_uptime_start) / 1000000.0);
+
+    // Add configured sensors summary
+    if (config->sensor_count > 0) {
+        cJSON *sensors_arr = cJSON_CreateArray();
+        if (sensors_arr) {
+            for (int i = 0; i < config->sensor_count && i < 10; i++) {
+                cJSON *sensor_info = cJSON_CreateObject();
+                if (sensor_info) {
+                    cJSON_AddStringToObject(sensor_info, "name", config->sensors[i].name);
+                    cJSON_AddStringToObject(sensor_info, "unit_id", config->sensors[i].unit_id);
+                    cJSON_AddNumberToObject(sensor_info, "slave_id", config->sensors[i].slave_id);
+                    cJSON_AddStringToObject(sensor_info, "type", config->sensors[i].sensor_type);
+                    cJSON_AddBoolToObject(sensor_info, "enabled", config->sensors[i].enabled);
+                    cJSON_AddItemToArray(sensors_arr, sensor_info);
+                }
+            }
+            cJSON_AddItemToObject(reported, "sensors", sensors_arr);
+        }
+    }
 
     char *json_str = cJSON_PrintUnformatted(reported);
     if (!json_str) {
