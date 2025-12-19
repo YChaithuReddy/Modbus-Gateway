@@ -165,8 +165,26 @@ idf.py monitor -f esp32_exception_decoder
 
 1. Web config file too large (609KB) - should be split
 2. Sensor LED logic implemented but may not blink correctly
-3. Missing Azure IoT features (Device Twin, OTA updates, C2D commands)
-4. Race condition in web server toggle (partially fixed with debouncing)
+3. Race condition in web server toggle (partially fixed with debouncing)
+
+## ☁️ AZURE IOT HUB FEATURES (IMPLEMENTED)
+
+### Device Twin Features
+- **Remote sensor configuration** - Configure sensors via desired properties
+- **Telemetry interval** - Change reporting frequency remotely
+- **OTA updates** - Trigger firmware updates via ota_url property
+- **Web server control** - Start/stop web server remotely
+- **Maintenance mode** - Pause telemetry for maintenance
+- **Remote reboot** - Trigger device restart
+- **Modbus settings** - Adjust retry count and delay
+
+### SD Card Features
+- **Offline data caching** - Store telemetry when network unavailable
+- **Automatic replay** - Send all cached data before live data (chronological order)
+- **Corruption detection** - Auto-delete malformed messages
+- **Power-loss protection** - CONFIG_FATFS_IMMEDIATE_FSYNC enabled
+
+See `docs/DEVICE_TWIN_GUIDE.md` for complete usage documentation.
 
 ## 📝 NOTES FOR CLAUDE CODE
 
@@ -187,6 +205,6 @@ idf.py monitor -f esp32_exception_decoder
 
 ---
 
-**Last Updated**: November 30, 2024
-**Last Known Working Commit**: e0ee803
-**Critical Issue Fixed**: Memory optimization for WiFi AP + PPP + MQTT coexistence
+**Last Updated**: December 19, 2024
+**Last Known Working Commit**: d25131e
+**Recent Features Added**: Device Twin sensor configuration, SD card corruption auto-delete, offline data replay
