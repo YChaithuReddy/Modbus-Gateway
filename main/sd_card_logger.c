@@ -10,6 +10,7 @@
 #include "driver/sdspi_host.h"
 #include "driver/spi_common.h"
 #include "sd_card_logger.h"
+#include "iot_configs.h"
 
 static const char *TAG = "SD_CARD";
 
@@ -605,7 +606,8 @@ esp_err_t sd_card_replay_messages(void (*publish_callback)(const pending_message
     char line_backup[700];  // Backup for logging corrupted lines
     uint32_t replayed_count = 0;
     uint32_t deleted_corrupt_count = 0;
-    const uint32_t MAX_REPLAY_BATCH = 20; // Limit messages per batch
+    // Use config value for batch limit (defined in iot_configs.h)
+    const uint32_t MAX_REPLAY_BATCH = SD_REPLAY_MAX_MESSAGES_PER_BATCH;
 
     while (fgets(line, sizeof(line), file) != NULL && replayed_count < MAX_REPLAY_BATCH) {
         // Make backup before modifying line (for logging)
@@ -783,12 +785,13 @@ esp_err_t sd_card_replay_messages(void (*publish_callback)(const pending_message
 
         ESP_LOGI(TAG, "📤 Replaying message ID: %lu from %s", msg.message_id, msg.timestamp);
 
-        // Call publish callback
+        // Call publish callback (rate limiting is handled in the callback using iot_configs.h values)
         publish_callback(&msg);
         replayed_count++;
 
-        // Small delay to avoid overwhelming the network
-        vTaskDelay(pdMS_TO_TICKS(100));
+        // Minimal yield to prevent watchdog and allow other tasks to run
+        // Rate limiting delays are handled by the callback function
+        vTaskDelay(pdMS_TO_TICKS(10));
     }
 
     fclose(file);

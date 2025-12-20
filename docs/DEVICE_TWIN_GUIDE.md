@@ -137,6 +137,111 @@ Add this to Device Twin desired properties:
 }
 ```
 
+### Minimal Configuration (Auto-Presets)
+
+**NEW:** For supported sensor types, you can now use minimal configuration. The system automatically applies register addresses, quantities, and data types based on the `sensor_type`.
+
+#### Supported Presets
+
+| Sensor Type | Auto Register | Auto Quantity | Notes |
+|-------------|---------------|---------------|-------|
+| `ZEST` | 4121 | 4 | AquaGen flow meter |
+| `Panda_EMF` | 4114 | 4 | Panda electromagnetic |
+| `Panda_USM` | 8 | 4 | Panda ultrasonic (64-bit) |
+| `Panda_Level` | 1 | 1 | Panda level sensor |
+| `Dailian_EMF` | 2006 | 2 | Dailian electromagnetic |
+| `Clampon` | - | 4 | Register varies by install |
+| `Flow-Meter` | - | 4 | Generic flow meter |
+| `Level` / `Radar Level` | - | 2 | Level sensors |
+| `Piezometer` | - | 2 | Water level sensor |
+
+#### Minimal Examples
+
+**ZEST Flow Meter** (only 4 fields needed):
+```json
+{
+  "sensors": [{
+    "name": "Main Flow",
+    "unit_id": "ZEST001",
+    "slave_id": 3,
+    "sensor_type": "ZEST"
+  }]
+}
+```
+*Auto-configures: register_address=4121, quantity=4*
+
+**Panda EMF** (only 4 fields needed):
+```json
+{
+  "sensors": [{
+    "name": "Inlet Flow",
+    "unit_id": "PANDA001",
+    "slave_id": 1,
+    "sensor_type": "Panda_EMF"
+  }]
+}
+```
+*Auto-configures: register_address=4114, quantity=4*
+
+**Panda Level** (only 4 fields needed):
+```json
+{
+  "sensors": [{
+    "name": "Tank Level",
+    "unit_id": "LEVEL001",
+    "slave_id": 2,
+    "sensor_type": "Panda_Level"
+  }]
+}
+```
+*Auto-configures: register_address=1, quantity=1, data_type=UINT16*
+
+**Multiple Sensors with Presets**:
+```json
+{
+  "sensors": [
+    {
+      "name": "Flow 1",
+      "unit_id": "ZEST001",
+      "slave_id": 1,
+      "sensor_type": "ZEST"
+    },
+    {
+      "name": "Flow 2",
+      "unit_id": "PANDA001",
+      "slave_id": 2,
+      "sensor_type": "Panda_EMF"
+    },
+    {
+      "name": "Level 1",
+      "unit_id": "LEVEL001",
+      "slave_id": 3,
+      "sensor_type": "Panda_Level"
+    }
+  ]
+}
+```
+
+#### Override Presets
+
+You can still override any preset value by specifying it explicitly:
+
+```json
+{
+  "sensors": [{
+    "name": "Custom ZEST",
+    "unit_id": "ZEST002",
+    "slave_id": 5,
+    "sensor_type": "ZEST",
+    "register_address": 5000,
+    "baud_rate": 19200
+  }]
+}
+```
+*Uses register_address=5000 instead of default 4121*
+
+---
+
 ### Sensor Field Reference
 
 | Field | Type | Required | Default | Description |
@@ -144,10 +249,10 @@ Add this to Device Twin desired properties:
 | `enabled` | boolean | No | `true` | Enable/disable sensor |
 | `name` | string | Yes | - | Display name (max 31 chars) |
 | `unit_id` | string | No | "" | Unique identifier for telemetry |
-| `slave_id` | number | Yes | 1 | Modbus slave address (1-247) |
+| `slave_id` | number | Yes* | 1 | Modbus slave address (1-247) |
 | `baud_rate` | number | No | 9600 | Serial baud rate |
 | `parity` | string | No | "none" | "none", "even", "odd" |
-| `register_address` | number | Yes | 0 | Starting register address |
+| `register_address` | number | Auto* | 0 | Starting register address |
 | `quantity` | number | No | 1 | Number of registers to read |
 | `data_type` | string | No | "UINT16" | See data types below |
 | `register_type` | string | No | "HOLDING" | "HOLDING" or "INPUT" |

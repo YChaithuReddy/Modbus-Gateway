@@ -32,6 +32,12 @@
 // Device Twin Configuration
 #define DEVICE_TWIN_UPDATE_INTERVAL_SEC 300  // 5 minutes - report device status to Azure
 
+// SD Card Replay Configuration (Azure IoT Hub rate limiting protection)
+#define SD_REPLAY_DELAY_BETWEEN_MESSAGES_MS 500   // Delay between each cached message (500ms minimum for Azure)
+#define SD_REPLAY_DELAY_BETWEEN_BATCHES_MS 2000   // Delay between replay batches (2 seconds)
+#define SD_REPLAY_MAX_MESSAGES_PER_BATCH 10       // Max messages per batch (reduced from 20)
+#define SD_REPLAY_WAIT_FOR_ACK_MS 1000            // Wait time for MQTT ACK before continuing
+
 // OTA Configuration
 #define OTA_RECV_TIMEOUT_MS 30000         // HTTP receive timeout (30s for slow CDN)
 #define OTA_BUF_SIZE 4096                 // Download buffer size

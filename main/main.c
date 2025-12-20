@@ -107,6 +107,11 @@ static int64_t last_heartbeat_time = 0;             // For SD card heartbeat log
 static uint32_t telemetry_failure_count = 0;        // Track consecutive failures
 static uint32_t system_restart_count = 0;           // Loaded from NVS on boot
 
+// SD card replay control - prevents overwhelming Azure IoT Hub
+static volatile bool sd_replay_should_stop = false;    // Flag to stop replay on MQTT disconnect
+static volatile uint32_t sd_replay_messages_sent = 0;  // Messages sent in current batch
+static volatile uint32_t sd_replay_last_msg_id = 0;    // Track last message ID being replayed
+
 // Static buffers to avoid stack overflow
 static char mqtt_broker_uri[256];
 static char mqtt_username[256];
@@ -474,6 +479,94 @@ static void check_ntp_resync(void) {
     }
 }
 
+// Apply sensor type presets - auto-configure register addresses and settings based on sensor_type
+// This allows users to add sensors with minimal configuration (just name, unit_id, slave_id, sensor_type)
+static void apply_sensor_type_presets(sensor_config_t* sensor) {
+    if (!sensor || strlen(sensor->sensor_type) == 0) {
+        return;
+    }
+
+    // Only apply register_address preset if not explicitly set (still at default 0)
+    bool apply_register = (sensor->register_address == 0);
+
+    ESP_LOGI(TAG, "[PRESET] Checking presets for sensor_type: %s (apply_register=%d)",
+             sensor->sensor_type, apply_register);
+
+    // ZEST (AquaGen Flow Meter)
+    // Register 4121 (0x1019), 4 registers, UINT16 integer + FLOAT32 decimal
+    if (strcmp(sensor->sensor_type, "ZEST") == 0) {
+        if (apply_register) sensor->register_address = 4121;
+        sensor->quantity = 4;
+        ESP_LOGI(TAG, "[PRESET] Applied ZEST preset: reg=%d, qty=%d",
+                 sensor->register_address, sensor->quantity);
+    }
+    // Panda EMF (Electromagnetic Flow Meter)
+    // Register 4114 (0x1012), 4 registers, INT32 integer + FLOAT32 decimal
+    else if (strcmp(sensor->sensor_type, "Panda_EMF") == 0) {
+        if (apply_register) sensor->register_address = 4114;
+        sensor->quantity = 4;
+        ESP_LOGI(TAG, "[PRESET] Applied Panda_EMF preset: reg=%d, qty=%d",
+                 sensor->register_address, sensor->quantity);
+    }
+    // Panda USM (Ultrasonic Flow Meter)
+    // Register 8, 4 registers, FLOAT64 (64-bit double)
+    else if (strcmp(sensor->sensor_type, "Panda_USM") == 0) {
+        if (apply_register) sensor->register_address = 8;
+        sensor->quantity = 4;
+        ESP_LOGI(TAG, "[PRESET] Applied Panda_USM preset: reg=%d, qty=%d",
+                 sensor->register_address, sensor->quantity);
+    }
+    // Panda Level (Water Level Sensor)
+    // Register 1, 1 register, UINT16
+    else if (strcmp(sensor->sensor_type, "Panda_Level") == 0) {
+        if (apply_register) sensor->register_address = 1;
+        sensor->quantity = 1;
+        strncpy(sensor->data_type, "UINT16", sizeof(sensor->data_type) - 1);
+        ESP_LOGI(TAG, "[PRESET] Applied Panda_Level preset: reg=%d, qty=%d, data_type=%s",
+                 sensor->register_address, sensor->quantity, sensor->data_type);
+    }
+    // Dailian EMF (Electromagnetic Flow Meter)
+    // Register 2006 (0x07D6), 2 registers, UINT32 word-swapped totaliser
+    else if (strcmp(sensor->sensor_type, "Dailian_EMF") == 0) {
+        if (apply_register) sensor->register_address = 2006;
+        sensor->quantity = 2;
+        ESP_LOGI(TAG, "[PRESET] Applied Dailian_EMF preset: reg=%d, qty=%d",
+                 sensor->register_address, sensor->quantity);
+    }
+    // Clampon (Clamp-on Flow Meter)
+    // 4 registers, UINT32_BADC + FLOAT32_BADC (register address varies by installation)
+    else if (strcmp(sensor->sensor_type, "Clampon") == 0) {
+        sensor->quantity = 4;
+        ESP_LOGI(TAG, "[PRESET] Applied Clampon preset: qty=%d (register must be specified)",
+                 sensor->quantity);
+    }
+    // Flow-Meter (Generic Flow Meter)
+    // 4 registers, UINT32_BADC + FLOAT32_BADC (register address varies)
+    else if (strcmp(sensor->sensor_type, "Flow-Meter") == 0) {
+        sensor->quantity = 4;
+        ESP_LOGI(TAG, "[PRESET] Applied Flow-Meter preset: qty=%d (register must be specified)",
+                 sensor->quantity);
+    }
+    // Radar Level sensor
+    else if (strcmp(sensor->sensor_type, "Radar Level") == 0 ||
+             strcmp(sensor->sensor_type, "Level") == 0) {
+        sensor->quantity = 2;
+        strncpy(sensor->data_type, "FLOAT32", sizeof(sensor->data_type) - 1);
+        ESP_LOGI(TAG, "[PRESET] Applied Level preset: qty=%d, data_type=%s",
+                 sensor->quantity, sensor->data_type);
+    }
+    // Piezometer (Water Level)
+    else if (strcmp(sensor->sensor_type, "Piezometer") == 0) {
+        sensor->quantity = 2;
+        strncpy(sensor->data_type, "FLOAT32", sizeof(sensor->data_type) - 1);
+        ESP_LOGI(TAG, "[PRESET] Applied Piezometer preset: qty=%d, data_type=%s",
+                 sensor->quantity, sensor->data_type);
+    }
+    else {
+        ESP_LOGW(TAG, "[PRESET] No preset found for sensor_type: %s", sensor->sensor_type);
+    }
+}
+
 // URL encode function
 static void url_encode(const char* input, char* output, size_t output_size) {
     static const char hex[] = "0123456789ABCDEF";
@@ -743,14 +836,32 @@ void mqtt_restart_after_ota(void) {
 }
 
 // Callback function for replaying cached SD card messages to MQTT
+// Uses rate limiting from iot_configs.h to prevent Azure IoT Hub from disconnecting
 static void replay_message_callback(const pending_message_t* msg) {
     if (!msg || !mqtt_client) {
         ESP_LOGE(TAG, "[SD] Invalid message or MQTT client not initialized");
+        sd_replay_should_stop = true;
         return;
     }
 
+    // Check if we should stop (MQTT disconnected during previous message)
+    if (sd_replay_should_stop) {
+        ESP_LOGW(TAG, "[SD] Replay stopped - MQTT connection lost");
+        return;
+    }
+
+    // Check MQTT connection before each message (critical for rate limiting)
     if (!mqtt_connected) {
         ESP_LOGW(TAG, "[SD] Cannot replay message %lu - MQTT not connected", msg->message_id);
+        sd_replay_should_stop = true;  // Signal to stop further attempts
+        return;
+    }
+
+    // Check if we've hit the batch limit
+    if (sd_replay_messages_sent >= SD_REPLAY_MAX_MESSAGES_PER_BATCH) {
+        ESP_LOGI(TAG, "[SD] Batch limit reached (%d messages) - pausing for next batch",
+                 SD_REPLAY_MAX_MESSAGES_PER_BATCH);
+        sd_replay_should_stop = true;
         return;
     }
 
@@ -759,22 +870,49 @@ static void replay_message_callback(const pending_message_t* msg) {
     ESP_LOGI(TAG, "[SD]    Timestamp: %s", msg->timestamp);
     ESP_LOGI(TAG, "[SD]    Payload: %.100s%s", msg->payload, strlen(msg->payload) > 100 ? "..." : "");
 
-    int msg_id = esp_mqtt_client_publish(mqtt_client, msg->topic, msg->payload, 0, 1, 0);
-    if (msg_id == -1) {
-        ESP_LOGE(TAG, "[SD] ❌ Failed to publish replayed message %lu", msg->message_id);
-    } else {
-        ESP_LOGI(TAG, "[SD] ✅ Successfully published replayed message %lu (MQTT msg_id: %d)",
-                 msg->message_id, msg_id);
+    // Track this message in case we need to stop mid-send
+    sd_replay_last_msg_id = msg->message_id;
 
-        // Remove the message from SD card after successful publish
-        esp_err_t ret = sd_card_remove_message(msg->message_id);
-        if (ret != ESP_OK) {
-            ESP_LOGW(TAG, "[SD] Failed to remove replayed message %lu from SD card", msg->message_id);
-        }
+    // Publish with QoS 0 for replay - faster and we still have the message on SD if it fails
+    // QoS 1 was causing Azure IoT Hub to close connection due to unacknowledged messages
+    int msg_id = esp_mqtt_client_publish(mqtt_client, msg->topic, msg->payload, 0, 0, 0);
+    if (msg_id == -1) {
+        ESP_LOGE(TAG, "[SD] ❌ Failed to publish replayed message %lu - stopping replay", msg->message_id);
+        sd_replay_should_stop = true;  // Stop on publish failure
+        return;
     }
 
-    // Small delay between replayed messages to avoid overwhelming MQTT broker
-    vTaskDelay(pdMS_TO_TICKS(100));
+    ESP_LOGI(TAG, "[SD] ✅ Successfully published replayed message %lu (MQTT msg_id: %d)",
+             msg->message_id, msg_id);
+    sd_replay_messages_sent++;
+
+    // Wait for MQTT to process the message before removing from SD
+    // This prevents losing messages if connection drops immediately after publish
+    vTaskDelay(pdMS_TO_TICKS(SD_REPLAY_WAIT_FOR_ACK_MS));
+
+    // Double-check connection is still alive after the wait
+    if (!mqtt_connected) {
+        ESP_LOGW(TAG, "[SD] MQTT disconnected after publish - NOT removing message %lu from SD",
+                 msg->message_id);
+        sd_replay_should_stop = true;
+        return;  // Keep message on SD for retry
+    }
+
+    // Remove the message from SD card after successful publish and connection confirmed
+    esp_err_t ret = sd_card_remove_message(msg->message_id);
+    if (ret != ESP_OK) {
+        ESP_LOGW(TAG, "[SD] Failed to remove replayed message %lu from SD card", msg->message_id);
+    }
+
+    // Rate limiting delay between messages to prevent Azure IoT Hub throttling
+    // Azure has limits on messages per second - 500ms minimum recommended
+    vTaskDelay(pdMS_TO_TICKS(SD_REPLAY_DELAY_BETWEEN_MESSAGES_MS));
+
+    // Final connection check after delay
+    if (!mqtt_connected) {
+        ESP_LOGW(TAG, "[SD] MQTT disconnected during replay delay - stopping");
+        sd_replay_should_stop = true;
+    }
 }
 
 // Log heartbeat to SD card for post-mortem debugging
@@ -1197,6 +1335,10 @@ static void mqtt_event_handler(void *handler_args, esp_event_base_t base, int32_
                                             strncpy(cfg->sensors[idx].description, item->valuestring, 63);
                                         if ((item = cJSON_GetObjectItem(sensor, "enabled")))
                                             cfg->sensors[idx].enabled = cJSON_IsTrue(item);
+
+                                        // Apply sensor type presets (auto-configures register address, quantity, etc.)
+                                        // Presets only apply to values not explicitly set in JSON
+                                        apply_sensor_type_presets(&cfg->sensors[idx]);
 
                                         cfg->sensor_count++;
                                         config_save_to_nvs(cfg);
@@ -1936,7 +2078,7 @@ static void create_telemetry_payload(char* payload, size_t payload_size) {
 
         // Check if batch mode is enabled (send all sensors in single JSON)
         if (config->batch_telemetry) {
-            ESP_LOGI(TAG, "[BATCH] Building batched JSON for all sensors");
+            ESP_LOGI(TAG, "[BATCH] Sending sensors with simple flat JSON format");
 
             // Get current timestamp for all sensors
             time_t now;
@@ -1946,10 +2088,8 @@ static void create_telemetry_payload(char* payload, size_t payload_size) {
             gmtime_r(&now, &timeinfo);
             strftime(timestamp, sizeof(timestamp), "%Y-%m-%dT%H:%M:%SZ", &timeinfo);
 
-            // Start building the batched JSON: {"body":[
-            payload_pos = snprintf(payload, payload_size, "{\"body\":[");
-
-            char* last_unit_id = NULL;
+            // Send each sensor as a separate flat JSON message
+            // Format: {"unit_id":"ZEST001","type":"FLOW","consumption":"50.000","created_on":"2025-12-20T07:11:16Z"}
             for (int i = 0; i < actual_count; i++) {
                 if (readings[i].valid) {
                     // Find the matching sensor config by unit_id
@@ -1966,19 +2106,20 @@ static void create_telemetry_payload(char* payload, size_t payload_size) {
                         continue;
                     }
 
-                    // Add comma separator if not first entry
-                    if (valid_sensors > 0) {
-                        payload_pos += snprintf(payload + payload_pos, payload_size - payload_pos, ",");
-                    }
-
                     // Determine value key and type based on sensor type
                     const char* value_key = "value";
                     const char* type_value = "SENSOR";
                     if (strcasecmp(matching_sensor->sensor_type, "Level") == 0 ||
-                        strcasecmp(matching_sensor->sensor_type, "Radar Level") == 0) {
+                        strcasecmp(matching_sensor->sensor_type, "Radar Level") == 0 ||
+                        strcasecmp(matching_sensor->sensor_type, "Panda_Level") == 0) {
                         value_key = "level_filled";
                         type_value = "LEVEL";
-                    } else if (strcasecmp(matching_sensor->sensor_type, "Flow-Meter") == 0) {
+                    } else if (strcasecmp(matching_sensor->sensor_type, "Flow-Meter") == 0 ||
+                               strcasecmp(matching_sensor->sensor_type, "ZEST") == 0 ||
+                               strcasecmp(matching_sensor->sensor_type, "Panda_EMF") == 0 ||
+                               strcasecmp(matching_sensor->sensor_type, "Panda_USM") == 0 ||
+                               strcasecmp(matching_sensor->sensor_type, "Dailian_EMF") == 0 ||
+                               strcasecmp(matching_sensor->sensor_type, "Clampon") == 0) {
                         value_key = "consumption";
                         type_value = "FLOW";
                     } else if (strcasecmp(matching_sensor->sensor_type, "RAINGAUGE") == 0) {
@@ -1995,53 +2136,44 @@ static void create_telemetry_payload(char* payload, size_t payload_size) {
                         type_value = "QUALITY";
                     }
 
-                    // Add sensor entry to body array
-                    // Format: {"consumption":3220.3,"type":"FLOW","created_on":"2025-12-12T18:19:01Z","unit_id":"FG23451F"}
-                    payload_pos += snprintf(payload + payload_pos, payload_size - payload_pos,
-                        "{\"%s\":%.3f,\"type\":\"%s\",\"created_on\":\"%s\",\"unit_id\":\"%s\"}",
-                        value_key, readings[i].value, type_value, timestamp, matching_sensor->unit_id);
+                    // Build simple flat JSON format
+                    // Format: {"unit_id":"ZEST001","type":"FLOW","consumption":"50.000","created_on":"2025-12-20T07:11:16Z"}
+                    char sensor_payload[512];
+                    snprintf(sensor_payload, sizeof(sensor_payload),
+                        "{\"unit_id\":\"%s\",\"type\":\"%s\",\"%s\":\"%.3f\",\"created_on\":\"%s\"}",
+                        matching_sensor->unit_id, type_value, value_key, readings[i].value, timestamp);
 
-                    last_unit_id = matching_sensor->unit_id;
-                    valid_sensors++;
+                    // Send via MQTT if connected
+                    if (mqtt_connected && mqtt_client != NULL) {
+                        char sensor_topic[256];
+                        snprintf(sensor_topic, sizeof(sensor_topic),
+                                 "devices/%s/messages/events/", config->azure_device_id);
 
-                    ESP_LOGI(TAG, "[BATCH] Added sensor %d: %s = %.3f",
-                             valid_sensors, matching_sensor->unit_id, readings[i].value);
+                        int msg_id = esp_mqtt_client_publish(
+                            mqtt_client,
+                            sensor_topic,
+                            sensor_payload,
+                            strlen(sensor_payload),
+                            0,  // QoS 0
+                            0   // No retain
+                        );
+
+                        if (msg_id >= 0) {
+                            valid_sensors++;
+                            ESP_LOGI(TAG, "[MQTT] Sent sensor %s: %s (msg_id=%d)",
+                                     matching_sensor->unit_id, sensor_payload, msg_id);
+                        } else {
+                            ESP_LOGW(TAG, "[WARN] Failed to publish sensor %s", matching_sensor->unit_id);
+                        }
+                    }
+
+                    // Store last payload for logging
+                    strncpy(payload, sensor_payload, payload_size - 1);
+                    payload[payload_size - 1] = '\0';
                 }
             }
 
-            // Close body array and add properties
-            payload_pos += snprintf(payload + payload_pos, payload_size - payload_pos,
-                "],\"properties\":{\"unit_id\":\"%s\",\"flow_factor\":\"$twin.tags.flow_factor\","
-                "\"max_capacity\":\"$twin.tags.max_capacity\",\"industry_id\":\"$twin.tags.industry_id\","
-                "\"category_id\":\"$twin.tags.category_id\",\"shifttime\":\"$twin.tags.shifttime\","
-                "\"unit_threshold\":\"$twin.tags.unit_threshold\"}}",
-                last_unit_id ? last_unit_id : config->azure_device_id);
-
-            // Send the batched JSON as a single MQTT message
-            if (valid_sensors > 0 && mqtt_connected && mqtt_client != NULL) {
-                char sensor_topic[256];
-                snprintf(sensor_topic, sizeof(sensor_topic),
-                         "devices/%s/messages/events/", config->azure_device_id);
-
-                int msg_id = esp_mqtt_client_publish(
-                    mqtt_client,
-                    sensor_topic,
-                    payload,
-                    strlen(payload),
-                    0,  // QoS 0
-                    0   // No retain
-                );
-
-                if (msg_id >= 0) {
-                    ESP_LOGI(TAG, "[MQTT] Sent batched telemetry with %d sensors (msg_id=%d, size=%d bytes)",
-                             valid_sensors, msg_id, strlen(payload));
-                } else {
-                    ESP_LOGW(TAG, "[WARN] Failed to publish batched telemetry");
-                    valid_sensors = 0;  // Mark as not sent
-                }
-            }
-
-            ESP_LOGI(TAG, "[OK] Batched telemetry: %d sensors in single message", valid_sensors);
+            ESP_LOGI(TAG, "[OK] Sent %d sensors with flat JSON format", valid_sensors);
         } else {
             // Individual mode: send each sensor as separate MQTT message (original behavior)
             ESP_LOGI(TAG, "[INDIVIDUAL] Sending sensors as separate messages");
@@ -3266,10 +3398,15 @@ skip_ota:       // Label for skipping OTA when memory is insufficient
                 calc->decimal_places = (decimals && cJSON_IsNumber(decimals)) ? decimals->valueint : 2;
             }
 
+            // Apply sensor type presets (auto-configures register address, quantity, etc.)
+            // This sets ZEST sensors to register 4121, quantity 4, etc.
+            // Presets only apply to values not explicitly set in JSON
+            apply_sensor_type_presets(sensor);
+
             config->sensor_count++;
-            ESP_LOGI(TAG, "[TWIN] Sensor %d configured: %s (slave=%d, reg=%d, type=%s)",
+            ESP_LOGI(TAG, "[TWIN] Sensor %d configured: %s (slave=%d, reg=%d, type=%s, sensor_type=%s)",
                      config->sensor_count, sensor->name, sensor->slave_id,
-                     sensor->register_address, sensor->data_type);
+                     sensor->register_address, sensor->data_type, sensor->sensor_type);
         }
 
         config_changed = true;
@@ -3819,6 +3956,7 @@ static bool send_telemetry(void) {
     // IMPORTANT: Replay ALL cached offline messages FIRST before sending live data
     // This ensures chronological order - older cached data must be sent before newer live data
     // Otherwise cloud analytics will use live data as reference and cached data becomes useless
+    // Uses rate limiting from iot_configs.h to prevent Azure IoT Hub throttling/disconnection
     if (config->sd_config.enabled) {
         uint32_t pending_count = 0;
         sd_card_get_pending_count(&pending_count);
@@ -3826,14 +3964,28 @@ static bool send_telemetry(void) {
         if (pending_count > 0) {
             uint32_t total_cached = pending_count;
             ESP_LOGI(TAG, "[SD] 📤 Found %lu cached messages - sending ALL before live data", total_cached);
+            ESP_LOGI(TAG, "[SD] 📊 Rate limiting: %dms between messages, %d per batch, %dms between batches",
+                     SD_REPLAY_DELAY_BETWEEN_MESSAGES_MS, SD_REPLAY_MAX_MESSAGES_PER_BATCH,
+                     SD_REPLAY_DELAY_BETWEEN_BATCHES_MS);
 
             // Keep replaying until ALL cached messages are sent
             uint32_t batches_sent = 0;
-            while (pending_count > 0) {
+            while (pending_count > 0 && mqtt_connected) {
                 batches_sent++;
                 ESP_LOGI(TAG, "[SD] 📤 Sending batch %lu... (%lu messages remaining)", batches_sent, pending_count);
 
+                // Reset replay control variables for this batch
+                sd_replay_should_stop = false;
+                sd_replay_messages_sent = 0;
+                sd_replay_last_msg_id = 0;
+
                 esp_err_t replay_ret = sd_card_replay_messages(replay_message_callback);
+
+                // Check if MQTT disconnected during replay
+                if (sd_replay_should_stop && !mqtt_connected) {
+                    ESP_LOGW(TAG, "[SD] ⚠️ MQTT disconnected during replay - will retry when connection restored");
+                    break;  // Exit loop, retry on next telemetry cycle
+                }
 
                 if (replay_ret != ESP_OK) {
                     ESP_LOGW(TAG, "[SD] ⚠️ Batch replay failed: %s - will retry on next telemetry cycle", esp_err_to_name(replay_ret));
@@ -3850,20 +4002,34 @@ static bool send_telemetry(void) {
                     break;
                 }
 
-                // Small delay between batches to avoid overwhelming MQTT broker
-                if (pending_count > 0) {
-                    vTaskDelay(pdMS_TO_TICKS(1000));  // 1 second between batches
+                ESP_LOGI(TAG, "[SD] ✅ Batch %lu complete: sent %lu messages, %lu remaining",
+                         batches_sent, sd_replay_messages_sent, pending_count);
+
+                // Delay between batches to let Azure IoT Hub recover (uses config value)
+                if (pending_count > 0 && mqtt_connected) {
+                    ESP_LOGI(TAG, "[SD] ⏳ Waiting %dms before next batch...", SD_REPLAY_DELAY_BETWEEN_BATCHES_MS);
+                    vTaskDelay(pdMS_TO_TICKS(SD_REPLAY_DELAY_BETWEEN_BATCHES_MS));
+
+                    // Check connection again after delay
+                    if (!mqtt_connected) {
+                        ESP_LOGW(TAG, "[SD] ⚠️ MQTT disconnected during batch delay - will retry later");
+                        break;
+                    }
                 }
             }
 
             if (pending_count == 0) {
                 ESP_LOGI(TAG, "[SD] ✅ ALL %lu cached messages sent in %lu batches - now sending live data", total_cached, batches_sent);
+            } else if (!mqtt_connected) {
+                ESP_LOGW(TAG, "[SD] ⚠️ %lu messages still pending (MQTT disconnected) - will continue when connected", pending_count);
             } else {
                 ESP_LOGW(TAG, "[SD] ⚠️ %lu messages still pending - will continue on next cycle", pending_count);
             }
 
-            // Delay before sending live data
-            vTaskDelay(pdMS_TO_TICKS(500));
+            // Delay before sending live data (let connection stabilize)
+            if (mqtt_connected) {
+                vTaskDelay(pdMS_TO_TICKS(1000));
+            }
         }
     }
 
