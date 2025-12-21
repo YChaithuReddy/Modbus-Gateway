@@ -208,7 +208,37 @@ The system automatically detects and removes:
 | **Power loss** | N/A | RTC preserves time, SD has FSYNC | Minimal data loss |
 | **OTA failure** | Report to Azure | Manual retry via Twin | No data impact |
 
-### 6.2 Network Offline Scenario
+### 6.2 Important: ESP32 Does NOT Restart on Network/MQTT Failures
+
+**This is a key design decision for production reliability:**
+
+| Scenario | Does ESP32 Restart? | What Happens Instead |
+|----------|---------------------|----------------------|
+| **Network goes offline** | ❌ NO | Continues running, caches all telemetry to SD card |
+| **MQTT disconnects** | ❌ NO | Continues running, caches all telemetry to SD card |
+| **MQTT reconnection fails** | ❌ NO | Keeps trying, data continues to cache |
+| **20+ MQTT failures** | ❌ NO | Logs error, continues caching (no restart) |
+| **SAS token expires** | ❌ NO | Refreshes token automatically |
+
+**Why No Restart?**
+
+The configuration `SYSTEM_RESTART_ON_CRITICAL_ERROR` is set to `false` in `iot_configs.h`. This means:
+
+1. **Network offline for hours/days** → ESP32 keeps running, caching data
+2. **MQTT disconnects repeatedly** → ESP32 keeps running, auto-reconnects
+3. **No data is lost** → Everything is stored on SD card
+4. **When connection returns** → All cached data is replayed automatically
+
+**The only scenarios that cause restart:**
+- Watchdog timeout (main loop stuck for 2+ minutes)
+- No successful telemetry for 30 minutes (TELEMETRY_TIMEOUT_SEC)
+- Power loss (obviously)
+- Manual restart via Device Twin (`reboot: true`)
+- Critical hardware failure
+
+---
+
+### 6.3 Network Offline Scenario (Detailed Timeline)
 
 ```
 Timeline:
@@ -229,7 +259,40 @@ T=12min: Network reconnects
          └─> Live telemetry resumes
 ```
 
-### 6.3 SD Card Replay During MQTT Disconnect
+### 6.4 MQTT Disconnect Scenario (Detailed Timeline)
+
+```
+Timeline:
+─────────────────────────────────────────────────────────────>
+
+T=0:    MQTT disconnects (network still connected)
+        └─> mqtt_connected = false
+        └─> Auto-reconnect starts immediately
+        └─> ESP32 DOES NOT RESTART
+
+T=0-30s: MQTT library attempts reconnection
+         └─> If successful: Resume normal operation
+         └─> If failed: Keep trying
+
+T=5min: Telemetry interval triggered
+        └─> Check: Is MQTT connected? NO
+        └─> Data cached to SD card
+        └─> ESP32 continues running normally
+
+T=10min: Still disconnected
+         └─> More data cached to SD card
+         └─> Reconnection attempts continue
+         └─> ESP32 STILL DOES NOT RESTART
+
+T=15min: MQTT reconnects successfully
+         └─> Replay all cached messages (with rate limiting)
+         └─> Resume live telemetry
+         └─> ESP32 never restarted during this entire period
+```
+
+**Key Point:** Even after 20+ failed reconnection attempts, the ESP32 will NOT restart. It will log an error and continue caching data until the connection is restored.
+
+### 6.5 SD Card Replay During MQTT Disconnect
 
 **Problem Solved:** Previously, rapid message sending caused Azure IoT Hub to disconnect.
 
