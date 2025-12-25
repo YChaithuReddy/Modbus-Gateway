@@ -455,9 +455,9 @@ I (45678) AZURE_IOT: [SEND] Published to Azure IoT Hub
 **Free tier = 8,000 messages/day**
 
 If you have:
-- 10 sensors
+- 15 sensors
 - Sending every 60 seconds
-- = 10 sensors × 1,440 readings/day = 14,400 messages/day ❌ (exceeds free tier)
+- = 15 sensors × 1,440 readings/day = 21,600 messages/day ❌ (exceeds free tier)
 
 **Solution:**
 - Increase interval to 120 seconds (7,200 messages/day ✅)

@@ -192,7 +192,7 @@ Get current device configuration
 ### Sensor Management
 
 #### `add_sensor`
-Add a new sensor (max 10 sensors)
+Add a new sensor (max 15 sensors)
 ```json
 {
   "command": "add_sensor",
@@ -387,7 +387,7 @@ az iot hub device-twin show \
 2. **Rollback**: If new firmware fails to boot 3 times, device automatically rolls back
 3. **GitHub OTA**: Supports GitHub release URLs with redirect handling
 4. **Memory**: Monitor `free_heap` in reported properties - should stay above 30KB
-5. **Sensor Limit**: Maximum 10 sensors can be configured
+5. **Sensor Limit**: Maximum 15 sensors can be configured
 6. **Telemetry Interval**: Minimum 30 seconds to prevent MQTT flooding
 
 ---
