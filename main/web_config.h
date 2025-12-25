@@ -201,7 +201,7 @@ typedef struct {
     int telemetry_interval;    // in seconds
 
     // Sensor configuration
-    sensor_config_t sensors[10]; // Reduced from 20 to 10 to save ~15KB RAM
+    sensor_config_t sensors[15]; // Supports up to 15 sensors
     int sensor_count;
 
     // Optional features

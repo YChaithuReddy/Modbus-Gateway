@@ -128,7 +128,7 @@ static int device_twin_request_id = 0;
 
 // Static buffers for telemetry to prevent heap fragmentation
 // These replace malloc/free calls that were causing memory exhaustion
-static sensor_reading_t telemetry_readings[10];  // Reduced from 20 to match sensors[10]
+static sensor_reading_t telemetry_readings[15];  // Supports up to 15 sensors
 static char telemetry_temp_json[MAX_JSON_PAYLOAD_SIZE];  // Pre-allocated JSON buffer
 static int sensors_already_published = 0;  // Track sensors published in create_telemetry_payload
 
@@ -2062,7 +2062,7 @@ static void create_telemetry_payload(char* payload, size_t payload_size) {
     memset(temp_json, 0, sizeof(telemetry_temp_json));
 
     int actual_count = 0;
-    esp_err_t ret = sensor_read_all_configured(readings, 10, &actual_count);
+    esp_err_t ret = sensor_read_all_configured(readings, 15, &actual_count);
     
     if (ret == ESP_OK && actual_count > 0) {
         ESP_LOGI(TAG, "[FLOW] Creating merged JSON for %d sensors", actual_count);
