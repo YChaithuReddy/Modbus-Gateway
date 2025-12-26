@@ -4065,8 +4065,11 @@ static bool send_telemetry(void) {
                                         "{\"unit_id\":\"%s\",\"type\":\"%s\",\"%s\":\"%.3f\",\"created_on\":\"%s\"}",
                                         sensor->unit_id, type_value, value_key, live_readings[i].value, timestamp);
 
-                                    // Cache to SD card
-                                    esp_err_t cache_ret = sd_card_store_message(live_payload);
+                                    // Cache to SD card (same format as offline caching)
+                                    char cache_topic[256];
+                                    snprintf(cache_topic, sizeof(cache_topic),
+                                             "devices/%s/messages/events/", config->azure_device_id);
+                                    esp_err_t cache_ret = sd_card_save_message(cache_topic, live_payload, timestamp);
                                     if (cache_ret == ESP_OK) {
                                         live_readings_cached++;
                                         ESP_LOGI(TAG, "[SD] 💾 Cached live reading: %s = %.3f",
