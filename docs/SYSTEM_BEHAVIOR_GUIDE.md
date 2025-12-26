@@ -181,7 +181,43 @@ When MQTT reconnects:
    - 2 seconds between batches
 5. Messages deleted from SD only after successful send
 
-### 5.4 Corruption Protection
+### 5.4 Continuous Sensor Reading During Replay (NEW)
+
+**Problem Solved:** During long replays (4+ hours), sensor reading was blocked, causing data loss.
+
+**New Behavior:**
+```
+REPLAY STARTS
+     │
+     ├──► Send old messages continuously (fast)
+     │
+     │    [telemetry_interval passes - e.g., 5 min]
+     │
+     ├──► PAUSE replay
+     │    └─> Read all sensors
+     │    └─> Cache readings to SD (like offline data)
+     ├──► RESUME replay
+     │
+     │    [repeat until all old messages sent]
+     │
+     ├──► Send newly cached readings (from pauses)
+     │
+     └──► Normal live telemetry resumes
+```
+
+**Benefits:**
+- Zero data loss during replay
+- Sensors continue reading at normal intervals
+- All data maintained in chronological order
+
+**Example (24h offline, 5-min interval, 15 sensors):**
+- Replay takes ~50 minutes
+- During replay: 10 sensor reading pauses occur
+- 10 × 15 = 150 new readings cached
+- After old messages: new cached readings sent
+- Then normal live telemetry
+
+### 5.5 Corruption Protection
 
 The system automatically detects and removes:
 

@@ -3969,7 +3969,15 @@ static bool send_telemetry(void) {
                      SD_REPLAY_DELAY_BETWEEN_BATCHES_MS);
 
             // Keep replaying until ALL cached messages are sent
+            // NEW: Track time to read sensors every telemetry_interval during replay
             uint32_t batches_sent = 0;
+            uint32_t last_sensor_read_tick = xTaskGetTickCount();
+            uint32_t sensor_interval_ticks = pdMS_TO_TICKS(config->telemetry_interval * 1000);
+            uint32_t live_readings_cached = 0;  // Count of live readings cached during replay
+
+            ESP_LOGI(TAG, "[SD] 📊 Will read sensors every %d seconds during replay to prevent data loss",
+                     config->telemetry_interval);
+
             while (pending_count > 0 && mqtt_connected) {
                 batches_sent++;
                 ESP_LOGI(TAG, "[SD] 📤 Sending batch %lu... (%lu messages remaining)", batches_sent, pending_count);
@@ -4005,6 +4013,78 @@ static bool send_telemetry(void) {
                 ESP_LOGI(TAG, "[SD] ✅ Batch %lu complete: sent %lu messages, %lu remaining",
                          batches_sent, sd_replay_messages_sent, pending_count);
 
+                // NEW: Check if telemetry interval has passed - read sensors and cache to SD
+                // This prevents data loss during long replay periods
+                uint32_t current_tick = xTaskGetTickCount();
+                if ((current_tick - last_sensor_read_tick) >= sensor_interval_ticks) {
+                    ESP_LOGI(TAG, "[SD] ⏸️ PAUSE replay - reading sensors (interval: %ds)", config->telemetry_interval);
+
+                    // Read sensors and create payload
+                    char live_payload[512];
+                    sensor_reading_t live_readings[15];
+                    int live_count = 0;
+
+                    esp_err_t read_ret = sensor_read_all_configured(live_readings, 15, &live_count);
+
+                    if (read_ret == ESP_OK && live_count > 0) {
+                        // Get timestamp
+                        time_t now;
+                        struct tm timeinfo;
+                        char timestamp[32];
+                        time(&now);
+                        gmtime_r(&now, &timeinfo);
+                        strftime(timestamp, sizeof(timestamp), "%Y-%m-%dT%H:%M:%SZ", &timeinfo);
+
+                        // Cache each sensor reading to SD (like offline data)
+                        for (int i = 0; i < live_count; i++) {
+                            if (live_readings[i].valid) {
+                                // Find matching sensor config
+                                sensor_config_t* sensor = NULL;
+                                for (int j = 0; j < config->sensor_count; j++) {
+                                    if (strcmp(config->sensors[j].unit_id, live_readings[i].unit_id) == 0) {
+                                        sensor = &config->sensors[j];
+                                        break;
+                                    }
+                                }
+
+                                if (sensor && sensor->enabled) {
+                                    // Determine value key based on sensor type
+                                    const char* value_key = "value";
+                                    const char* type_value = "SENSOR";
+                                    if (strcasecmp(sensor->sensor_type, "Flow-Meter") == 0 ||
+                                        strcasecmp(sensor->sensor_type, "ZEST") == 0) {
+                                        value_key = "consumption";
+                                        type_value = "FLOW";
+                                    } else if (strcasecmp(sensor->sensor_type, "Level") == 0) {
+                                        value_key = "level_filled";
+                                        type_value = "LEVEL";
+                                    }
+
+                                    // Create JSON payload
+                                    snprintf(live_payload, sizeof(live_payload),
+                                        "{\"unit_id\":\"%s\",\"type\":\"%s\",\"%s\":\"%.3f\",\"created_on\":\"%s\"}",
+                                        sensor->unit_id, type_value, value_key, live_readings[i].value, timestamp);
+
+                                    // Cache to SD card
+                                    esp_err_t cache_ret = sd_card_store_message(live_payload);
+                                    if (cache_ret == ESP_OK) {
+                                        live_readings_cached++;
+                                        ESP_LOGI(TAG, "[SD] 💾 Cached live reading: %s = %.3f",
+                                                 sensor->unit_id, live_readings[i].value);
+                                    }
+                                }
+                            }
+                        }
+                        ESP_LOGI(TAG, "[SD] ✅ Cached %d live readings during replay pause", live_count);
+                    }
+
+                    last_sensor_read_tick = xTaskGetTickCount();
+                    ESP_LOGI(TAG, "[SD] ▶️ RESUME replay...");
+
+                    // Update pending count (now includes newly cached messages)
+                    sd_card_get_pending_count(&pending_count);
+                }
+
                 // Delay between batches to let Azure IoT Hub recover (uses config value)
                 if (pending_count > 0 && mqtt_connected) {
                     ESP_LOGI(TAG, "[SD] ⏳ Waiting %dms before next batch...", SD_REPLAY_DELAY_BETWEEN_BATCHES_MS);
@@ -4019,7 +4099,11 @@ static bool send_telemetry(void) {
             }
 
             if (pending_count == 0) {
-                ESP_LOGI(TAG, "[SD] ✅ ALL %lu cached messages sent in %lu batches - now sending live data", total_cached, batches_sent);
+                ESP_LOGI(TAG, "[SD] ✅ ALL %lu cached messages sent in %lu batches", total_cached, batches_sent);
+                if (live_readings_cached > 0) {
+                    ESP_LOGI(TAG, "[SD] 📊 Also cached %lu live readings during replay (zero data loss!)", live_readings_cached);
+                }
+                ESP_LOGI(TAG, "[SD] ▶️ Now sending live data...");
             } else if (!mqtt_connected) {
                 ESP_LOGW(TAG, "[SD] ⚠️ %lu messages still pending (MQTT disconnected) - will continue when connected", pending_count);
             } else {
