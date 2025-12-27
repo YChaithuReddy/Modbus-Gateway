@@ -1,15 +1,34 @@
-# ESP32 Modbus IoT System - Version 1.0.0
+# ESP32 Modbus IoT System - Version 1.3.6
 
 ## Version Information
-- **Version**: 1.0.0 (Production Ready)
+- **Version**: 1.3.6 (Production Ready)
 - **Release Date**: December 2024
-- **Build Target**: ESP32 ESP-IDF v5.4
+- **Build Target**: ESP32 ESP-IDF v5.5.1
 - **Product Name**: Fluxgen Modbus IoT Gateway
 - **Company**: Fluxgen Industrial IoT Solutions
 
 ## Version History
 
-### Version 1.0.0 - Production Release (Current)
+### Version 1.3.6 - OTA & Device Twin Fixes (Current)
+**Release Date**: December 2024
+
+**OTA Updates:**
+- ✅ **OTA from GitHub Releases** - Full support for GitHub-hosted firmware
+- ✅ **Fixed heap exhaustion** - Stop MQTT before OTA to free memory
+- ✅ **Fixed certificate issues** - Skip verification for GitHub CDN
+- ✅ **Fixed version reporting** - Device Twin shows correct firmware version
+- ✅ **Continuous sensor reading during replay** - No data loss during recovery
+
+### Version 1.2.0 - Autonomous Recovery Release
+**Release Date**: December 2024
+
+**Major Features:**
+- ✅ **SD Card offline caching** - Store data during network outages
+- ✅ **Automatic replay** - Send cached data chronologically when online
+- ✅ **Watchdog protection** - 2-minute timeout for stuck main loop
+- ✅ **WiFi dongle power cycling** - Auto-recovery with 5-min cooldown
+
+### Version 1.0.0 - Production Release
 **Release Date**: December 2024
 
 **Major Features:**

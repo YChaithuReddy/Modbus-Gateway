@@ -1,7 +1,7 @@
 # Fluxgen ESP32 Modbus IoT Gateway - Production Release
 
 [![Production Ready](https://img.shields.io/badge/Status-PRODUCTION-brightgreen.svg)](PRODUCTION_GUIDE.md)
-[![Version](https://img.shields.io/badge/Version-1.2.0-blue.svg)](VERSION.md)
+[![Version](https://img.shields.io/badge/Version-1.3.6-blue.svg)](VERSION.md)
 [![ESP-IDF](https://img.shields.io/badge/ESP--IDF-v5.5.1-orange.svg)](https://docs.espressif.com/projects/esp-idf/en/v5.5.1/)
 [![64-bit Support](https://img.shields.io/badge/64--bit-Complete-purple.svg)](#)
 [![License](https://img.shields.io/badge/License-Industrial-yellow.svg)](#)
@@ -261,7 +261,20 @@ modbus_iot_gateway/
 
 ## Version History
 
-### v1.2.0 (Current) - Production Autonomous Release
+### v1.3.6 (Current) - OTA & Device Twin Fixes
+**OTA Updates from GitHub:**
+- OTA firmware updates from GitHub releases now fully working
+- Fixed certificate verification issues on GitHub CDN
+- Fixed heap exhaustion during OTA (stop MQTT first)
+- Fixed long redirect URL crashes (923-byte Location headers)
+- Fixed Device Twin firmware version reporting
+
+**Continuous Sensor Reading:**
+- Sensors continue reading during SD card replay
+- No data loss during 4+ hour replay scenarios
+- Cached sensor data maintains chronological order
+
+### v1.2.0 - Production Autonomous Release
 **Autonomous Recovery Features:**
 - System no longer restarts on network errors (caches to SD instead)
 - Added 5-minute cooldown between WiFi dongle resets
@@ -377,6 +390,6 @@ modbus_iot_gateway/
 
 ---
 
-**Status: PRODUCTION READY v1.2.0**
+**Status: PRODUCTION READY v1.3.6**
 
-*Designed for unattended remote deployment with autonomous recovery capabilities.*
+*Designed for unattended remote deployment with autonomous recovery capabilities and OTA updates via GitHub.*

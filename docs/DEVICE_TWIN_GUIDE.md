@@ -701,29 +701,48 @@ The device will reboot after 3 seconds. This property auto-resets to `false`.
 
 ## OTA Firmware Updates
 
-Update device firmware remotely:
+Update device firmware remotely via Azure IoT Hub Device Twin.
+
+### Supported Firmware Hosts
+
+| Host | Support | Notes |
+|------|---------|-------|
+| **GitHub Releases** | ✅ Full | Certificate verification skipped for CDN |
+| **Azure Blob Storage** | ✅ Full | Uses certificate bundle |
+| **Custom HTTPS** | ✅ Full | Requires valid SSL certificate |
 
 ### Step 1: Host Firmware File
 
-Upload your `.bin` file to a publicly accessible HTTPS URL (e.g., GitHub Releases).
+**GitHub Releases (Recommended):**
+1. Create a release in your GitHub repository
+2. Upload the `.bin` file as a release asset
+3. Copy the download URL (e.g., `https://github.com/YourRepo/releases/download/v1.3.6/firmware.bin`)
 
 ### Step 2: Trigger Update
 
 ```json
 {
   "ota_enabled": true,
-  "ota_url": "https://github.com/YourRepo/releases/download/v1.1.0/firmware.bin"
+  "ota_url": "https://github.com/YourRepo/releases/download/v1.3.6/firmware.bin"
 }
 ```
 
 ### OTA Process
 
 1. Device receives new `ota_url`
-2. Stops web server to free memory (if running)
-3. Downloads firmware over HTTPS
-4. Validates and installs to OTA partition
-5. Reboots to new firmware
-6. If boot fails, automatically rolls back
+2. **Stops MQTT** to free memory (~30KB) for OTA TLS connection
+3. Stops web server to free additional memory (if running)
+4. Downloads firmware over HTTPS (handles GitHub CDN redirects automatically)
+5. Validates and installs to OTA partition
+6. Reboots to new firmware
+7. **Restarts MQTT** after OTA cleanup
+8. If boot fails, automatically rolls back
+
+### Memory Requirements
+
+- **Minimum Free Heap**: ~50KB before OTA starts
+- **During OTA**: MQTT stopped, freeing ~30KB for TLS connection
+- **Buffer Sizes**: 4KB receive, 1KB transmit (reduced to save memory)
 
 ### OTA Status in Reported Properties
 
@@ -738,6 +757,26 @@ Monitor progress via reported properties:
 | `success` | Update complete, rebooting |
 | `failed` | Update failed (see ota_error) |
 
+### Reported OTA Properties
+
+```json
+{
+  "reported": {
+    "firmware_version": "1.3.6",
+    "ota": {
+      "status": "idle",
+      "currentVersion": "1.3.6",
+      "newVersion": "",
+      "progress": 0,
+      "bytesDownloaded": 0,
+      "totalBytes": 0,
+      "errorMsg": "",
+      "isRollback": false
+    }
+  }
+}
+```
+
 ### Disable OTA
 
 To prevent accidental updates:
@@ -747,6 +786,15 @@ To prevent accidental updates:
   "ota_enabled": false
 }
 ```
+
+### Troubleshooting OTA
+
+| Issue | Solution |
+|-------|----------|
+| "Heap exhaustion" | Ensure MQTT stops before OTA (automatic in v1.3.4+) |
+| "Certificate error" | GitHub URLs automatically skip cert verification |
+| "Download timeout" | Check network connectivity, increase timeout |
+| "Redirect failed" | GitHub redirects handled automatically in v1.3.5+ |
 
 ---
 

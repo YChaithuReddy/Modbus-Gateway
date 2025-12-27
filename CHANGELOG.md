@@ -1,5 +1,46 @@
 # ESP32 Modbus IoT Gateway - Changelog
 
+## Version 1.3.6 - OTA & Device Twin Fixes (December 2024)
+
+### 🔧 **OTA Updates from GitHub Now Working**
+
+#### **Fixed Critical OTA Issues**
+- **[CRITICAL FIX]** OTA updates from GitHub releases now work reliably
+  - **Root Cause**: Multiple issues - certificate verification, heap exhaustion, long redirect URLs
+  - **Solution**: Multi-version iterative fixes (v1.3.1 through v1.3.6)
+
+#### **OTA Fixes by Version**
+
+| Version | Issue | Fix |
+|---------|-------|-----|
+| v1.3.1 | Certificate verification failed on GitHub CDN | Skip cert verification for GitHub URLs |
+| v1.3.3 | 923-byte redirect URL crashed HTTP client | Added redirect handling configuration |
+| v1.3.4 | Heap exhaustion (52 bytes min free) | Stop MQTT before OTA, reduce buffer sizes |
+| v1.3.5 | Auto-redirect doesn't work with streaming API | Re-enabled event handler for manual redirects |
+| v1.3.6 | Device Twin showed wrong firmware version | Changed hardcoded "1.0.0" to FW_VERSION_STRING |
+
+#### **Technical Changes**
+- **Stop MQTT before OTA** - Frees ~30KB heap for OTA TLS connection (both WiFi and SIM modes)
+- **Reduced HTTP buffer sizes** - 4KB/1KB instead of 16KB/4KB to save memory
+- **Skip certificate verification for GitHub** - GitHub CDN certificates cause issues on ESP32
+- **Fixed firmware version reporting** - Device Twin now shows actual version from `iot_configs.h`
+- **MQTT restart after OTA** - Automatically restarts MQTT after OTA cleanup
+
+#### **Files Modified**
+- `main/ota_update.c` - OTA download logic improvements
+- `main/main.c` - Fixed hardcoded firmware version in Device Twin
+- `main/iot_configs.h` - Version bumped to 1.3.6
+
+### 🌐 **Continuous Sensor Reading During SD Replay**
+
+#### **Fixed Data Loss During Replay**
+- **[CRITICAL FIX]** Sensors now continue reading during SD card replay
+  - **Problem**: During 4+ hour replay, sensor data was lost
+  - **Solution**: Pause replay every 5 minutes to read sensors and cache to SD
+  - **Impact**: Zero data loss during network recovery
+
+---
+
 ## Version 1.1.0-final - Recent Updates
 
 ### 🔧 **RS485 Testing System Enhancements** - 2025-01-XX

@@ -1,7 +1,7 @@
 # CLAUDE.md - ESP32 Modbus IoT Gateway Project Context
 
 ## Project Overview
-**ESP32 Modbus IoT Gateway v1.0.0** - A production-ready industrial IoT gateway for RS485 Modbus communication with Azure IoT Hub integration.
+**ESP32 Modbus IoT Gateway v1.3.6** - A production-ready industrial IoT gateway for RS485 Modbus communication with Azure IoT Hub integration.
 
 ## ⚠️ CRITICAL WARNINGS - MUST READ
 
@@ -72,6 +72,28 @@ if (sta_netif == NULL) {
 - Set `MAX_MQTT_RECONNECT_ATTEMPTS` to 10
 - Set `SYSTEM_RESTART_ON_CRITICAL_ERROR` to false
 - Added exponential backoff for reconnection
+
+### Issue #6: OTA from GitHub Fails (v1.3.1-v1.3.6)
+**Problem**: OTA firmware updates from GitHub releases failed with multiple errors
+**Root Causes** (fixed incrementally):
+1. Certificate verification failed on GitHub CDN
+2. Heap exhaustion (52 bytes min free) with two TLS connections (MQTT + OTA)
+3. Long redirect URLs (923 bytes) crashed HTTP client
+4. Auto-redirect doesn't work with ESP-IDF streaming API
+5. Device Twin showed hardcoded "1.0.0" instead of actual version
+**Solution**:
+- Skip certificate verification for GitHub URLs (CDN certs problematic)
+- Stop MQTT before OTA to free ~30KB heap
+- Reduce HTTP buffer sizes (4KB/1KB instead of 16KB/4KB)
+- Use manual redirect handling with event handler
+- Use `FW_VERSION_STRING` constant instead of hardcoded version
+**Files**: `main/ota_update.c`, `main/main.c:3457`
+
+### Issue #7: Data Loss During SD Card Replay
+**Problem**: During 4+ hour SD card replay, sensor readings were blocked
+**Root Cause**: Replay loop was blocking without reading sensors
+**Solution**: Pause replay every 5 minutes to read sensors and cache to SD
+**File**: `main/main.c` (replay loop with sensor reading)
 
 ## 📋 BEFORE EDITING CHECKLIST
 
@@ -205,6 +227,7 @@ See `docs/DEVICE_TWIN_GUIDE.md` for complete usage documentation.
 
 ---
 
-**Last Updated**: December 19, 2024
-**Last Known Working Commit**: d25131e
-**Recent Features Added**: Device Twin sensor configuration, SD card corruption auto-delete, offline data replay
+**Last Updated**: December 27, 2024
+**Last Known Working Commit**: 3c19a98
+**Current Version**: v1.3.6
+**Recent Features Added**: OTA from GitHub releases, continuous sensor reading during replay, fixed Device Twin version reporting
