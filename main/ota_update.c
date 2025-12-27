@@ -306,9 +306,14 @@ static void ota_download_task(void *pvParameter)
     // For SIM mode, it works over the PPP connection
     ESP_LOGI(TAG, "%s - Using ESP32 HTTP client", is_sim_mode ? "SIM Mode" : "WiFi Mode");
 
-    // Log memory for WiFi mode too
+    // CRITICAL: Stop MQTT for WiFi mode too - two TLS connections exhaust heap
+    // Min Free Heap was dropping to ~50 bytes causing TLS handshake failures
     if (!is_sim_mode) {
-        ESP_LOGI(TAG, "Free heap before WiFi OTA: %lu bytes", esp_get_free_heap_size());
+        extern void mqtt_stop_for_ota(void);
+        ESP_LOGI(TAG, "Stopping MQTT to free memory for OTA TLS connection...");
+        mqtt_stop_for_ota();
+        vTaskDelay(pdMS_TO_TICKS(1000));  // Give MQTT time to clean up
+        ESP_LOGI(TAG, "Free heap after stopping MQTT: %lu bytes", esp_get_free_heap_size());
     }
 
     esp_http_client_handle_t client = NULL;
@@ -354,7 +359,7 @@ static void ota_download_task(void *pvParameter)
         // Clear redirect location from previous iteration
         redirect_location[0] = '\0';
 
-        // Check if URL is from GitHub (for logging purposes)
+        // Check if URL is from GitHub or GitHub CDN (releases use CDN with different certificates)
         bool is_github_url = (strstr(current_url, "github.com") != NULL) ||
                              (strstr(current_url, "githubusercontent.com") != NULL) ||
                              (strstr(current_url, "github-releases") != NULL) ||
@@ -362,7 +367,7 @@ static void ota_download_task(void *pvParameter)
 
         ESP_LOGI(TAG, "Connecting to: %s", current_url);
         if (is_github_url) {
-            ESP_LOGW(TAG, "GitHub/CDN URL - cert verification skipped via sdkconfig");
+            ESP_LOGW(TAG, "GitHub/CDN URL detected - disabling certificate verification");
         }
 
         // SIM mode needs longer timeouts and more retries due to PPP/cellular latency
@@ -371,18 +376,22 @@ static void ota_download_task(void *pvParameter)
         int max_connect_retries = is_sim_mode ? 5 : 1;  // 5 retries for SIM mode
 
         // Configure HTTP client for this URL
-        // Match the config from commit ed2bc9a that fixed WiFi mode
-        // Simplified config - let ESP-IDF handle transport type from URL
+        // For GitHub URLs: use auto-redirect and skip cert verification (CDN has long redirect URLs that crash manual handling)
+        // For other URLs (Azure, etc.): use manual redirect handling with certificate verification
         esp_http_client_config_t http_config = {
             .url = current_url,
             .timeout_ms = connection_timeout,
-            .keep_alive_enable = false,           // Don't keep alive for redirects
-            .buffer_size = 8192,                  // Increased for long GitHub CDN headers
-            .buffer_size_tx = 2048,
+            .keep_alive_enable = false,
+            .buffer_size = 4096,                  // Reduced to save heap memory
+            .buffer_size_tx = 1024,               // Reduced to save heap memory
             .skip_cert_common_name_check = true,  // Allow redirects to different domains
-            .crt_bundle_attach = esp_crt_bundle_attach,  // Use certificate bundle (like MQTT)
-            .event_handler = http_event_handler,  // Capture Location header via events
-            .if_name = (is_sim_mode && ppp_if_valid) ? &ppp_ifreq : NULL,  // Bind to PPP interface
+            // GitHub: skip cert verification, use manual redirect handling
+            // Original crash was due to memory exhaustion (Min Free: 52 bytes), not event handler
+            // Now that MQTT is stopped first, we have enough memory (Min Free: 51KB+)
+            .crt_bundle_attach = is_github_url ? NULL : esp_crt_bundle_attach,
+            .disable_auto_redirect = true,        // Always manual redirect (auto doesn't work with streaming API)
+            .event_handler = http_event_handler,  // Capture Location header for redirects
+            .if_name = (is_sim_mode && ppp_if_valid) ? &ppp_ifreq : NULL,
         };
 
         // Create HTTP client
@@ -702,11 +711,11 @@ cleanup:
         free(download_buffer);
     }
 
-    // For SIM mode: Restart MQTT after OTA cleanup
-    // (MQTT was stopped to free PPP for exclusive OTA use)
-    if (is_sim_mode) {
+    // Restart MQTT after OTA cleanup (was stopped to free memory for TLS)
+    // This applies to both WiFi and SIM modes now
+    {
         extern void mqtt_restart_after_ota(void);
-        ESP_LOGI(TAG, "Restarting MQTT after SIM OTA cleanup...");
+        ESP_LOGI(TAG, "Restarting MQTT after OTA cleanup...");
         mqtt_restart_after_ota();
     }
 

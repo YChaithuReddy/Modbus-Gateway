@@ -3,9 +3,9 @@
 
 // Firmware Version - Update these for each release
 #define FW_VERSION_MAJOR 1
-#define FW_VERSION_MINOR 2
-#define FW_VERSION_PATCH 0
-#define FW_VERSION_STRING "1.2.0"
+#define FW_VERSION_MINOR 3
+#define FW_VERSION_PATCH 6
+#define FW_VERSION_STRING "1.3.6"
 
 // WiFi Configuration (Replace with your credentials)
 #define IOT_CONFIG_WIFI_SSID "YOUR_WIFI_SSID"

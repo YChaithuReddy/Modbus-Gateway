@@ -3454,7 +3454,7 @@ static void report_device_twin_properties(void) {
     cJSON_AddNumberToObject(reported, "sensor_count", config->sensor_count);
 
     // Add firmware version and device info
-    cJSON_AddStringToObject(reported, "firmware_version", "1.0.0");
+    cJSON_AddStringToObject(reported, "firmware_version", FW_VERSION_STRING);
     cJSON_AddStringToObject(reported, "device_id", config->azure_device_id);
     cJSON_AddNumberToObject(reported, "last_boot_time", (double)esp_timer_get_time() / 1000000.0);
 
