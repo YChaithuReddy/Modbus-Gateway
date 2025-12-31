@@ -1,5 +1,46 @@
 # ESP32 Modbus IoT Gateway - Changelog
 
+## Version 1.3.7 - Expanded Sensor Support (December 2024)
+
+### 📊 **Increased Sensor Capacity**
+
+#### **Sensor Limit Increased to 15**
+- **[ENHANCEMENT]** Maximum sensor count increased from 8 to 15
+  - **Files Modified**: `main/web_config.c` (3 locations)
+  - **Impact**: Support for larger industrial deployments
+
+#### **NVS Partition Expanded**
+- **[FIX]** NVS partition increased from 24KB to 40KB
+  - **Problem**: `ESP_ERR_NVS_NOT_ENOUGH_SPACE` when saving 9+ sensors
+  - **Solution**: Expanded NVS from 0x6000 to 0xA000 in partition table
+  - **File**: `partitions_4mb.csv`
+
+#### **OTA Partition Size Increased**
+- **[FIX]** OTA partitions increased from 0x1D0000 to 0x1E0000 each
+  - **Problem**: Firmware size (0x1D0190) exceeded partition size
+  - **Solution**: Increased each OTA partition by 64KB
+  - **File**: `partitions_4mb.csv`
+
+### 🔧 **Panda_Level Sensor Enhancement**
+
+#### **Level Percentage Display**
+- **[NEW]** Panda_Level sensors now show level percentage in RS485 test results
+  - **Formula**: `Level % = ((Sensor Height - Raw Value) / Tank Height) × 100`
+  - **File**: `main/web_config.c:8167`
+  - **Note**: Requires Height and Max Water Level parameters configured
+
+### 🛠️ **Flash Script Improvements**
+
+#### **Better esptool Detection**
+- **[ENHANCEMENT]** flash_firmware.bat now tries multiple detection methods:
+  1. `python -m esptool`
+  2. `py -m esptool`
+  3. `esptool.py` (PATH)
+  4. `esptool` (PATH)
+- **Impact**: Works on more Windows configurations
+
+---
+
 ## Version 1.3.6 - OTA & Device Twin Fixes (December 2024)
 
 ### 🔧 **OTA Updates from GitHub Now Working**

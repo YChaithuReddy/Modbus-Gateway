@@ -1,7 +1,7 @@
-# ESP32 Modbus IoT System - Version 1.3.6
+# ESP32 Modbus IoT System - Version 1.3.7
 
 ## Version Information
-- **Version**: 1.3.6 (Production Ready)
+- **Version**: 1.3.7 (Production Ready)
 - **Release Date**: December 2024
 - **Build Target**: ESP32 ESP-IDF v5.5.1
 - **Product Name**: Fluxgen Modbus IoT Gateway
@@ -9,7 +9,17 @@
 
 ## Version History
 
-### Version 1.3.6 - OTA & Device Twin Fixes (Current)
+### Version 1.3.7 - Expanded Sensor Support (Current)
+**Release Date**: December 2024
+
+**Sensor & Storage Improvements:**
+- ✅ **Increased sensor limit from 8 to 15** - Support for larger deployments
+- ✅ **Expanded NVS partition to 40KB** - More storage for sensor configurations
+- ✅ **Increased OTA partition size** - Room for firmware growth
+- ✅ **Panda_Level percentage display** - Shows level % in RS485 test results
+- ✅ **Improved flash script** - Better esptool auto-detection
+
+### Version 1.3.6 - OTA & Device Twin Fixes
 **Release Date**: December 2024
 
 **OTA Updates:**

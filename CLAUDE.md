@@ -1,7 +1,7 @@
 # CLAUDE.md - ESP32 Modbus IoT Gateway Project Context
 
 ## Project Overview
-**ESP32 Modbus IoT Gateway v1.3.6** - A production-ready industrial IoT gateway for RS485 Modbus communication with Azure IoT Hub integration.
+**ESP32 Modbus IoT Gateway v1.3.7** - A production-ready industrial IoT gateway for RS485 Modbus communication with Azure IoT Hub integration.
 
 ## ⚠️ CRITICAL WARNINGS - MUST READ
 
@@ -227,7 +227,7 @@ See `docs/DEVICE_TWIN_GUIDE.md` for complete usage documentation.
 
 ---
 
-**Last Updated**: December 27, 2024
-**Last Known Working Commit**: 3c19a98
-**Current Version**: v1.3.6
-**Recent Features Added**: OTA from GitHub releases, continuous sensor reading during replay, fixed Device Twin version reporting
+**Last Updated**: December 31, 2024
+**Last Known Working Commit**: 6b2a057
+**Current Version**: v1.3.7
+**Recent Features Added**: Sensor limit increased to 15, NVS expanded to 40KB, Panda_Level percentage display, improved flash script

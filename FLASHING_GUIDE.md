@@ -225,5 +225,5 @@ esptool.py --chip esp32 --port COM3 --baud 460800 write_flash 0x0 merged_firmwar
 
 ---
 
-**Version**: 1.3.6
+**Version**: 1.3.7
 **Last Updated**: December 2024

@@ -1,13 +1,13 @@
 @echo off
 REM ============================================
 REM Fluxgen Modbus IoT Gateway - Flash Script
-REM Version 1.3.6
+REM Version 1.3.7
 REM ============================================
 
 echo.
 echo ========================================
 echo   Fluxgen Modbus IoT Gateway Flasher
-echo   Version 1.3.6
+echo   Version 1.3.7
 echo ========================================
 echo.
 
