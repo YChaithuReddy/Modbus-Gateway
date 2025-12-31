@@ -5997,7 +5997,7 @@ static void parse_form_param(const char *param, const char *value) {
     } else if (strncmp(param, "sensor_", 7) == 0) {
         // Parse sensor parameters
         int sensor_idx = atoi(param + 7);
-        if (sensor_idx >= 0 && sensor_idx < 8) {
+        if (sensor_idx >= 0 && sensor_idx < 15) {
             char *param_type = strchr(param + 7, '_');
             if (param_type) {
                 param_type++; // Skip the underscore
@@ -6595,14 +6595,26 @@ static esp_err_t test_sensor_handler(httpd_req_t *req)
                      "<div class='value-box'><b>Configured Value:</b> %.6f (%s)</div>"
                      "<div><b>Raw Hex:</b> <span class='hex-display'>", display_value, value_desc);
             
-            // Add operation team comparison display for Level/Radar Level sensors
-            if ((strcmp(sensor->sensor_type, "Radar Level") == 0 || strcmp(sensor->sensor_type, "Level") == 0) && sensor->max_water_level > 0) {
-                char comparison_str[200];
+            // Add operation team comparison display for Level/Radar Level/Panda_Level sensors
+            if ((strcmp(sensor->sensor_type, "Radar Level") == 0 || strcmp(sensor->sensor_type, "Level") == 0 || strcmp(sensor->sensor_type, "Panda_Level") == 0) && sensor->max_water_level > 0) {
+                // Calculate level percentage: (Sensor Height - Raw Value) / Tank Height * 100
+                double level_percent = ((sensor->sensor_height - primary_value) / sensor->max_water_level) * 100.0;
+                if (level_percent < 0) level_percent = 0.0;
+                if (level_percent > 100) level_percent = 100.0;
+                char comparison_str[300];
                 snprintf(comparison_str, sizeof(comparison_str),
-                         "<br><b>Operation Comparison:</b> %.0f → %.1f%% ✅<br>",
-                         primary_value, display_value);
+                         "<br><b style='color:#28a745'>Level Filled: %.2f%%</b><br>"
+                         "<span style='color:#6c757d'>Formula: (%.2f - %.0f) / %.2f × 100</span><br>",
+                         level_percent, sensor->sensor_height, primary_value, sensor->max_water_level);
                 strcat(format_table, temp_str);
                 strcat(format_table, comparison_str);
+            } else if ((strcmp(sensor->sensor_type, "Panda_Level") == 0 || strcmp(sensor->sensor_type, "Level") == 0) && sensor->max_water_level <= 0) {
+                // Warning if height parameters not configured
+                char warning_str[200];
+                snprintf(warning_str, sizeof(warning_str),
+                         "<br><b style='color:#dc3545'>⚠ Set Sensor Height & Max Water Level to see Level %%</b><br>");
+                strcat(format_table, temp_str);
+                strcat(format_table, warning_str);
             } else if (strcmp(sensor->sensor_type, "ZEST") == 0 && reg_count >= 4) {
                 // Add detailed ZEST calculation breakdown for 4-register format
                 // ZEST Format: Register[0] = Integer part (UINT16)
@@ -6881,7 +6893,7 @@ static esp_err_t save_single_sensor_handler(httpd_req_t *req)
                     int sub_idx = atoi(sub_start + 5);
                     char *param_type = strchr(sub_start + 5, '_');
                     
-                    if (param_type && sensor_idx >= 0 && sensor_idx < 8 && sub_idx >= 0 && sub_idx < 8) {
+                    if (param_type && sensor_idx >= 0 && sensor_idx < 15 && sub_idx >= 0 && sub_idx < 8) {
                         param_type++; // Skip the underscore
                         ESP_LOGI(TAG, "Processing sub-sensor: sensor[%d].sub[%d].%s = %s", sensor_idx, sub_idx, param_type, decoded_value);
                         
@@ -6947,8 +6959,8 @@ static esp_err_t save_single_sensor_handler(httpd_req_t *req)
                     // Handle regular sensor parameters
                     int current_sensor_idx = atoi(param_name + 7);
                     if (sensor_id == -1) sensor_id = current_sensor_idx;
-                    
-                    if (current_sensor_idx >= 0 && current_sensor_idx < 8) {
+
+                    if (current_sensor_idx >= 0 && current_sensor_idx < 15) {
                         char *param_type = strchr(param_name + 7, '_');
                         if (param_type) {
                             param_type++; // Skip the underscore
@@ -8164,8 +8176,9 @@ static esp_err_t test_rs485_handler(httpd_req_t *req)
         char scale_desc[50];
         
         // Apply sensor type-specific calculation
-        if (strcmp(sensor_type, "Level") == 0 && max_water_level > 0) {
-            // Level sensor calculation: (Sensor Height - Raw Value) / Maximum Water Level * 100
+        if ((strcmp(sensor_type, "Level") == 0 || strcmp(sensor_type, "Panda_Level") == 0) && max_water_level > 0) {
+            // Level sensor calculation: (Sensor Height - Raw Value) / Tank Height * 100
+            // For Panda_Level: Raw value is distance in mm, convert to meters if needed
             double raw_scaled_value = primary_value * scale_factor;
             scaled_value = ((sensor_height - raw_scaled_value) / max_water_level) * 100.0;
             // Ensure percentage is within reasonable bounds
@@ -8188,10 +8201,16 @@ static esp_err_t test_rs485_handler(httpd_req_t *req)
                  primary_value, primary_desc, scaled_value, scale_desc);
         strcat(data_output, temp);
 
-        // Add Level Filled display for Level and Radar Level sensors
-        if (strcmp(sensor_type, "Level") == 0 && max_water_level > 0) {
-            snprintf(temp, 500, "<strong>Level Filled:</strong> %.2f%% (Calculated using formula: (%.2f - %.6f) / %.2f * 100)<br>",
-                     scaled_value, sensor_height, primary_value, max_water_level);
+        // Add Level Filled display for Level, Panda_Level and Radar Level sensors
+        if ((strcmp(sensor_type, "Level") == 0 || strcmp(sensor_type, "Panda_Level") == 0) && max_water_level > 0) {
+            snprintf(temp, 500, "<strong style='color:#28a745'>Level Filled: %.2f%%</strong> (Formula: (%.2f - %.2f) / %.2f × 100)<br>",
+                     scaled_value, sensor_height, primary_value * scale_factor, max_water_level);
+            strcat(data_output, temp);
+        } else if ((strcmp(sensor_type, "Level") == 0 || strcmp(sensor_type, "Panda_Level") == 0) && max_water_level <= 0) {
+            // Show warning if sensor_height and max_water_level are not configured
+            snprintf(temp, 500, "<strong style='color:#dc3545'>⚠ Configure Sensor Height and Tank Height to see Level %%</strong><br>"
+                     "<span style='color:#6c757d'>Raw Value: %.0f | Set Sensor Height & Max Water Level in sensor config</span><br>",
+                     primary_value);
             strcat(data_output, temp);
         } else if (strcmp(sensor_type, "Radar Level") == 0 && max_water_level > 0) {
             snprintf(temp, 500, "<strong>Level Filled:</strong> %.2f%% (Calculated using formula: %.6f / %.2f * 100)<br>",

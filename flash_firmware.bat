@@ -11,17 +11,50 @@ echo   Version 1.3.6
 echo ========================================
 echo.
 
-REM Check if esptool is available
-where esptool.py >nul 2>nul
-if %ERRORLEVEL% NEQ 0 (
-    echo [ERROR] esptool.py not found!
-    echo.
-    echo Please install esptool first:
-    echo   pip install esptool
-    echo.
-    pause
-    exit /b 1
+REM Try different ways to find esptool
+set ESPTOOL_CMD=
+
+REM Method 1: Try python -m esptool
+python -m esptool version >nul 2>nul
+if %ERRORLEVEL% EQU 0 (
+    set ESPTOOL_CMD=python -m esptool
+    goto :found_esptool
 )
+
+REM Method 2: Try py -m esptool
+py -m esptool version >nul 2>nul
+if %ERRORLEVEL% EQU 0 (
+    set ESPTOOL_CMD=py -m esptool
+    goto :found_esptool
+)
+
+REM Method 3: Try esptool.py directly
+where esptool.py >nul 2>nul
+if %ERRORLEVEL% EQU 0 (
+    set ESPTOOL_CMD=esptool.py
+    goto :found_esptool
+)
+
+REM Method 4: Try esptool (without .py)
+where esptool >nul 2>nul
+if %ERRORLEVEL% EQU 0 (
+    set ESPTOOL_CMD=esptool
+    goto :found_esptool
+)
+
+REM Not found
+echo [ERROR] esptool not found!
+echo.
+echo Please install esptool using one of these:
+echo   python -m pip install esptool
+echo   py -m pip install esptool
+echo   pip install esptool
+echo.
+pause
+exit /b 1
+
+:found_esptool
+echo [OK] Found esptool: %ESPTOOL_CMD%
 
 REM Check if build files exist
 if not exist "build\bootloader\bootloader.bin" (
@@ -50,7 +83,7 @@ echo.
 echo TIP: Hold the BOOT button on ESP32 if flashing fails
 echo.
 
-esptool.py --chip esp32 --port %COMPORT% --baud 460800 ^
+%ESPTOOL_CMD% --chip esp32 --port %COMPORT% --baud 460800 ^
   --before default_reset --after hard_reset write_flash ^
   -z --flash_mode dio --flash_freq 40m --flash_size 4MB ^
   0x1000 build\bootloader\bootloader.bin ^
