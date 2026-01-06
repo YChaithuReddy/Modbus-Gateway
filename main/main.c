@@ -2077,8 +2077,10 @@ static void create_telemetry_payload(char* payload, size_t payload_size) {
         int valid_sensors = 0;
 
         // Check if batch mode is enabled (send all sensors in single JSON)
+        // Single sensor: send without body array
+        // Multiple sensors: send with body array
         if (config->batch_telemetry) {
-            ESP_LOGI(TAG, "[BATCH] Sending sensors with simple flat JSON format");
+            ESP_LOGI(TAG, "[BATCH] Building single MQTT message for %d sensors", actual_count);
 
             // Get current timestamp for all sensors
             time_t now;
@@ -2088,8 +2090,32 @@ static void create_telemetry_payload(char* payload, size_t payload_size) {
             gmtime_r(&now, &timeinfo);
             strftime(timestamp, sizeof(timestamp), "%Y-%m-%dT%H:%M:%SZ", &timeinfo);
 
-            // Send each sensor as a separate flat JSON message
-            // Format: {"unit_id":"ZEST001","type":"FLOW","consumption":"50.000","created_on":"2025-12-20T07:11:16Z"}
+            // Allocate buffer for combined payload (4KB should be enough for 15 sensors)
+            char *batch_payload = malloc(4096);
+            if (!batch_payload) {
+                ESP_LOGE(TAG, "[ERROR] Failed to allocate batch payload buffer");
+                return ESP_ERR_NO_MEM;
+            }
+
+            // Count valid sensors first to determine format
+            int valid_count = 0;
+            for (int i = 0; i < actual_count; i++) {
+                if (readings[i].valid) {
+                    valid_count++;
+                }
+            }
+
+            // Start the JSON - use body array only for multiple sensors
+            int batch_pos = 0;
+            bool use_body_array = (valid_count > 1);
+            if (use_body_array) {
+                batch_pos = snprintf(batch_payload, 4096, "{\"body\":[");
+                ESP_LOGI(TAG, "[BATCH] Multiple sensors (%d) - using body array format", valid_count);
+            } else {
+                ESP_LOGI(TAG, "[BATCH] Single sensor - using flat format (no body array)");
+            }
+
+            // Build array of sensor objects
             for (int i = 0; i < actual_count; i++) {
                 if (readings[i].valid) {
                     // Find the matching sensor config by unit_id
@@ -2106,18 +2132,26 @@ static void create_telemetry_payload(char* payload, size_t payload_size) {
                         continue;
                     }
 
+                    // Add comma separator if not first sensor (only for body array)
+                    if (valid_sensors > 0 && use_body_array) {
+                        batch_pos += snprintf(batch_payload + batch_pos, 4096 - batch_pos, ",");
+                    }
+
                     // Determine value key and type based on sensor type
                     const char* value_key = "value";
                     const char* type_value = "SENSOR";
                     if (strcasecmp(matching_sensor->sensor_type, "Level") == 0 ||
                         strcasecmp(matching_sensor->sensor_type, "Radar Level") == 0 ||
-                        strcasecmp(matching_sensor->sensor_type, "Panda_Level") == 0) {
+                        strcasecmp(matching_sensor->sensor_type, "Panda_Level") == 0 ||
+                        strcasecmp(matching_sensor->sensor_type, "Hydrostatic_Level") == 0 ||
+                        strcasecmp(matching_sensor->sensor_type, "Piezometer") == 0) {
                         value_key = "level_filled";
                         type_value = "LEVEL";
                     } else if (strcasecmp(matching_sensor->sensor_type, "Flow-Meter") == 0 ||
                                strcasecmp(matching_sensor->sensor_type, "ZEST") == 0 ||
                                strcasecmp(matching_sensor->sensor_type, "Panda_EMF") == 0 ||
                                strcasecmp(matching_sensor->sensor_type, "Panda_USM") == 0 ||
+                               strcasecmp(matching_sensor->sensor_type, "Dailian") == 0 ||
                                strcasecmp(matching_sensor->sensor_type, "Dailian_EMF") == 0 ||
                                strcasecmp(matching_sensor->sensor_type, "Clampon") == 0) {
                         value_key = "consumption";
@@ -2136,92 +2170,101 @@ static void create_telemetry_payload(char* payload, size_t payload_size) {
                         type_value = "QUALITY";
                     }
 
-                    // Build simple flat JSON format
-                    char sensor_payload[512];
-
-                    // Special handling for QUALITY sensors - include only actually read sub-sensor values
+                    // Build sensor JSON object
                     if (strcasecmp(matching_sensor->sensor_type, "QUALITY") == 0) {
-                        // Build JSON with only valid water quality parameters
+                        // QUALITY sensor with params_data object
                         char params_data[256] = "";
-                        int param_count = 0;
 
                         if (readings[i].quality_params.ph_valid) {
-                            param_count += snprintf(params_data + strlen(params_data),
+                            snprintf(params_data + strlen(params_data),
                                 sizeof(params_data) - strlen(params_data),
-                                "%s\"pH\":%.2f", param_count > 0 ? "," : "", readings[i].quality_params.ph_value);
+                                "%s\"pH\":%.2f", strlen(params_data) > 0 ? "," : "", readings[i].quality_params.ph_value);
                         }
                         if (readings[i].quality_params.tds_valid) {
-                            param_count += snprintf(params_data + strlen(params_data),
+                            snprintf(params_data + strlen(params_data),
                                 sizeof(params_data) - strlen(params_data),
                                 "%s\"TDS\":%.2f", strlen(params_data) > 0 ? "," : "", readings[i].quality_params.tds_value);
                         }
                         if (readings[i].quality_params.temp_valid) {
-                            param_count += snprintf(params_data + strlen(params_data),
+                            snprintf(params_data + strlen(params_data),
                                 sizeof(params_data) - strlen(params_data),
                                 "%s\"Temp\":%.2f", strlen(params_data) > 0 ? "," : "", readings[i].quality_params.temp_value);
                         }
                         if (readings[i].quality_params.humidity_valid) {
-                            param_count += snprintf(params_data + strlen(params_data),
+                            snprintf(params_data + strlen(params_data),
                                 sizeof(params_data) - strlen(params_data),
                                 "%s\"HUMIDITY\":%.2f", strlen(params_data) > 0 ? "," : "", readings[i].quality_params.humidity_value);
                         }
                         if (readings[i].quality_params.tss_valid) {
-                            param_count += snprintf(params_data + strlen(params_data),
+                            snprintf(params_data + strlen(params_data),
                                 sizeof(params_data) - strlen(params_data),
                                 "%s\"TSS\":%.2f", strlen(params_data) > 0 ? "," : "", readings[i].quality_params.tss_value);
                         }
                         if (readings[i].quality_params.bod_valid) {
-                            param_count += snprintf(params_data + strlen(params_data),
+                            snprintf(params_data + strlen(params_data),
                                 sizeof(params_data) - strlen(params_data),
                                 "%s\"BOD\":%.2f", strlen(params_data) > 0 ? "," : "", readings[i].quality_params.bod_value);
                         }
                         if (readings[i].quality_params.cod_valid) {
-                            param_count += snprintf(params_data + strlen(params_data),
+                            snprintf(params_data + strlen(params_data),
                                 sizeof(params_data) - strlen(params_data),
                                 "%s\"COD\":%.2f", strlen(params_data) > 0 ? "," : "", readings[i].quality_params.cod_value);
                         }
 
-                        snprintf(sensor_payload, sizeof(sensor_payload),
+                        batch_pos += snprintf(batch_payload + batch_pos, 4096 - batch_pos,
                             "{\"params_data\":{%s},\"type\":\"QUALITY\",\"created_on\":\"%s\",\"unit_id\":\"%s\"}",
                             params_data, timestamp, matching_sensor->unit_id);
                     } else {
-                        // Format: {"unit_id":"ZEST001","type":"FLOW","consumption":"50.000","created_on":"2025-12-20T07:11:16Z"}
-                        snprintf(sensor_payload, sizeof(sensor_payload),
-                            "{\"unit_id\":\"%s\",\"type\":\"%s\",\"%s\":\"%.3f\",\"created_on\":\"%s\"}",
-                            matching_sensor->unit_id, type_value, value_key, readings[i].value, timestamp);
+                        // Regular sensor with value field
+                        batch_pos += snprintf(batch_payload + batch_pos, 4096 - batch_pos,
+                            "{\"%s\":%.3f,\"type\":\"%s\",\"created_on\":\"%s\",\"unit_id\":\"%s\"}",
+                            value_key, readings[i].value, type_value, timestamp, matching_sensor->unit_id);
                     }
 
-                    // Send via MQTT if connected
-                    if (mqtt_connected && mqtt_client != NULL) {
-                        char sensor_topic[256];
-                        snprintf(sensor_topic, sizeof(sensor_topic),
-                                 "devices/%s/messages/events/", config->azure_device_id);
-
-                        int msg_id = esp_mqtt_client_publish(
-                            mqtt_client,
-                            sensor_topic,
-                            sensor_payload,
-                            strlen(sensor_payload),
-                            0,  // QoS 0
-                            0   // No retain
-                        );
-
-                        if (msg_id >= 0) {
-                            valid_sensors++;
-                            ESP_LOGI(TAG, "[MQTT] Sent sensor %s: %s (msg_id=%d)",
-                                     matching_sensor->unit_id, sensor_payload, msg_id);
-                        } else {
-                            ESP_LOGW(TAG, "[WARN] Failed to publish sensor %s", matching_sensor->unit_id);
-                        }
-                    }
-
-                    // Store last payload for logging
-                    strncpy(payload, sensor_payload, payload_size - 1);
-                    payload[payload_size - 1] = '\0';
+                    valid_sensors++;
+                    ESP_LOGI(TAG, "[BATCH] Added sensor %s to batch", matching_sensor->unit_id);
                 }
             }
 
-            ESP_LOGI(TAG, "[OK] Sent %d sensors with flat JSON format", valid_sensors);
+            // Close the JSON - only add body array closing if multiple sensors
+            if (use_body_array) {
+                batch_pos += snprintf(batch_payload + batch_pos, 4096 - batch_pos, "]}");
+            }
+
+            // Send single MQTT message with all sensors
+            if (mqtt_connected && mqtt_client != NULL && valid_sensors > 0) {
+                char sensor_topic[256];
+                snprintf(sensor_topic, sizeof(sensor_topic),
+                         "devices/%s/messages/events/", config->azure_device_id);
+
+                int msg_id = esp_mqtt_client_publish(
+                    mqtt_client,
+                    sensor_topic,
+                    batch_payload,
+                    strlen(batch_payload),
+                    0,  // QoS 0
+                    0   // No retain
+                );
+
+                if (msg_id >= 0) {
+                    ESP_LOGI(TAG, "[MQTT] Sent batch message with %d sensors (msg_id=%d, size=%d bytes)",
+                             valid_sensors, msg_id, strlen(batch_payload));
+                    ESP_LOGI(TAG, "[MQTT] Payload: %s", batch_payload);
+                } else {
+                    ESP_LOGW(TAG, "[WARN] Failed to publish batch message");
+                }
+
+                // Store payload for logging
+                strncpy(payload, batch_payload, payload_size - 1);
+                payload[payload_size - 1] = '\0';
+            }
+
+            free(batch_payload);
+            if (use_body_array) {
+                ESP_LOGI(TAG, "[OK] Sent %d sensors in single batch message with body array", valid_sensors);
+            } else {
+                ESP_LOGI(TAG, "[OK] Sent single sensor message (no body array)", valid_sensors);
+            }
         } else {
             // Individual mode: send each sensor as separate MQTT message (original behavior)
             ESP_LOGI(TAG, "[INDIVIDUAL] Sending sensors as separate messages");
