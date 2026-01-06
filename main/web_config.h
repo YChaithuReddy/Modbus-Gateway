@@ -126,7 +126,7 @@ typedef struct {
     char description[64];
     
     // Sensor type and Level-specific fields
-    char sensor_type[16];      // "Flow-Meter", "Level", "ENERGY", "QUALITY", etc.
+    char sensor_type[24];      // "Flow-Meter", "Level", "ENERGY", "QUALITY", "Hydrostatic_Level", etc.
     float sensor_height;       // For Level sensors: physical sensor height
     float max_water_level;     // For Level sensors: maximum water level for calculation
     char meter_type[32];       // For ENERGY sensors: meter type identifier

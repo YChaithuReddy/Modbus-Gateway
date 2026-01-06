@@ -1032,7 +1032,7 @@ esp_err_t test_sensor_connection(const sensor_config_t *sensor, char *result_buf
     modbus_result_t modbus_result;
     
     // Use holding registers by default, or input registers if specified
-    if (sensor->register_type[0] && strcmp(sensor->register_type, "INPUT_REGISTER") == 0) {
+    if (sensor->register_type[0] && (strcmp(sensor->register_type, "INPUT") == 0 || strcmp(sensor->register_type, "INPUT_REGISTER") == 0)) {
         modbus_result = modbus_read_input_registers(sensor->slave_id, sensor->register_address, sensor->quantity);
     } else {
         modbus_result = modbus_read_holding_registers(sensor->slave_id, sensor->register_address, sensor->quantity);
@@ -2991,6 +2991,7 @@ static esp_err_t config_page_handler(httpd_req_t *req)
         "  h += '<option value=\"Dailian_EMF\">Dailian EMF</option>';"
         "  h += '<option value=\"Panda_EMF\">Panda EMF</option>';"
         "  h += '<option value=\"Panda_Level\">Panda Level</option>';"
+        "  h += '<option value=\"Hydrostatic_Level\">Hydrostatic Level (Aquagen)</option>';"
         "  h += '<option value=\"Piezometer\">Piezometer (Water Level)</option>';"
         "  h += '<option value=\"Level\">Level</option>';"
         "  h += '<option value=\"Radar Level\">Radar Level</option>';"
@@ -3047,6 +3048,7 @@ static esp_err_t config_page_handler(httpd_req_t *req)
         "  h += '<option value=\"Dailian_EMF\">Dailian EMF</option>';"
         "  h += '<option value=\"Panda_EMF\">Panda EMF</option>';"
         "  h += '<option value=\"Panda_Level\">Panda Level</option>';"
+        "  h += '<option value=\"Hydrostatic_Level\">Hydrostatic Level (Aquagen)</option>';"
         "  h += '<option value=\"Piezometer\">Piezometer (Water Level)</option>';"
         "  h += '<option value=\"Level\">Level</option>';"
         "  h += '<option value=\"Radar Level\">Radar Level</option>';"
@@ -3247,6 +3249,9 @@ static esp_err_t config_page_handler(httpd_req_t *req)
         "  if (subSensor && confirm('Remove this sub-sensor?')) {"
         "    subSensor.remove();"
         "  }"
+        "}"
+        "function saveSubSensor(subSensorId) {"
+        "  alert('Sub-sensor configuration saved locally.\\n\\nClick the main SAVE button to save all changes to the device.');"
         "}");
     
     // Sensor type form update function
@@ -3361,6 +3366,10 @@ static esp_err_t config_page_handler(httpd_req_t *req)
         "formHtml += '<input type=\"hidden\" name=\"sensor_' + sensorId + '_data_type\" value=\"PANDA_LEVEL_FIXED\">';"
         "formHtml += '<p style=\"color:#28a745;font-size:12px;margin:10px 0\"><strong>Data Format:</strong> Fixed - UINT16 (16-bit level value)</p>';"
         "formHtml += '<p style=\"color:#007bff;font-size:11px;margin:5px 0\"><em>Panda Level defaults: Register 1 (0x0001), Quantity 1 - Level percentage = ((Sensor Height - Value) / Tank Height) × 100</em></p>';"
+        "} else if (sensorType === 'Hydrostatic_Level') {"
+        "formHtml += '<input type=\"hidden\" name=\"sensor_' + sensorId + '_data_type\" value=\"UINT16_BE\">';"
+        "formHtml += '<p style=\"color:#28a745;font-size:12px;margin:10px 0\"><strong>Data Format:</strong> Fixed - UINT16_BE (16-bit unsigned)</p>';"
+        "formHtml += '<p style=\"color:#007bff;font-size:11px;margin:5px 0\"><em>Hydrostatic Level defaults: Register 4 (0x0004), Quantity 1 - Level percentage = (Raw Value / Tank Height) × 100</em></p>';"
         "} else if (sensorType === 'Piezometer') {"
         "formHtml += '<input type=\"hidden\" name=\"sensor_' + sensorId + '_data_type\" value=\"UINT16_HI\">';"
         "formHtml += '<p style=\"color:#28a745;font-size:12px;margin:10px 0\"><strong>Data Format:</strong> Fixed - UINT16_HI (16-bit unsigned integer)</p>';"
@@ -3531,6 +3540,11 @@ static esp_err_t config_page_handler(httpd_req_t *req)
         "const regAddrInput = document.querySelector('input[name=\"sensor_' + sensorId + '_register_address\"]');"
         "if (quantityInput) quantityInput.value = '1';"
         "if (regAddrInput) regAddrInput.value = '1';"
+        "} else if (sensorType === 'Hydrostatic_Level') {"
+        "const quantityInput = document.querySelector('input[name=\"sensor_' + sensorId + '_quantity\"]');"
+        "const regAddrInput = document.querySelector('input[name=\"sensor_' + sensorId + '_register_address\"]');"
+        "if (quantityInput) quantityInput.value = '1';"
+        "if (regAddrInput) regAddrInput.value = '4';"
         "} else if (sensorType === 'Piezometer') {"
         "const quantityInput = document.querySelector('input[name=\"sensor_' + sensorId + '_quantity\"]');"
         "const regAddrInput = document.querySelector('input[name=\"sensor_' + sensorId + '_register_address\"]');"
@@ -4594,7 +4608,7 @@ static esp_err_t config_page_handler(httpd_req_t *req)
                         escaped_param_name, g_system_config.sensors[i].sub_sensors[j].slave_id,
                         g_system_config.sensors[i].sub_sensors[j].register_address, g_system_config.sensors[i].sub_sensors[j].quantity,
                         escaped_sub_data_type, g_system_config.sensors[i].sub_sensors[j].scale_factor,
-                        escaped_sub_register_type[0] ? escaped_sub_register_type : "HOLDING_REGISTER");
+                        escaped_sub_register_type[0] ? escaped_sub_register_type : "HOLDING");
                     httpd_resp_sendstr_chunk(req, chunk);
                     first_sub_sensor = false;
                 }
@@ -5031,10 +5045,10 @@ static esp_err_t config_page_handler(httpd_req_t *req)
         "h += '<div style=\"display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px;margin:10px 0\">';"
         "h += '<div><label style=\"font-weight:bold\">Quantity:</label><br><input type=\"number\" name=\"sensor_' + sensorId + '_sub_' + i + '_quantity\" value=\"' + subSensor.quantity + '\" min=\"1\" max=\"10\" style=\"width:100%;padding:5px\"></div>';"
         "h += '<div><label style=\"font-weight:bold\">Register Type:</label><br><select name=\"sensor_' + sensorId + '_sub_' + i + '_register_type\" style=\"width:100%;padding:5px\">';"
-        "const inputSelected = (subSensor.register_type === 'INPUT_REGISTER') ? ' selected' : '';"
-        "const holdingSelected = (subSensor.register_type === 'HOLDING_REGISTER') ? ' selected' : '';"
-        "h += '<option value=\"INPUT_REGISTER\"' + inputSelected + '>Input Register</option>';"
-        "h += '<option value=\"HOLDING_REGISTER\"' + holdingSelected + '>Holding Register</option>';"
+        "const inputSelected = (subSensor.register_type === 'INPUT') ? ' selected' : '';"
+        "const holdingSelected = (subSensor.register_type === 'HOLDING' || !subSensor.register_type) ? ' selected' : '';"
+        "h += '<option value=\"INPUT\"' + inputSelected + '>Input Register</option>';"
+        "h += '<option value=\"HOLDING\"' + holdingSelected + '>Holding Register</option>';"
         "h += '</select></div>';"
         "h += '<div><label style=\"font-weight:bold\">Scale Factor:</label><br><input type=\"number\" name=\"sensor_' + sensorId + '_sub_' + i + '_scale_factor\" value=\"' + subSensor.scale_factor + '\" step=\"any\" style=\"width:100%;padding:5px\"></div>';"
         "h += '</div>';"
@@ -5150,8 +5164,8 @@ static esp_err_t config_page_handler(httpd_req_t *req)
         "h += '<div style=\"display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px;margin:10px 0\">';"
         "h += '<div><label style=\"font-weight:bold\">Quantity:</label><br><input type=\"number\" name=\"sensor_' + sensorId + '_sub_' + subSensorCount + '_quantity\" value=\"1\" min=\"1\" max=\"10\" style=\"width:100%;padding:5px\"></div>';"
         "h += '<div><label style=\"font-weight:bold\">Register Type:</label><br><select name=\"sensor_' + sensorId + '_sub_' + subSensorCount + '_register_type\" style=\"width:100%;padding:5px\">';"
-        "h += '<option value=\"HOLDING_REGISTER\" selected>Holding Register</option>';"
-        "h += '<option value=\"INPUT_REGISTER\">Input Register</option>';"
+        "h += '<option value=\"HOLDING\" selected>Holding Register</option>';"
+        "h += '<option value=\"INPUT\">Input Register</option>';"
         "h += '</select></div>';"
         "h += '<div><label style=\"font-weight:bold\">Scale Factor:</label><br><input type=\"number\" name=\"sensor_' + sensorId + '_sub_' + subSensorCount + '_scale_factor\" value=\"1.0\" step=\"any\" style=\"width:100%;padding:5px\"></div>';"
         "h += '</div>';"
@@ -5226,14 +5240,21 @@ static esp_err_t config_page_handler(httpd_req_t *req)
         "function saveSensorEdit(sensorId){"
         "const name=document.getElementById('edit_name_'+sensorId).value;"
         "const unitId=document.getElementById('edit_unit_'+sensorId).value;"
-        "const slaveId=document.getElementById('edit_slave_'+sensorId).value;"
-        "const register=document.getElementById('edit_register_'+sensorId).value;"
-        "const quantity=document.getElementById('edit_quantity_'+sensorId).value;"
-        "const dataType=document.getElementById('edit_datatype_'+sensorId).value;"
-        "const baudRate=document.getElementById('edit_baud_'+sensorId).value;"
-        "const parity=document.getElementById('edit_parity_'+sensorId).value;"
-        "const registerType=document.getElementById('edit_register_type_'+sensorId).value;"
         "const sensor=sensorData[sensorId];"
+        "const slaveIdEl=document.getElementById('edit_slave_'+sensorId);"
+        "const registerEl=document.getElementById('edit_register_'+sensorId);"
+        "const quantityEl=document.getElementById('edit_quantity_'+sensorId);"
+        "const dataTypeEl=document.getElementById('edit_datatype_'+sensorId);"
+        "const baudRateEl=document.getElementById('edit_baud_'+sensorId);"
+        "const parityEl=document.getElementById('edit_parity_'+sensorId);"
+        "const registerTypeEl=document.getElementById('edit_register_type_'+sensorId);"
+        "const slaveId=slaveIdEl?slaveIdEl.value:'0';"
+        "const register=registerEl?registerEl.value:'0';"
+        "const quantity=quantityEl?quantityEl.value:'1';"
+        "const dataType=dataTypeEl?dataTypeEl.value:'UINT16_BE';"
+        "const baudRate=baudRateEl?baudRateEl.value:'9600';"
+        "const parity=parityEl?parityEl.value:'none';"
+        "const registerType=registerTypeEl?registerTypeEl.value:'HOLDING';"
         "let formData='sensor_id='+sensorId+'&name='+encodeURIComponent(name)+'&unit_id='+encodeURIComponent(unitId)+"
         "'&slave_id='+slaveId+'&register_address='+register+'&quantity='+quantity+'&data_type='+encodeURIComponent(dataType)+'&register_type='+registerType+'&baud_rate='+baudRate+'&parity='+parity;"
         "if (sensor.sensor_type === 'Level') {"
@@ -5266,7 +5287,7 @@ static esp_err_t config_page_handler(httpd_req_t *req)
         "formData += '&sensor_' + sensorId + '_sub_' + i + '_slave_id=' + (slaveIdInput.value || '1');"
         "formData += '&sensor_' + sensorId + '_sub_' + i + '_register=' + (registerInput.value || '30001');"
         "formData += '&sensor_' + sensorId + '_sub_' + i + '_quantity=' + (quantityInput ? quantityInput.value || '1' : '1');"
-        "formData += '&sensor_' + sensorId + '_sub_' + i + '_register_type=' + (registerTypeSelect ? registerTypeSelect.value || 'HOLDING_REGISTER' : 'HOLDING_REGISTER');"
+        "formData += '&sensor_' + sensorId + '_sub_' + i + '_register_type=' + (registerTypeSelect ? registerTypeSelect.value || 'HOLDING' : 'HOLDING');"
         "formData += '&sensor_' + sensorId + '_sub_' + i + '_scale_factor=' + (scaleFactorInput ? scaleFactorInput.value || '1.0' : '1.0');"
         "formData += '&sensor_' + sensorId + '_sub_' + i + '_data_type=' + (dataTypeSelect ? dataTypeSelect.value : '');"
         "}"
@@ -5306,18 +5327,49 @@ static esp_err_t config_page_handler(httpd_req_t *req)
         "if(!resultDiv){alert('Error: Result div not found for ID: test-result-new-'+sensorId);return;}"
         "resultDiv.style.display='block';"
         "resultDiv.innerHTML='<div style=\"background:#fff3cd;padding:10px;border-radius:4px;color:#856404\">Testing RS485 communication...</div>';"
+        "const sensorTypeElem=document.querySelector('select[name=\"sensor_'+sensorId+'_sensor_type\"]');"
+        "let sensorType=sensorTypeElem ? sensorTypeElem.value : '';"
+        "const baudRateElem=document.querySelector('select[name=\"sensor_'+sensorId+'_baud_rate\"]');"
+        "const parityElem=document.querySelector('select[name=\"sensor_'+sensorId+'_parity\"]');"
+        "const baudRate=baudRateElem ? baudRateElem.value : '9600';"
+        "const parity=parityElem ? parityElem.value : 'none';"
+        "if(sensorType==='QUALITY'){"
+        "console.log('Testing QUALITY sensor - gathering sub-sensor data');"
+        "const subSensorContainer=document.getElementById('sub-sensors-container-'+sensorId);"
+        "if(!subSensorContainer){resultDiv.innerHTML='<div style=\"background:#f8d7da;padding:10px;border-radius:4px;color:#721c24\"><strong>ERROR:</strong> Sub-sensor container not found</div>';return;}"
+        "const subSensors=subSensorContainer.querySelectorAll('.sub-sensor-form');"
+        "if(subSensors.length===0){resultDiv.innerHTML='<div style=\"background:#f8d7da;padding:10px;border-radius:4px;color:#721c24\"><strong>ERROR:</strong> Please add at least one sub-sensor before testing</div>';return;}"
+        "let data='sensor_type=QUALITY&baud_rate='+baudRate+'&parity='+parity+'&sub_sensor_count='+subSensors.length;"
+        "for(let i=0;i<subSensors.length;i++){"
+        "const paramElem=subSensors[i].querySelector('select[name*=\"_parameter\"]');"
+        "const slaveElem=subSensors[i].querySelector('input[name*=\"_slave_id\"]');"
+        "const regElem=subSensors[i].querySelector('input[name*=\"_register\"]');"
+        "const qtyElem=subSensors[i].querySelector('input[name*=\"_quantity\"]');"
+        "const dtElem=subSensors[i].querySelector('select[name*=\"_data_type\"]');"
+        "const scaleElem=subSensors[i].querySelector('input[name*=\"_scale\"]');"
+        "const regTypeElem=subSensors[i].querySelector('select[name*=\"_register_type\"]');"
+        "data+='&sub_'+i+'_param='+(paramElem?encodeURIComponent(paramElem.value):'');"
+        "data+='&sub_'+i+'_slave='+(slaveElem?slaveElem.value:'1');"
+        "data+='&sub_'+i+'_reg='+(regElem?regElem.value:'1');"
+        "data+='&sub_'+i+'_qty='+(qtyElem?qtyElem.value:'1');"
+        "data+='&sub_'+i+'_dtype='+(dtElem?encodeURIComponent(dtElem.value):'UINT16_BE');"
+        "data+='&sub_'+i+'_scale='+(scaleElem?scaleElem.value:'1.0');"
+        "data+='&sub_'+i+'_regtype='+(regTypeElem?regTypeElem.value:'HOLDING');"
+        "}"
+        "console.log('QUALITY test data:',data);"
+        "fetch('/test_quality_sensor',{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},body:data})"
+        ".then(r=>{if(!r.ok)throw new Error('HTTP '+r.status);return r.text();})"
+        ".then(html=>{resultDiv.innerHTML=html;})"
+        ".catch(e=>{resultDiv.innerHTML='<div style=\"background:#f8d7da;padding:10px;border-radius:4px;color:#721c24\"><strong>ERROR:</strong> '+e.message+'</div>';});"
+        "return;}"
         "console.log('Looking for form elements with sensor ID:', sensorId);"
         "const slaveIdElem=document.querySelector('input[name=\"sensor_'+sensorId+'_slave_id\"]');"
         "const regAddrElem=document.querySelector('input[name=\"sensor_'+sensorId+'_register_address\"]');"
         "const quantityElem=document.querySelector('input[name=\"sensor_'+sensorId+'_quantity\"]');"
         "let dataTypeElem=document.querySelector('select[name=\"sensor_'+sensorId+'_data_type\"]');"
         "if(!dataTypeElem) dataTypeElem=document.querySelector('input[name=\"sensor_'+sensorId+'_data_type\"]');"
-        "const baudRateElem=document.querySelector('select[name=\"sensor_'+sensorId+'_baud_rate\"]');"
-        "const parityElem=document.querySelector('select[name=\"sensor_'+sensorId+'_parity\"]');"
         "const scaleFactorElem=document.querySelector('input[name=\"sensor_'+sensorId+'_scale_factor\"]');"
         "const registerTypeElem=document.querySelector('select[name=\"sensor_'+sensorId+'_register_type\"]');"
-        "const sensorTypeElem=document.querySelector('select[name=\"sensor_'+sensorId+'_sensor_type\"]');"
-        "let sensorType=sensorTypeElem ? sensorTypeElem.value : '';"
         "console.log('Form elements found:', {slaveId: !!slaveIdElem, regAddr: !!regAddrElem, quantity: !!quantityElem, dataType: !!dataTypeElem, baudRate: !!baudRateElem, parity: !!parityElem, registerType: !!registerTypeElem, sensorType: !!sensorTypeElem});"
         "if(!slaveIdElem||!regAddrElem||!quantityElem||(sensorType !== 'ZEST' && sensorType !== 'Clampon' && sensorType !== 'Dailian' && sensorType !== 'Dailian_EMF' && sensorType !== 'Panda_EMF' && sensorType !== 'Panda_Level' && sensorType !== 'Piezometer' && !dataTypeElem)||!baudRateElem||!parityElem){"
         "let missingFields=[];"
@@ -5340,8 +5392,6 @@ static esp_err_t config_page_handler(httpd_req_t *req)
         "if(sensorType==='Panda_EMF' && !dataType) dataType='PANDA_EMF_FIXED';"
         "if(sensorType==='Panda_Level' && !dataType) dataType='PANDA_LEVEL_FIXED';"
         "if(sensorType==='ZEST' && !dataType) dataType='ZEST_FIXED';"
-        "const baudRate=baudRateElem.value||'9600';"
-        "const parity=parityElem.value||'none';"
         "const registerType=registerTypeElem ? registerTypeElem.value : 'HOLDING';"
         "const scaleFactor=(scaleFactorElem ? scaleFactorElem.value : null)||'1.0';"
         "if(!sensorType){"
@@ -5352,7 +5402,7 @@ static esp_err_t config_page_handler(httpd_req_t *req)
         "if(sensorType !== 'ZEST' && sensorType !== 'Clampon' && sensorType !== 'Dailian' && sensorType !== 'Dailian_EMF' && sensorType !== 'Panda_EMF' && sensorType !== 'Panda_Level' && sensorType !== 'Piezometer' && !dataType){"
         "resultDiv.innerHTML='<div style=\"background:#f8d7da;padding:10px;border-radius:4px;color:#721c24\"><strong>ERROR: Data Type Required</strong><br>Please select a data type before testing.</div>';"
         "return;}"
-        "if(!slaveId||!regAddr||!quantity||!baudRate||!parity||!scaleFactor){"
+        "if(!slaveId||!regAddr||!quantity||!scaleFactor){"
         "resultDiv.innerHTML='<div style=\"background:#f8d7da;padding:10px;border-radius:4px;color:#721c24\"><strong>ERROR: Validation Error</strong><br>Please fill in all required fields before testing.</div>';"
         "return;}"
         "let data='slave_id='+slaveId+'&register_address='+regAddr+'&quantity='+quantity+'&data_type='+dataType+'&register_type='+registerType+'&baud_rate='+baudRate+'&parity='+parity+'&scale_factor='+scaleFactor;"
@@ -5384,13 +5434,46 @@ static esp_err_t config_page_handler(httpd_req_t *req)
         "if(!resultDiv){alert('Error: Result div not found');return;}"
         "resultDiv.style.display='block';"
         "resultDiv.innerHTML='<div style=\"background:#fff3cd;padding:10px;border-radius:4px;color:#856404\">Testing RS485 communication...</div>';"
+        "const sensor=sensorData[sensorId];"
+        "const sensorType=sensor ? sensor.sensor_type : '';"
+        "const baudRateElem=document.getElementById('edit_baud_'+sensorId);"
+        "const parityElem=document.getElementById('edit_parity_'+sensorId);"
+        "const baudRate=baudRateElem ? baudRateElem.value : '9600';"
+        "const parity=parityElem ? parityElem.value : 'none';"
+        "if(sensorType==='QUALITY'){"
+        "console.log('Testing QUALITY sensor - gathering sub-sensor data');"
+        "const subSensorContainer=document.getElementById('edit-sub-sensors-'+sensorId);"
+        "if(!subSensorContainer){resultDiv.innerHTML='<div style=\"background:#f8d7da;padding:10px;border-radius:4px;color:#721c24\"><strong>ERROR:</strong> Sub-sensor container not found</div>';return;}"
+        "const subSensors=subSensorContainer.querySelectorAll('.sub-sensor');"
+        "if(subSensors.length===0){resultDiv.innerHTML='<div style=\"background:#f8d7da;padding:10px;border-radius:4px;color:#721c24\"><strong>ERROR:</strong> No sub-sensors configured</div>';return;}"
+        "let data='sensor_type=QUALITY&baud_rate='+baudRate+'&parity='+parity+'&sub_sensor_count='+subSensors.length;"
+        "for(let i=0;i<subSensors.length;i++){"
+        "const paramElem=subSensors[i].querySelector('select[name*=\"_parameter\"]');"
+        "const slaveElem=subSensors[i].querySelector('input[name*=\"_slave_id\"]');"
+        "const regElem=subSensors[i].querySelector('input[name*=\"_register\"]');"
+        "const qtyElem=subSensors[i].querySelector('input[name*=\"_quantity\"]');"
+        "const dtElem=subSensors[i].querySelector('select[name*=\"_data_type\"]');"
+        "const scaleElem=subSensors[i].querySelector('input[name*=\"_scale\"]');"
+        "const regTypeElem=subSensors[i].querySelector('select[name*=\"_register_type\"]');"
+        "data+='&sub_'+i+'_param='+(paramElem?encodeURIComponent(paramElem.value):'');"
+        "data+='&sub_'+i+'_slave='+(slaveElem?slaveElem.value:'1');"
+        "data+='&sub_'+i+'_reg='+(regElem?regElem.value:'1');"
+        "data+='&sub_'+i+'_qty='+(qtyElem?qtyElem.value:'1');"
+        "data+='&sub_'+i+'_dtype='+(dtElem?encodeURIComponent(dtElem.value):'UINT16_BE');"
+        "data+='&sub_'+i+'_scale='+(scaleElem?scaleElem.value:'1.0');"
+        "data+='&sub_'+i+'_regtype='+(regTypeElem?regTypeElem.value:'HOLDING');"
+        "}"
+        "console.log('QUALITY edit test data:',data);"
+        "fetch('/test_quality_sensor',{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},body:data})"
+        ".then(r=>{if(!r.ok)throw new Error('HTTP '+r.status);return r.text();})"
+        ".then(html=>{resultDiv.innerHTML=html;})"
+        ".catch(e=>{resultDiv.innerHTML='<div style=\"background:#f8d7da;padding:10px;border-radius:4px;color:#721c24\"><strong>ERROR:</strong> '+e.message+'</div>';});"
+        "return;}"
         "const slaveIdElem=document.getElementById('edit_slave_'+sensorId);"
         "const regAddrElem=document.getElementById('edit_register_'+sensorId);"
         "const quantityElem=document.getElementById('edit_quantity_'+sensorId);"
         "const registerTypeElem=document.getElementById('edit_register_type_'+sensorId);"
         "const dataTypeElem=document.getElementById('edit_datatype_'+sensorId);"
-        "const baudRateElem=document.getElementById('edit_baud_'+sensorId);"
-        "const parityElem=document.getElementById('edit_parity_'+sensorId);"
         "const scaleFactorElem=document.getElementById('edit_scale_factor_'+sensorId);"
         "if(!slaveIdElem||!regAddrElem||!quantityElem||!registerTypeElem||!dataTypeElem||!baudRateElem||!parityElem){"
         "resultDiv.innerHTML='<div style=\"background:#f8d7da;padding:10px;border-radius:4px;color:#721c24\"><strong>ERROR: Form Error</strong><br>Cannot find form elements. Please refresh the page.</div>';"
@@ -5400,11 +5483,7 @@ static esp_err_t config_page_handler(httpd_req_t *req)
         "const quantity=quantityElem.value||'1';"
         "const registerType=registerTypeElem.value||'HOLDING';"
         "const dataType=dataTypeElem.value||'';"
-        "const baudRate=baudRateElem.value||'9600';"
-        "const parity=parityElem.value||'none';"
-        "const sensor=sensorData[sensorId];"
         "const scaleFactor=(scaleFactorElem ? scaleFactorElem.value : null)||'1.0';"
-        "const sensorType=sensor ? sensor.sensor_type : 'Flow-Meter';"
         "console.log('Edit test params:',{slaveId,regAddr,quantity,registerType,dataType,baudRate,parity,scaleFactor,sensorType});"
         "if(sensorType !== 'ZEST' && sensorType !== 'Clampon' && sensorType !== 'Dailian' && sensorType !== 'Dailian_EMF' && sensorType !== 'Panda_EMF' && sensorType !== 'Panda_Level' && sensorType !== 'Piezometer' && !dataType){"
         "resultDiv.innerHTML='<div style=\"background:#f8d7da;padding:10px;border-radius:4px;color:#721c24\"><strong>ERROR: Data Type Required</strong><br>Please select a data type before testing.</div>';"
@@ -6451,13 +6530,159 @@ static esp_err_t test_sensor_handler(httpd_req_t *req)
         if (!reg_type || strlen(reg_type) == 0) {
             reg_type = "HOLDING";
         }
-        
-        if (strcmp(reg_type, "INPUT") == 0) {
+
+        // For QUALITY sensors, test ALL sub-sensors and display results
+        if (strcmp(sensor->sensor_type, "QUALITY") == 0 && sensor->sub_sensor_count > 0) {
+            // Test all sub-sensors for QUALITY sensors
+            snprintf(format_table, 10000,
+                     "<div class='test-result'>"
+                     "<h4>✓ Water Quality Sensor - %d Parameters</h4>"
+                     "<table style='width:100%%;border-collapse:collapse;margin:10px 0'>"
+                     "<tr style='background:#28a745;color:white'>"
+                     "<th style='padding:8px;border:1px solid #ddd'>Parameter</th>"
+                     "<th style='padding:8px;border:1px solid #ddd'>Raw Value</th>"
+                     "<th style='padding:8px;border:1px solid #ddd'>Scaled Value</th>"
+                     "<th style='padding:8px;border:1px solid #ddd'>Data Type</th>"
+                     "</tr>", sensor->sub_sensor_count);
+
+            int success_count = 0;
+            for (int sub_idx = 0; sub_idx < sensor->sub_sensor_count && sub_idx < 8; sub_idx++) {
+                sub_sensor_t *sub = &sensor->sub_sensors[sub_idx];
+                if (!sub->enabled || strlen(sub->parameter_name) == 0) {
+                    continue;
+                }
+
+                int sub_slave = sub->slave_id;
+                int sub_reg = sub->register_address;
+                int sub_qty = sub->quantity > 0 ? sub->quantity : 1;
+                const char* sub_reg_type = sub->register_type[0] ? sub->register_type : "HOLDING";
+                const char* sub_data_type = sub->data_type[0] ? sub->data_type : "UINT16_BE";
+                float sub_scale = sub->scale_factor > 0 ? sub->scale_factor : 1.0f;
+
+                ESP_LOGI(TAG, "[QUALITY] Testing sub-sensor[%d]: %s (Slave=%d, Reg=%d, Qty=%d, Type=%s, Scale=%.4f)",
+                         sub_idx, sub->parameter_name, sub_slave, sub_reg, sub_qty, sub_data_type, sub_scale);
+
+                // Read this sub-sensor
+                modbus_result_t sub_result;
+                if (strcmp(sub_reg_type, "INPUT") == 0 || strcmp(sub_reg_type, "INPUT_REGISTER") == 0) {
+                    sub_result = modbus_read_input_registers(sub_slave, sub_reg, sub_qty);
+                } else {
+                    sub_result = modbus_read_holding_registers(sub_slave, sub_reg, sub_qty);
+                }
+
+                char row_html[512];
+                if (sub_result == MODBUS_SUCCESS) {
+                    success_count++;
+                    uint16_t sub_regs[4] = {0};
+                    int sub_reg_count = modbus_get_response_length();
+                    if (sub_reg_count > 4) sub_reg_count = 4;
+                    for (int r = 0; r < sub_reg_count; r++) {
+                        sub_regs[r] = modbus_get_response_buffer(r);
+                    }
+
+                    // Calculate value based on data type
+                    double raw_val = 0.0, scaled_val = 0.0;
+                    if (sub_reg_count >= 2 && (strstr(sub_data_type, "UINT32") || strstr(sub_data_type, "INT32"))) {
+                        uint32_t val32 = 0;
+                        if (strstr(sub_data_type, "3412") || strstr(sub_data_type, "CDAB") || strstr(sub_data_type, "4321")) {
+                            val32 = ((uint32_t)sub_regs[1] << 16) | sub_regs[0];
+                        } else {
+                            val32 = ((uint32_t)sub_regs[0] << 16) | sub_regs[1];
+                        }
+                        raw_val = strstr(sub_data_type, "INT32") ? (double)(int32_t)val32 : (double)val32;
+                    } else if (sub_reg_count >= 2 && strstr(sub_data_type, "FLOAT32")) {
+                        uint32_t val32 = strstr(sub_data_type, "3412") || strstr(sub_data_type, "CDAB") ?
+                            ((uint32_t)sub_regs[1] << 16) | sub_regs[0] :
+                            ((uint32_t)sub_regs[0] << 16) | sub_regs[1];
+                        union { uint32_t i; float f; } conv;
+                        conv.i = val32;
+                        raw_val = (double)conv.f;
+                    } else {
+                        raw_val = (double)sub_regs[0];
+                    }
+                    scaled_val = raw_val * sub_scale;
+
+                    // Determine unit based on parameter name
+                    const char* unit = "";
+                    if (strcasecmp(sub->parameter_name, "TDS") == 0 || strcasecmp(sub->parameter_name, "Conductivity") == 0) {
+                        unit = "ppm";
+                    } else if (strcasecmp(sub->parameter_name, "pH") == 0 || strcasecmp(sub->parameter_name, "PH") == 0) {
+                        unit = "pH";
+                    } else if (strcasecmp(sub->parameter_name, "TSS") == 0) {
+                        unit = "mg/L";
+                    } else if (strcasecmp(sub->parameter_name, "Temp") == 0 || strcasecmp(sub->parameter_name, "Temperature") == 0) {
+                        unit = "°C";
+                    } else if (strcasecmp(sub->parameter_name, "COD") == 0) {
+                        unit = "mg/L";
+                    } else if (strcasecmp(sub->parameter_name, "BOD") == 0) {
+                        unit = "mg/L";
+                    } else if (strcasecmp(sub->parameter_name, "DO") == 0 || strcasecmp(sub->parameter_name, "Dissolved Oxygen") == 0) {
+                        unit = "mg/L";
+                    } else if (strcasecmp(sub->parameter_name, "Turbidity") == 0) {
+                        unit = "NTU";
+                    } else if (strcasecmp(sub->parameter_name, "ORP") == 0) {
+                        unit = "mV";
+                    } else if (strcasecmp(sub->parameter_name, "Chlorine") == 0) {
+                        unit = "mg/L";
+                    } else if (strcasecmp(sub->parameter_name, "Ammonia") == 0 || strcasecmp(sub->parameter_name, "NH3") == 0) {
+                        unit = "mg/L";
+                    } else if (strcasecmp(sub->parameter_name, "Nitrate") == 0 || strcasecmp(sub->parameter_name, "NO3") == 0) {
+                        unit = "mg/L";
+                    } else if (strcasecmp(sub->parameter_name, "Humidity") == 0) {
+                        unit = "%";
+                    }
+                    // Use sub->units if configured, otherwise use default
+                    if (sub->units[0] != '\0') {
+                        unit = sub->units;
+                    }
+
+                    ESP_LOGI(TAG, "[QUALITY] %s: Raw=%.2f, Scaled=%.2f %s", sub->parameter_name, raw_val, scaled_val, unit);
+
+                    snprintf(row_html, sizeof(row_html),
+                             "<tr><td style='padding:8px;border:1px solid #ddd'><b>%s</b></td>"
+                             "<td style='padding:8px;border:1px solid #ddd'>%.2f</td>"
+                             "<td style='padding:8px;border:1px solid #ddd;color:#28a745;font-weight:bold'>%.2f %s</td>"
+                             "<td style='padding:8px;border:1px solid #ddd;font-size:11px'>%s×%.2f</td></tr>",
+                             sub->parameter_name, raw_val, scaled_val, unit, sub_data_type, sub_scale);
+                } else {
+                    snprintf(row_html, sizeof(row_html),
+                             "<tr style='background:#fff3cd'><td style='padding:8px;border:1px solid #ddd'><b>%s</b></td>"
+                             "<td colspan='3' style='padding:8px;border:1px solid #ddd;color:#856404'>⚠ Read Failed (Slave %d, Reg %d)</td></tr>",
+                             sub->parameter_name, sub_slave, sub_reg);
+                }
+                strncat(format_table, row_html, 10000 - strlen(format_table) - 1);
+
+                // Small delay between reads
+                vTaskDelay(pdMS_TO_TICKS(50));
+            }
+
+            strncat(format_table, "</table>", 10000 - strlen(format_table) - 1);
+
+            if (success_count == 0) {
+                strncat(format_table, "<p style='color:#dc3545'>⚠ No sub-sensors could be read</p>", 10000 - strlen(format_table) - 1);
+            }
+            strncat(format_table, "</div>", 10000 - strlen(format_table) - 1);
+
+            // Send response and cleanup
+            httpd_resp_set_type(req, "text/html");
+            httpd_resp_send(req, format_table, strlen(format_table));
+            free(format_table);
+            return ESP_OK;
+        }
+
+        // For non-QUALITY sensors, use normal test logic
+        int test_slave_id = sensor->slave_id;
+        int test_register = sensor->register_address;
+        int test_quantity = sensor->quantity > 0 ? sensor->quantity : 1;
+        const char* test_data_type = sensor->data_type;
+        float test_scale_factor = sensor->scale_factor > 0 ? sensor->scale_factor : 1.0f;
+
+        if (strcmp(reg_type, "INPUT") == 0 || strcmp(reg_type, "INPUT_REGISTER") == 0) {
             ESP_LOGI(TAG, "[MODBUS] Reading INPUT registers (function 04) for sensor '%s'", sensor->name);
-            result = modbus_read_input_registers(sensor->slave_id, sensor->register_address, sensor->quantity);
+            result = modbus_read_input_registers(test_slave_id, test_register, test_quantity);
         } else {
             ESP_LOGI(TAG, "[MODBUS] Reading HOLDING registers (function 03) for sensor '%s' - type '%s'", sensor->name, reg_type);
-            result = modbus_read_holding_registers(sensor->slave_id, sensor->register_address, sensor->quantity);
+            result = modbus_read_holding_registers(test_slave_id, test_register, test_quantity);
         }
         
         if (result == MODBUS_SUCCESS) {
@@ -6484,43 +6709,43 @@ static esp_err_t test_sensor_handler(httpd_req_t *req)
             
             // Add primary configured value first
             double primary_value = 0.0;
-            if (reg_count >= 4 && strstr(sensor->data_type, "FLOAT64")) {
+            if (reg_count >= 4 && strstr(test_data_type, "FLOAT64")) {
                 // FLOAT64 handling - 4 registers (64-bit double precision)
                 uint64_t raw_val64 = 0;
-                if (strstr(sensor->data_type, "12345678")) {
+                if (strstr(test_data_type, "12345678")) {
                     // FLOAT64_12345678 (ABCDEFGH) - Standard big endian
-                    raw_val64 = ((uint64_t)registers[0] << 48) | ((uint64_t)registers[1] << 32) | 
+                    raw_val64 = ((uint64_t)registers[0] << 48) | ((uint64_t)registers[1] << 32) |
                                ((uint64_t)registers[2] << 16) | registers[3];
-                } else if (strstr(sensor->data_type, "87654321")) {
+                } else if (strstr(test_data_type, "87654321")) {
                     // FLOAT64_87654321 (HGFEDCBA) - Full little endian
-                    raw_val64 = ((uint64_t)registers[3] << 48) | ((uint64_t)registers[2] << 32) | 
+                    raw_val64 = ((uint64_t)registers[3] << 48) | ((uint64_t)registers[2] << 32) |
                                ((uint64_t)registers[1] << 16) | registers[0];
                 } else {
                     // Default to standard big endian if specific order not found
-                    raw_val64 = ((uint64_t)registers[0] << 48) | ((uint64_t)registers[1] << 32) | 
+                    raw_val64 = ((uint64_t)registers[0] << 48) | ((uint64_t)registers[1] << 32) |
                                ((uint64_t)registers[2] << 16) | registers[3];
                 }
                 union { uint64_t i; double d; } conv64;
                 conv64.i = raw_val64;
-                primary_value = conv64.d * sensor->scale_factor;
-            } else if (reg_count >= 2 && strstr(sensor->data_type, "FLOAT32")) {
-                uint32_t raw_val = strstr(sensor->data_type, "4321") ? 
+                primary_value = conv64.d * test_scale_factor;
+            } else if (reg_count >= 2 && strstr(test_data_type, "FLOAT32")) {
+                uint32_t raw_val = strstr(test_data_type, "4321") ?
                     ((uint32_t)registers[1] << 16) | registers[0] :
                     ((uint32_t)registers[0] << 16) | registers[1];
                 union { uint32_t i; float f; } conv;
                 conv.i = raw_val;
-                primary_value = (double)conv.f * sensor->scale_factor;
-            } else if (reg_count >= 2 && (strstr(sensor->data_type, "UINT32") || strstr(sensor->data_type, "INT32"))) {
+                primary_value = (double)conv.f * test_scale_factor;
+            } else if (reg_count >= 2 && (strstr(test_data_type, "UINT32") || strstr(test_data_type, "INT32"))) {
                 uint32_t raw_val32 = 0;
-                
+
                 // Handle comprehensive INT32/UINT32 byte order patterns
-                if (strstr(sensor->data_type, "4321") || strstr(sensor->data_type, "DCBA")) {
+                if (strstr(test_data_type, "4321") || strstr(test_data_type, "DCBA")) {
                     // UINT32_4321 (DCBA) - Little endian
                     raw_val32 = ((uint32_t)registers[1] << 16) | registers[0];
-                } else if (strstr(sensor->data_type, "3412") || strstr(sensor->data_type, "CDAB")) {
+                } else if (strstr(test_data_type, "3412") || strstr(test_data_type, "CDAB")) {
                     // UINT32_3412 - Word swap (DCBA) - reg[1] high, reg[0] low
                     raw_val32 = ((uint32_t)registers[1] << 16) | registers[0];
-                } else if (strstr(sensor->data_type, "2143") || strstr(sensor->data_type, "BADC")) {
+                } else if (strstr(test_data_type, "2143") || strstr(test_data_type, "BADC")) {
                     // UINT32_2143 (BADC) - Mixed byte swap
                     uint16_t reg0_swapped = ((registers[0] & 0xFF) << 8) | ((registers[0] >> 8) & 0xFF);
                     uint16_t reg1_swapped = ((registers[1] & 0xFF) << 8) | ((registers[1] >> 8) & 0xFF);
@@ -6529,14 +6754,14 @@ static esp_err_t test_sensor_handler(httpd_req_t *req)
                     // Default: UINT32_1234 (ABCD) - Big endian
                     raw_val32 = ((uint32_t)registers[0] << 16) | registers[1];
                 }
-                
-                if (strstr(sensor->data_type, "INT32")) {
-                    primary_value = (double)(int32_t)raw_val32 * sensor->scale_factor;
+
+                if (strstr(test_data_type, "INT32")) {
+                    primary_value = (double)(int32_t)raw_val32 * test_scale_factor;
                 } else {
-                    primary_value = (double)raw_val32 * sensor->scale_factor;
+                    primary_value = (double)raw_val32 * test_scale_factor;
                 }
             } else if (reg_count >= 1) {
-                primary_value = (double)registers[0] * sensor->scale_factor;
+                primary_value = (double)registers[0] * test_scale_factor;
             }
             
             char temp_str[1000];
@@ -6549,11 +6774,22 @@ static esp_err_t test_sensor_handler(httpd_req_t *req)
                 display_value = (primary_value / sensor->max_water_level) * 100.0;
                 if (display_value < 0) display_value = 0.0;
                 snprintf(value_desc, sizeof(value_desc), "Radar Level %.2f%%", display_value);
+            } else if (strcmp(sensor->sensor_type, "Hydrostatic_Level") == 0 && sensor->max_water_level > 0) {
+                // Hydrostatic Level: Raw value IS the water level (not distance from sensor)
+                display_value = (primary_value / sensor->max_water_level) * 100.0;
+                if (display_value < 0) display_value = 0.0;
+                snprintf(value_desc, sizeof(value_desc), "Hydrostatic Level %.2f%%", display_value);
             } else if (strcmp(sensor->sensor_type, "Level") == 0 && sensor->max_water_level > 0) {
                 display_value = ((sensor->sensor_height - primary_value) / sensor->max_water_level) * 100.0;
                 if (display_value < 0) display_value = 0.0;
                 if (display_value > 100) display_value = 100.0;
                 snprintf(value_desc, sizeof(value_desc), "Level %.2f%%", display_value);
+            } else if (strcmp(sensor->sensor_type, "Panda_Level") == 0 && sensor->max_water_level > 0) {
+                // Panda Level: Distance from sensor, formula = (Sensor Height - Raw) / Tank Height × 100
+                display_value = ((sensor->sensor_height - primary_value) / sensor->max_water_level) * 100.0;
+                if (display_value < 0) display_value = 0.0;
+                if (display_value > 100) display_value = 100.0;
+                snprintf(value_desc, sizeof(value_desc), "Panda Level %.2f%%", display_value);
             } else if (strcmp(sensor->sensor_type, "ZEST") == 0 && reg_count >= 4) {
                 // ZEST sensor special handling - 4-register format
                 // Register[0]: Integer part (UINT16)
@@ -6570,7 +6806,7 @@ static esp_err_t test_sensor_handler(httpd_req_t *req)
                 memcpy(&decimal_float, &float_bits, sizeof(float));
                 double value2 = (double)decimal_float;
 
-                display_value = (value1 + value2) * sensor->scale_factor;
+                display_value = (value1 + value2) * test_scale_factor;
                 snprintf(value_desc, sizeof(value_desc), "ZEST: UINT16(%lu) + FLOAT32(%.6f) = %.6f",
                          (unsigned long)integer_part, value2, display_value);
             } else if (strcmp(sensor->sensor_type, "Panda_USM") == 0 && reg_count >= 4) {
@@ -6584,19 +6820,25 @@ static esp_err_t test_sensor_handler(httpd_req_t *req)
                 double net_volume;
                 memcpy(&net_volume, &combined_value64, sizeof(double));
 
-                display_value = net_volume * sensor->scale_factor;
+                display_value = net_volume * test_scale_factor;
                 snprintf(value_desc, sizeof(value_desc), "Panda USM: DOUBLE64 = %.6f m³",
                          display_value);
+            } else if ((strcmp(sensor->sensor_type, "Hydrostatic_Level") == 0 || strcmp(sensor->sensor_type, "Radar Level") == 0) && sensor->max_water_level <= 0) {
+                // Level sensor but max_water_level not configured - show warning
+                snprintf(value_desc, sizeof(value_desc), "Raw: %.0f ⚠ Set Tank Height!", primary_value);
+            } else if ((strcmp(sensor->sensor_type, "Panda_Level") == 0 || strcmp(sensor->sensor_type, "Level") == 0) && sensor->max_water_level <= 0) {
+                // Level sensor but parameters not configured - show warning
+                snprintf(value_desc, sizeof(value_desc), "Raw: %.0f ⚠ Set Heights!", primary_value);
             } else {
-                snprintf(value_desc, sizeof(value_desc), "%s×%.3f", sensor->data_type, sensor->scale_factor);
+                snprintf(value_desc, sizeof(value_desc), "%s×%.3f", test_data_type, test_scale_factor);
             }
-            
+
             snprintf(temp_str, sizeof(temp_str),
                      "<div class='value-box'><b>Configured Value:</b> %.6f (%s)</div>"
                      "<div><b>Raw Hex:</b> <span class='hex-display'>", display_value, value_desc);
             
-            // Add operation team comparison display for Level/Radar Level/Panda_Level sensors
-            if ((strcmp(sensor->sensor_type, "Radar Level") == 0 || strcmp(sensor->sensor_type, "Level") == 0 || strcmp(sensor->sensor_type, "Panda_Level") == 0) && sensor->max_water_level > 0) {
+            // Add operation team comparison display for Level/Radar Level/Panda_Level/Hydrostatic_Level sensors
+            if ((strcmp(sensor->sensor_type, "Level") == 0 || strcmp(sensor->sensor_type, "Panda_Level") == 0) && sensor->max_water_level > 0) {
                 // Calculate level percentage: (Sensor Height - Raw Value) / Tank Height * 100
                 double level_percent = ((sensor->sensor_height - primary_value) / sensor->max_water_level) * 100.0;
                 if (level_percent < 0) level_percent = 0.0;
@@ -6608,11 +6850,30 @@ static esp_err_t test_sensor_handler(httpd_req_t *req)
                          level_percent, sensor->sensor_height, primary_value, sensor->max_water_level);
                 strcat(format_table, temp_str);
                 strcat(format_table, comparison_str);
+            } else if ((strcmp(sensor->sensor_type, "Radar Level") == 0 || strcmp(sensor->sensor_type, "Hydrostatic_Level") == 0) && sensor->max_water_level > 0) {
+                // Hydrostatic/Radar Level: Raw Value IS the water level
+                // Calculate level percentage: Raw Value / Tank Height * 100
+                double level_percent = (primary_value / sensor->max_water_level) * 100.0;
+                if (level_percent < 0) level_percent = 0.0;
+                char comparison_str[300];
+                snprintf(comparison_str, sizeof(comparison_str),
+                         "<br><b style='color:#28a745'>Level Filled: %.2f%%</b><br>"
+                         "<span style='color:#6c757d'>Formula: %.0f / %.2f × 100</span><br>",
+                         level_percent, primary_value, sensor->max_water_level);
+                strcat(format_table, temp_str);
+                strcat(format_table, comparison_str);
             } else if ((strcmp(sensor->sensor_type, "Panda_Level") == 0 || strcmp(sensor->sensor_type, "Level") == 0) && sensor->max_water_level <= 0) {
                 // Warning if height parameters not configured
                 char warning_str[200];
                 snprintf(warning_str, sizeof(warning_str),
                          "<br><b style='color:#dc3545'>⚠ Set Sensor Height & Max Water Level to see Level %%</b><br>");
+                strcat(format_table, temp_str);
+                strcat(format_table, warning_str);
+            } else if ((strcmp(sensor->sensor_type, "Radar Level") == 0 || strcmp(sensor->sensor_type, "Hydrostatic_Level") == 0) && sensor->max_water_level <= 0) {
+                // Warning if tank height not configured for Hydrostatic/Radar
+                char warning_str[200];
+                snprintf(warning_str, sizeof(warning_str),
+                         "<br><b style='color:#dc3545'>⚠ Set Max Water Level (Tank Height) to see Level %%</b><br>");
                 strcat(format_table, temp_str);
                 strcat(format_table, warning_str);
             } else if (strcmp(sensor->sensor_type, "ZEST") == 0 && reg_count >= 4) {
@@ -6907,7 +7168,7 @@ static esp_err_t save_single_sensor_handler(httpd_req_t *req)
                                 g_system_config.sensors[sensor_idx].sub_sensors[sub_idx].quantity = 1;
                             }
                             if (strlen(g_system_config.sensors[sensor_idx].sub_sensors[sub_idx].register_type) == 0) {
-                                strcpy(g_system_config.sensors[sensor_idx].sub_sensors[sub_idx].register_type, "HOLDING_REGISTER");
+                                strcpy(g_system_config.sensors[sensor_idx].sub_sensors[sub_idx].register_type, "HOLDING");
                             }
                             if (strlen(g_system_config.sensors[sensor_idx].sub_sensors[sub_idx].data_type) == 0) {
                                 strcpy(g_system_config.sensors[sensor_idx].sub_sensors[sub_idx].data_type, "UINT16_HI");
@@ -6927,9 +7188,16 @@ static esp_err_t save_single_sensor_handler(httpd_req_t *req)
                             } else if (strcmp(param_type, "quantity") == 0) {
                                 g_system_config.sensors[sensor_idx].sub_sensors[sub_idx].quantity = atoi(decoded_value);
                             } else if (strcmp(param_type, "register_type") == 0) {
-                                strncpy(g_system_config.sensors[sensor_idx].sub_sensors[sub_idx].register_type, decoded_value,
-                                       sizeof(g_system_config.sensors[sensor_idx].sub_sensors[sub_idx].register_type) - 1);
-                                g_system_config.sensors[sensor_idx].sub_sensors[sub_idx].register_type[sizeof(g_system_config.sensors[sensor_idx].sub_sensors[sub_idx].register_type) - 1] = '\0';
+                                // Normalize register_type to short form
+                                if (strcmp(decoded_value, "HOLDING_REGISTER") == 0 || strcmp(decoded_value, "HOLDING") == 0) {
+                                    strcpy(g_system_config.sensors[sensor_idx].sub_sensors[sub_idx].register_type, "HOLDING");
+                                } else if (strcmp(decoded_value, "INPUT_REGISTER") == 0 || strcmp(decoded_value, "INPUT") == 0) {
+                                    strcpy(g_system_config.sensors[sensor_idx].sub_sensors[sub_idx].register_type, "INPUT");
+                                } else {
+                                    strncpy(g_system_config.sensors[sensor_idx].sub_sensors[sub_idx].register_type, decoded_value,
+                                           sizeof(g_system_config.sensors[sensor_idx].sub_sensors[sub_idx].register_type) - 1);
+                                    g_system_config.sensors[sensor_idx].sub_sensors[sub_idx].register_type[sizeof(g_system_config.sensors[sensor_idx].sub_sensors[sub_idx].register_type) - 1] = '\0';
+                                }
                             } else if (strcmp(param_type, "data_type") == 0) {
                                 strncpy(g_system_config.sensors[sensor_idx].sub_sensors[sub_idx].data_type, decoded_value,
                                        sizeof(g_system_config.sensors[sensor_idx].sub_sensors[sub_idx].data_type) - 1);
@@ -7327,9 +7595,79 @@ static esp_err_t edit_sensor_handler(httpd_req_t *req)
                 if (sensor_id >= 0 && sensor_id < g_system_config.sensor_count) {
                     g_system_config.sensors[sensor_id].max_water_level = atof(decoded_value);
                 }
+            } else if (strncmp(param_name, "sensor_", 7) == 0 && strstr(param_name, "_sub_")) {
+                // Handle sub-sensor parameters (pattern: sensor_{index}_sub_{subIndex}_{param})
+                char *sub_start = strstr(param_name, "_sub_");
+                if (sub_start && sensor_id >= 0 && sensor_id < g_system_config.sensor_count) {
+                    int sub_idx = atoi(sub_start + 5);
+                    char *param_type = strchr(sub_start + 5, '_');
+
+                    if (param_type && sub_idx >= 0 && sub_idx < 8) {
+                        param_type++; // Skip the underscore
+                        ESP_LOGI(TAG, "Edit sub-sensor: sensor[%d].sub[%d].%s = %s", sensor_id, sub_idx, param_type, decoded_value);
+
+                        // Enable the sub-sensor when we process any of its parameters
+                        g_system_config.sensors[sensor_id].sub_sensors[sub_idx].enabled = true;
+
+                        // Initialize default values if not already set
+                        if (g_system_config.sensors[sensor_id].sub_sensors[sub_idx].quantity == 0) {
+                            g_system_config.sensors[sensor_id].sub_sensors[sub_idx].quantity = 1;
+                        }
+                        if (strlen(g_system_config.sensors[sensor_id].sub_sensors[sub_idx].register_type) == 0) {
+                            strcpy(g_system_config.sensors[sensor_id].sub_sensors[sub_idx].register_type, "HOLDING");
+                        }
+                        if (strlen(g_system_config.sensors[sensor_id].sub_sensors[sub_idx].data_type) == 0) {
+                            strcpy(g_system_config.sensors[sensor_id].sub_sensors[sub_idx].data_type, "UINT16_HI");
+                        }
+                        if (g_system_config.sensors[sensor_id].sub_sensors[sub_idx].scale_factor == 0.0) {
+                            g_system_config.sensors[sensor_id].sub_sensors[sub_idx].scale_factor = 1.0;
+                        }
+
+                        if (strcmp(param_type, "parameter") == 0) {
+                            strncpy(g_system_config.sensors[sensor_id].sub_sensors[sub_idx].parameter_name, decoded_value,
+                                   sizeof(g_system_config.sensors[sensor_id].sub_sensors[sub_idx].parameter_name) - 1);
+                        } else if (strcmp(param_type, "slave_id") == 0) {
+                            g_system_config.sensors[sensor_id].sub_sensors[sub_idx].slave_id = atoi(decoded_value);
+                        } else if (strcmp(param_type, "register") == 0) {
+                            g_system_config.sensors[sensor_id].sub_sensors[sub_idx].register_address = atoi(decoded_value);
+                        } else if (strcmp(param_type, "quantity") == 0) {
+                            g_system_config.sensors[sensor_id].sub_sensors[sub_idx].quantity = atoi(decoded_value);
+                        } else if (strcmp(param_type, "register_type") == 0) {
+                            // Normalize register_type to short form
+                            if (strcmp(decoded_value, "HOLDING_REGISTER") == 0 || strcmp(decoded_value, "HOLDING") == 0) {
+                                strcpy(g_system_config.sensors[sensor_id].sub_sensors[sub_idx].register_type, "HOLDING");
+                            } else if (strcmp(decoded_value, "INPUT_REGISTER") == 0 || strcmp(decoded_value, "INPUT") == 0) {
+                                strcpy(g_system_config.sensors[sensor_id].sub_sensors[sub_idx].register_type, "INPUT");
+                            } else {
+                                strncpy(g_system_config.sensors[sensor_id].sub_sensors[sub_idx].register_type, decoded_value,
+                                       sizeof(g_system_config.sensors[sensor_id].sub_sensors[sub_idx].register_type) - 1);
+                            }
+                        } else if (strcmp(param_type, "data_type") == 0) {
+                            strncpy(g_system_config.sensors[sensor_id].sub_sensors[sub_idx].data_type, decoded_value,
+                                   sizeof(g_system_config.sensors[sensor_id].sub_sensors[sub_idx].data_type) - 1);
+                        } else if (strcmp(param_type, "scale_factor") == 0 || strcmp(param_type, "scale") == 0) {
+                            g_system_config.sensors[sensor_id].sub_sensors[sub_idx].scale_factor = atof(decoded_value);
+                        }
+
+                        // Update sub-sensor count if this is the highest index
+                        if (sub_idx >= g_system_config.sensors[sensor_id].sub_sensor_count) {
+                            g_system_config.sensors[sensor_id].sub_sensor_count = sub_idx + 1;
+                        }
+
+                        ESP_LOGI(TAG, "Sub-sensor[%d][%d]: param='%s', slave=%d, reg=%d, qty=%d, type='%s', data='%s', scale=%.3f",
+                                 sensor_id, sub_idx,
+                                 g_system_config.sensors[sensor_id].sub_sensors[sub_idx].parameter_name,
+                                 g_system_config.sensors[sensor_id].sub_sensors[sub_idx].slave_id,
+                                 g_system_config.sensors[sensor_id].sub_sensors[sub_idx].register_address,
+                                 g_system_config.sensors[sensor_id].sub_sensors[sub_idx].quantity,
+                                 g_system_config.sensors[sensor_id].sub_sensors[sub_idx].register_type,
+                                 g_system_config.sensors[sensor_id].sub_sensors[sub_idx].data_type,
+                                 g_system_config.sensors[sensor_id].sub_sensors[sub_idx].scale_factor);
+                    }
+                }
             }
         }
-        
+
         if (param_end) {
             param_start = param_end + 1;
         } else {
@@ -7547,7 +7885,7 @@ static esp_err_t test_rs485_handler(httpd_req_t *req)
     
     // Perform Modbus test based on register type
     modbus_result_t result;
-    if (strcmp(register_type, "INPUT") == 0) {
+    if (strcmp(register_type, "INPUT") == 0 || strcmp(register_type, "INPUT_REGISTER") == 0) {
         ESP_LOGI(TAG, "[MODBUS] Reading INPUT registers (function 04)");
         result = modbus_read_input_registers(slave_id, register_address, quantity);
     } else {
@@ -8185,12 +8523,14 @@ static esp_err_t test_rs485_handler(httpd_req_t *req)
             if (scaled_value < 0) scaled_value = 0.0;
             if (scaled_value > 100) scaled_value = 100.0;
             snprintf(scale_desc, sizeof(scale_desc), "Level: %.2f%%", scaled_value);
-        } else if (strcmp(sensor_type, "Radar Level") == 0 && max_water_level > 0) {
-            // Radar Level sensor calculation: (Primary Value / Maximum Water Level) * 100
+        } else if ((strcmp(sensor_type, "Radar Level") == 0 || strcmp(sensor_type, "Hydrostatic_Level") == 0) && max_water_level > 0) {
+            // Hydrostatic/Radar Level sensor calculation: (Raw Value / Tank Height) * 100
+            // Raw value IS the water level (not distance from sensor)
             scaled_value = (primary_value / max_water_level) * 100.0;
             // Ensure percentage is not negative (but allow over 100% to show overflow)
             if (scaled_value < 0) scaled_value = 0.0;
-            snprintf(scale_desc, sizeof(scale_desc), "Radar Level: %.2f%%", scaled_value);
+            snprintf(scale_desc, sizeof(scale_desc), "%s: %.2f%%",
+                     strcmp(sensor_type, "Hydrostatic_Level") == 0 ? "Hydrostatic Level" : "Radar Level", scaled_value);
         } else {
             // Flow-Meter or other sensor types use direct scale factor
             scaled_value = primary_value * scale_factor;
@@ -8201,7 +8541,7 @@ static esp_err_t test_rs485_handler(httpd_req_t *req)
                  primary_value, primary_desc, scaled_value, scale_desc);
         strcat(data_output, temp);
 
-        // Add Level Filled display for Level, Panda_Level and Radar Level sensors
+        // Add Level Filled display for Level, Panda_Level, Hydrostatic_Level and Radar Level sensors
         if ((strcmp(sensor_type, "Level") == 0 || strcmp(sensor_type, "Panda_Level") == 0) && max_water_level > 0) {
             snprintf(temp, 500, "<strong style='color:#28a745'>Level Filled: %.2f%%</strong> (Formula: (%.2f - %.2f) / %.2f × 100)<br>",
                      scaled_value, sensor_height, primary_value * scale_factor, max_water_level);
@@ -8212,9 +8552,16 @@ static esp_err_t test_rs485_handler(httpd_req_t *req)
                      "<span style='color:#6c757d'>Raw Value: %.0f | Set Sensor Height & Max Water Level in sensor config</span><br>",
                      primary_value);
             strcat(data_output, temp);
-        } else if (strcmp(sensor_type, "Radar Level") == 0 && max_water_level > 0) {
-            snprintf(temp, 500, "<strong>Level Filled:</strong> %.2f%% (Calculated using formula: %.6f / %.2f * 100)<br>",
+        } else if ((strcmp(sensor_type, "Radar Level") == 0 || strcmp(sensor_type, "Hydrostatic_Level") == 0) && max_water_level > 0) {
+            // Hydrostatic and Radar Level: Raw value IS the water level
+            snprintf(temp, 500, "<strong style='color:#28a745'>Level Filled: %.2f%%</strong> (Formula: %.0f / %.2f × 100)<br>",
                      scaled_value, primary_value, max_water_level);
+            strcat(data_output, temp);
+        } else if ((strcmp(sensor_type, "Radar Level") == 0 || strcmp(sensor_type, "Hydrostatic_Level") == 0) && max_water_level <= 0) {
+            // Show warning if max_water_level (tank height) is not configured
+            snprintf(temp, 500, "<strong style='color:#dc3545'>⚠ Configure Tank Height (Max Water Level) to see Level %%</strong><br>"
+                     "<span style='color:#6c757d'>Raw Value: %.0f | Set Max Water Level in sensor config</span><br>",
+                     primary_value);
             strcat(data_output, temp);
         }
 
@@ -8414,6 +8761,206 @@ static esp_err_t test_rs485_handler(httpd_req_t *req)
     
     // Clean up allocated memory
     free(response);
+    return ESP_OK;
+}
+
+// QUALITY Sensor Test handler (tests sub-sensors from form data before saving)
+static esp_err_t test_quality_sensor_handler(httpd_req_t *req)
+{
+    char buf[2048];
+    int ret = httpd_req_recv(req, buf, sizeof(buf) - 1);
+    if (ret <= 0) {
+        httpd_resp_send_500(req);
+        return ESP_FAIL;
+    }
+    buf[ret] = '\0';
+    ESP_LOGI(TAG, "Test QUALITY sensor data: %s", buf);
+
+    // Parse baud_rate and parity
+    int baud_rate = 9600;
+    char parity[8] = "none";
+    int sub_sensor_count = 0;
+
+    // Parse basic params
+    char* param = strstr(buf, "baud_rate=");
+    if (param) baud_rate = atoi(param + 10);
+    param = strstr(buf, "parity=");
+    if (param) {
+        char* end = strchr(param + 7, '&');
+        int len = end ? (end - param - 7) : strlen(param + 7);
+        if (len > 0 && len < sizeof(parity)) {
+            strncpy(parity, param + 7, len);
+            parity[len] = '\0';
+        }
+    }
+    param = strstr(buf, "sub_sensor_count=");
+    if (param) sub_sensor_count = atoi(param + 17);
+
+    // Set baud rate
+    modbus_set_baud_rate(baud_rate);
+
+    // Build HTML response
+    char* html = (char*)malloc(8000);
+    if (!html) {
+        httpd_resp_send_500(req);
+        return ESP_FAIL;
+    }
+
+    snprintf(html, 8000,
+             "<div class='test-result'>"
+             "<h4>✓ Water Quality Sensor Test - %d Parameters</h4>"
+             "<table style='width:100%%;border-collapse:collapse;margin:10px 0'>"
+             "<tr style='background:#28a745;color:white'>"
+             "<th style='padding:8px;border:1px solid #ddd'>Parameter</th>"
+             "<th style='padding:8px;border:1px solid #ddd'>Raw Value</th>"
+             "<th style='padding:8px;border:1px solid #ddd'>Scaled Value</th>"
+             "<th style='padding:8px;border:1px solid #ddd'>Data Type</th>"
+             "</tr>", sub_sensor_count);
+
+    int success_count = 0;
+    for (int i = 0; i < sub_sensor_count && i < 8; i++) {
+        char key[64];
+        char param_name[32] = "";
+        int slave_id = 1, reg_addr = 1, quantity = 1;
+        char data_type[32] = "UINT16_BE";
+        char reg_type[16] = "HOLDING";
+        float scale = 1.0f;
+
+        // Parse sub-sensor params
+        snprintf(key, sizeof(key), "sub_%d_param=", i);
+        param = strstr(buf, key);
+        if (param) {
+            char* start = param + strlen(key);
+            char* end = strchr(start, '&');
+            int len = end ? (end - start) : strlen(start);
+            if (len > 0 && len < sizeof(param_name)) {
+                strncpy(param_name, start, len);
+                param_name[len] = '\0';
+                // URL decode
+                char decoded[32];
+                url_decode(decoded, param_name);
+                strcpy(param_name, decoded);
+            }
+        }
+
+        snprintf(key, sizeof(key), "sub_%d_slave=", i);
+        param = strstr(buf, key);
+        if (param) slave_id = atoi(param + strlen(key));
+
+        snprintf(key, sizeof(key), "sub_%d_reg=", i);
+        param = strstr(buf, key);
+        if (param) reg_addr = atoi(param + strlen(key));
+
+        snprintf(key, sizeof(key), "sub_%d_qty=", i);
+        param = strstr(buf, key);
+        if (param) quantity = atoi(param + strlen(key));
+
+        snprintf(key, sizeof(key), "sub_%d_dtype=", i);
+        param = strstr(buf, key);
+        if (param) {
+            char* start = param + strlen(key);
+            char* end = strchr(start, '&');
+            int len = end ? (end - start) : strlen(start);
+            if (len > 0 && len < sizeof(data_type)) {
+                strncpy(data_type, start, len);
+                data_type[len] = '\0';
+                char decoded[32];
+                url_decode(decoded, data_type);
+                strcpy(data_type, decoded);
+            }
+        }
+
+        snprintf(key, sizeof(key), "sub_%d_scale=", i);
+        param = strstr(buf, key);
+        if (param) scale = atof(param + strlen(key));
+
+        snprintf(key, sizeof(key), "sub_%d_regtype=", i);
+        param = strstr(buf, key);
+        if (param) {
+            char* start = param + strlen(key);
+            char* end = strchr(start, '&');
+            int len = end ? (end - start) : strlen(start);
+            if (len > 0 && len < sizeof(reg_type)) {
+                strncpy(reg_type, start, len);
+                reg_type[len] = '\0';
+            }
+        }
+
+        if (strlen(param_name) == 0) continue;
+
+        ESP_LOGI(TAG, "[TEST] Sub-sensor %d: %s (Slave=%d, Reg=%d, Qty=%d, Type=%s, Scale=%.2f)",
+                 i, param_name, slave_id, reg_addr, quantity, data_type, scale);
+
+        // Read this sub-sensor
+        modbus_result_t result;
+        if (strcmp(reg_type, "INPUT") == 0) {
+            result = modbus_read_input_registers(slave_id, reg_addr, quantity);
+        } else {
+            result = modbus_read_holding_registers(slave_id, reg_addr, quantity);
+        }
+
+        char row[512];
+        if (result == MODBUS_SUCCESS) {
+            success_count++;
+            uint16_t regs[4] = {0};
+            int reg_count = modbus_get_response_length();
+            if (reg_count > 4) reg_count = 4;
+            for (int r = 0; r < reg_count; r++) {
+                regs[r] = modbus_get_response_buffer(r);
+            }
+
+            double raw_val = 0.0;
+            if (reg_count >= 2 && (strstr(data_type, "UINT32") || strstr(data_type, "INT32"))) {
+                uint32_t val32 = 0;
+                if (strstr(data_type, "3412") || strstr(data_type, "CDAB") || strstr(data_type, "4321")) {
+                    val32 = ((uint32_t)regs[1] << 16) | regs[0];
+                } else {
+                    val32 = ((uint32_t)regs[0] << 16) | regs[1];
+                }
+                raw_val = strstr(data_type, "INT32") ? (double)(int32_t)val32 : (double)val32;
+            } else if (reg_count >= 2 && strstr(data_type, "FLOAT32")) {
+                uint32_t val32 = strstr(data_type, "3412") || strstr(data_type, "CDAB") ?
+                    ((uint32_t)regs[1] << 16) | regs[0] : ((uint32_t)regs[0] << 16) | regs[1];
+                union { uint32_t i; float f; } conv;
+                conv.i = val32;
+                raw_val = (double)conv.f;
+            } else {
+                raw_val = (double)regs[0];
+            }
+            double scaled_val = raw_val * scale;
+
+            // Determine unit
+            const char* unit = "";
+            if (strcasecmp(param_name, "TDS") == 0) unit = "ppm";
+            else if (strcasecmp(param_name, "pH") == 0) unit = "pH";
+            else if (strcasecmp(param_name, "TSS") == 0 || strcasecmp(param_name, "COD") == 0 || strcasecmp(param_name, "BOD") == 0) unit = "mg/L";
+            else if (strcasecmp(param_name, "Temp") == 0 || strcasecmp(param_name, "Temperature") == 0) unit = "°C";
+
+            snprintf(row, sizeof(row),
+                     "<tr><td style='padding:8px;border:1px solid #ddd'><b>%s</b></td>"
+                     "<td style='padding:8px;border:1px solid #ddd'>%.2f</td>"
+                     "<td style='padding:8px;border:1px solid #ddd;color:#28a745;font-weight:bold'>%.2f %s</td>"
+                     "<td style='padding:8px;border:1px solid #ddd;font-size:11px'>%s×%.2f</td></tr>",
+                     param_name, raw_val, scaled_val, unit, data_type, scale);
+        } else {
+            snprintf(row, sizeof(row),
+                     "<tr style='background:#fff3cd'><td style='padding:8px;border:1px solid #ddd'><b>%s</b></td>"
+                     "<td colspan='3' style='padding:8px;border:1px solid #ddd;color:#856404'>⚠ Read Failed (Slave %d, Reg %d)</td></tr>",
+                     param_name, slave_id, reg_addr);
+        }
+        strncat(html, row, 8000 - strlen(html) - 1);
+        vTaskDelay(pdMS_TO_TICKS(50));
+    }
+
+    strncat(html, "</table>", 8000 - strlen(html) - 1);
+    if (success_count == 0) {
+        strncat(html, "<p style='color:#dc3545'>⚠ No sub-sensors could be read</p>", 8000 - strlen(html) - 1);
+    }
+    strncat(html, "</div>", 8000 - strlen(html) - 1);
+
+    httpd_resp_set_type(req, "text/html");
+    httpd_resp_send(req, html, strlen(html));
+    free(html);
     return ESP_OK;
 }
 
@@ -9606,6 +10153,16 @@ static esp_err_t start_webserver(void)
         } else {
             ESP_LOGE(TAG, "ERROR: Failed to register /test_rs485 endpoint: %s", esp_err_to_name(test_rs485_reg));
         }
+
+        // QUALITY Sensor Test endpoint (tests from form data before saving)
+        httpd_uri_t test_quality_uri = {
+            .uri = "/test_quality_sensor",
+            .method = HTTP_POST,
+            .handler = test_quality_sensor_handler,
+            .user_ctx = NULL
+        };
+        httpd_register_uri_handler(g_server, &test_quality_uri);
+        ESP_LOGI(TAG, "SUCCESS: /test_quality_sensor endpoint registered");
 
         // Water Quality Sensor Test endpoint
         httpd_uri_t test_water_quality_uri = {

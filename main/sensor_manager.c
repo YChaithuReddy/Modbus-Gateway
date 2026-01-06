@@ -230,9 +230,14 @@ esp_err_t sensor_test_live(const sensor_config_t *sensor, sensor_test_result_t *
     
     // Default to HOLDING if register_type is empty or invalid
     const char* reg_type = sensor->register_type;
-    if (!reg_type || strlen(reg_type) == 0 || 
-        (strcmp(reg_type, "HOLDING") != 0 && strcmp(reg_type, "INPUT") != 0)) {
-        ESP_LOGW(TAG, "Invalid register type '%s', defaulting to HOLDING", reg_type ? reg_type : "NULL");
+    if (!reg_type || strlen(reg_type) == 0) {
+        reg_type = "HOLDING";
+    } else if (strcmp(reg_type, "INPUT") == 0 || strcmp(reg_type, "INPUT_REGISTER") == 0) {
+        reg_type = "INPUT";  // Normalize to short form
+    } else if (strcmp(reg_type, "HOLDING") == 0 || strcmp(reg_type, "HOLDING_REGISTER") == 0 || strncmp(reg_type, "HOLDING", 7) == 0) {
+        reg_type = "HOLDING";  // Normalize to short form
+    } else {
+        ESP_LOGW(TAG, "Unrecognized register type '%s', defaulting to HOLDING", reg_type);
         reg_type = "HOLDING";
     }
     
@@ -498,6 +503,30 @@ esp_err_t sensor_test_live(const sensor_config_t *sensor, sensor_test_result_t *
 
         ESP_LOGI(TAG, "Panda_Level Calculation: Raw=%u, SensorHeight=%.2f, TankHeight=%.2f, Level%%=%.2f",
                  raw_level, sensor->sensor_height, sensor->max_water_level, result->scaled_value);
+    }
+    // Special handling for Hydrostatic Level sensors (Aquagen) - 1 register at address 0x0004
+    // Formula: Level % = (Raw Value / Tank Height) * 100
+    // Unlike Panda_Level, the raw value IS the water level (not distance from sensor)
+    else if (strcmp(sensor->sensor_type, "Hydrostatic_Level") == 0 && reg_count >= 1) {
+        // Raw level value (actual water level reading)
+        uint16_t raw_level = registers[0];
+        double level_value = (double)raw_level;
+
+        // Apply the level calculation if max_water_level (tank height) is set
+        if (sensor->max_water_level > 0) {
+            // Hydrostatic: Level % = (Raw / Tank Height) * 100
+            result->scaled_value = (level_value / sensor->max_water_level) * 100.0;
+            // Clamp to 0-100% range
+            if (result->scaled_value < 0) result->scaled_value = 0.0;
+            if (result->scaled_value > 100) result->scaled_value = 100.0;
+        } else {
+            // If no tank height set, just return raw value scaled
+            result->scaled_value = level_value * sensor->scale_factor;
+        }
+        result->raw_value = raw_level;
+
+        ESP_LOGI(TAG, "Hydrostatic_Level Calculation: Raw=%u, TankHeight=%.2f, Level%%=%.2f",
+                 raw_level, sensor->max_water_level, result->scaled_value);
     } else {
         // Convert the data using standard conversion
         esp_err_t conv_result = convert_modbus_data(registers, reg_count,
@@ -682,30 +711,31 @@ esp_err_t sensor_read_quality(const sensor_config_t *sensor, sensor_reading_t *r
             any_success = true;
             double scaled_value = test_result.scaled_value;
             
-            // Map parameter to the correct field based on JSON key
-            if (strcmp(sub_sensor->json_key, "pH") == 0) {
+            // Map parameter to the correct field based on parameter_name
+            // Use case-insensitive comparison for flexibility
+            if (strcasecmp(sub_sensor->parameter_name, "pH") == 0 || strcasecmp(sub_sensor->parameter_name, "PH") == 0) {
                 reading->quality_params.ph_value = scaled_value;
                 ESP_LOGI(TAG, "pH: %.2f", scaled_value);
-            } else if (strcmp(sub_sensor->json_key, "TDS") == 0) {
+            } else if (strcasecmp(sub_sensor->parameter_name, "TDS") == 0 || strcasecmp(sub_sensor->parameter_name, "Conductivity") == 0) {
                 reading->quality_params.tds_value = scaled_value;
-                ESP_LOGI(TAG, "TDS: %.2f ppm", scaled_value);
-            } else if (strcmp(sub_sensor->json_key, "Temp") == 0) {
+                ESP_LOGI(TAG, "TDS/Conductivity: %.2f ppm", scaled_value);
+            } else if (strcasecmp(sub_sensor->parameter_name, "Temp") == 0 || strcasecmp(sub_sensor->parameter_name, "Temperature") == 0) {
                 reading->quality_params.temp_value = scaled_value;
-                ESP_LOGI(TAG, "Temperature: %.2fdegC", scaled_value);
-            } else if (strcmp(sub_sensor->json_key, "HUMIDITY") == 0) {
+                ESP_LOGI(TAG, "Temperature: %.2f°C", scaled_value);
+            } else if (strcasecmp(sub_sensor->parameter_name, "HUMIDITY") == 0 || strcasecmp(sub_sensor->parameter_name, "Humidity") == 0) {
                 reading->quality_params.humidity_value = scaled_value;
                 ESP_LOGI(TAG, "Humidity: %.2f%%", scaled_value);
-            } else if (strcmp(sub_sensor->json_key, "TSS") == 0) {
+            } else if (strcasecmp(sub_sensor->parameter_name, "TSS") == 0) {
                 reading->quality_params.tss_value = scaled_value;
                 ESP_LOGI(TAG, "TSS: %.2f mg/L", scaled_value);
-            } else if (strcmp(sub_sensor->json_key, "BOD") == 0) {
+            } else if (strcasecmp(sub_sensor->parameter_name, "BOD") == 0) {
                 reading->quality_params.bod_value = scaled_value;
                 ESP_LOGI(TAG, "BOD: %.2f mg/L", scaled_value);
-            } else if (strcmp(sub_sensor->json_key, "COD") == 0) {
+            } else if (strcasecmp(sub_sensor->parameter_name, "COD") == 0) {
                 reading->quality_params.cod_value = scaled_value;
                 ESP_LOGI(TAG, "COD: %.2f mg/L", scaled_value);
             } else {
-                ESP_LOGW(TAG, "Unknown parameter key: %s", sub_sensor->json_key);
+                ESP_LOGW(TAG, "Unknown parameter: %s (value=%.2f)", sub_sensor->parameter_name, scaled_value);
             }
         } else {
             ESP_LOGE(TAG, "Failed to read sub-sensor %s: %s", 
