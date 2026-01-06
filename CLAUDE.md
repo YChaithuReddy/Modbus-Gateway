@@ -34,6 +34,21 @@ if (sta_netif == NULL) {
 }
 ```
 
+### 4. **⚠️ PARTITION TABLE IS FROZEN - DO NOT MODIFY**
+- **Problem**: OTA updates CANNOT change the partition table
+- **Impact**: If partition table changes, all deployed devices require manual reflash
+- **Current Layout** (v1.3.7 - LOCKED):
+  - NVS: 40KB (0x9000 - 0x13000)
+  - otadata: 8KB
+  - phy_init: 4KB
+  - factory app: ~1.5MB
+  - ota_0/ota_1: ~1.5MB each
+- **Rule**: NEVER modify `partitions.csv` after devices are deployed
+- **If you must change partitions**:
+  - All existing devices need physical access for manual flash
+  - Document the breaking change in release notes
+  - Consider it a "major version" change requiring field service
+
 ## 🛠️ LESSONS LEARNED FROM DEBUGGING SESSIONS
 
 ### Issue #1: Heap Corruption with ZEST Sensors
@@ -94,6 +109,15 @@ if (sta_netif == NULL) {
 **Root Cause**: Replay loop was blocking without reading sensors
 **Solution**: Pause replay every 5 minutes to read sensors and cache to SD
 **File**: `main/main.c` (replay loop with sensor reading)
+
+### Issue #8: OTA Fails After Partition Table Change (v1.3.7)
+**Problem**: OTA update returns HTTP 404 or fails to boot after partition change
+**Root Cause**: v1.3.7 expanded NVS from 24KB to 40KB, changing partition table
+**Impact**: Devices with old partition table cannot receive OTA updates
+**Solution**:
+- Devices must be manually reflashed with `idf.py fullclean && idf.py flash`
+- Partition table is now FROZEN - no future changes allowed
+**Prevention**: Plan partition sizes generously from initial deployment
 
 ## 📋 BEFORE EDITING CHECKLIST
 
@@ -227,7 +251,8 @@ See `docs/DEVICE_TWIN_GUIDE.md` for complete usage documentation.
 
 ---
 
-**Last Updated**: December 31, 2024
-**Last Known Working Commit**: 6b2a057
+**Last Updated**: January 6, 2025
+**Last Known Working Commit**: 83dc356
 **Current Version**: v1.3.7
-**Recent Features Added**: Sensor limit increased to 15, NVS expanded to 40KB, Panda_Level percentage display, improved flash script
+**Partition Table**: FROZEN as of v1.3.7 (NVS: 40KB, required for 15 sensors)
+**Recent Features Added**: QUALITY sensor support with sub-sensors, partition table locked for OTA compatibility
