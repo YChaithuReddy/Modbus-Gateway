@@ -3,7 +3,7 @@
 // Professional industrial IoT gateway with real-time RS485 Modbus communication
 
 // Feature flags - set to 0 to disable and reduce memory usage
-#define ENABLE_CALCULATION_UI 1  // Calculation engine UI enabled (set to 0 to disable and save memory)
+#define ENABLE_CALCULATION_UI 0  // Calculation engine UI disabled (set to 1 to enable)
 
 #include "web_config.h"
 #include "modbus.h"
