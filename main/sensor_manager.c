@@ -34,17 +34,21 @@ esp_err_t convert_modbus_data(uint16_t *registers, int reg_count,
     const char* actual_data_type = data_type;
     const char* actual_byte_order = byte_order;
     
-    // 32-bit Integer formats
-    if (strstr(data_type, "INT32_1234") || strstr(data_type, "UINT32_1234")) {
+    // 32-bit Integer formats - support both numeric (1234) and letter (ABCD) patterns
+    if (strstr(data_type, "INT32_1234") || strstr(data_type, "UINT32_1234") ||
+        strstr(data_type, "INT32_ABCD") || strstr(data_type, "UINT32_ABCD")) {
         actual_data_type = strstr(data_type, "UINT32") ? "UINT32" : "INT32";
         actual_byte_order = "BIG_ENDIAN";     // 1234 = ABCD = BIG_ENDIAN
-    } else if (strstr(data_type, "INT32_4321") || strstr(data_type, "UINT32_4321")) {
+    } else if (strstr(data_type, "INT32_4321") || strstr(data_type, "UINT32_4321") ||
+               strstr(data_type, "INT32_DCBA") || strstr(data_type, "UINT32_DCBA")) {
         actual_data_type = strstr(data_type, "UINT32") ? "UINT32" : "INT32";
         actual_byte_order = "LITTLE_ENDIAN";  // 4321 = DCBA = LITTLE_ENDIAN
-    } else if (strstr(data_type, "INT32_3412") || strstr(data_type, "UINT32_3412")) {
+    } else if (strstr(data_type, "INT32_3412") || strstr(data_type, "UINT32_3412") ||
+               strstr(data_type, "INT32_CDAB") || strstr(data_type, "UINT32_CDAB")) {
         actual_data_type = strstr(data_type, "UINT32") ? "UINT32" : "INT32";
-        actual_byte_order = "LITTLE_ENDIAN";  // 3412 = DCBA (word swap) = reg[1]<<16 | reg[0]
-    } else if (strstr(data_type, "INT32_2143") || strstr(data_type, "UINT32_2143")) {
+        actual_byte_order = "LITTLE_ENDIAN";  // 3412 = CDAB (word swap) = reg[1]<<16 | reg[0]
+    } else if (strstr(data_type, "INT32_2143") || strstr(data_type, "UINT32_2143") ||
+               strstr(data_type, "INT32_BADC") || strstr(data_type, "UINT32_BADC")) {
         actual_data_type = strstr(data_type, "UINT32") ? "UINT32" : "INT32";
         actual_byte_order = "MIXED_BADC";     // 2143 = BADC = MIXED_BADC
     }
@@ -126,7 +130,21 @@ esp_err_t convert_modbus_data(uint16_t *registers, int reg_count,
             *result = (double)combined_value * scale_factor;
             ESP_LOGI(TAG, "UINT32: Raw=0x%08" PRIX32 " (%" PRIu32 ") -> %.6f", combined_value, combined_value, *result);
         }
-        
+
+    } else if ((strcmp(actual_data_type, "UINT32") == 0 || strcmp(actual_data_type, "INT32") == 0) && reg_count == 1) {
+        // Fallback: INT32/UINT32 with only 1 register - treat as 16-bit value
+        ESP_LOGW(TAG, "INT32/UINT32 requested but only 1 register available - using 16-bit interpretation");
+        if (strcmp(actual_data_type, "INT32") == 0) {
+            int16_t signed_val = (int16_t)registers[0];
+            *raw_value = registers[0];
+            *result = (double)signed_val * scale_factor;
+            ESP_LOGI(TAG, "INT32->INT16 fallback: Raw=0x%04" PRIX32 " (%d) -> %.6f", *raw_value, signed_val, *result);
+        } else {
+            *raw_value = registers[0];
+            *result = (double)(*raw_value) * scale_factor;
+            ESP_LOGI(TAG, "UINT32->UINT16 fallback: Raw=0x%04" PRIX32 " (%" PRIu32 ") -> %.6f", *raw_value, *raw_value, *result);
+        }
+
     } else if (strcmp(actual_data_type, "HEX") == 0) {
         // HEX type - concatenate all registers as hex value
         *raw_value = 0;
@@ -671,14 +689,22 @@ esp_err_t sensor_read_quality(const sensor_config_t *sensor, sensor_reading_t *r
     gmtime_r(&now, &timeinfo);
     strftime(reading->timestamp, sizeof(reading->timestamp), "%Y-%m-%dT%H:%M:%SZ", &timeinfo);
 
-    // Initialize default parameter values
-    reading->quality_params.ph_value = 7.0;        // Default pH
-    reading->quality_params.tds_value = 100.0;     // Default TDS
-    reading->quality_params.temp_value = 25.0;     // Default Temperature
-    reading->quality_params.humidity_value = 60.0; // Default Humidity
-    reading->quality_params.tss_value = 10.0;      // Default TSS
-    reading->quality_params.bod_value = 5.0;       // Default BOD
-    reading->quality_params.cod_value = 8.0;       // Default COD
+    // Initialize default parameter values and validity flags
+    reading->quality_params.ph_value = 0.0;
+    reading->quality_params.tds_value = 0.0;
+    reading->quality_params.temp_value = 0.0;
+    reading->quality_params.humidity_value = 0.0;
+    reading->quality_params.tss_value = 0.0;
+    reading->quality_params.bod_value = 0.0;
+    reading->quality_params.cod_value = 0.0;
+    // All validity flags start as false
+    reading->quality_params.ph_valid = false;
+    reading->quality_params.tds_valid = false;
+    reading->quality_params.temp_valid = false;
+    reading->quality_params.humidity_valid = false;
+    reading->quality_params.tss_valid = false;
+    reading->quality_params.bod_valid = false;
+    reading->quality_params.cod_valid = false;
 
     bool any_success = false;
     
@@ -715,24 +741,31 @@ esp_err_t sensor_read_quality(const sensor_config_t *sensor, sensor_reading_t *r
             // Use case-insensitive comparison for flexibility
             if (strcasecmp(sub_sensor->parameter_name, "pH") == 0 || strcasecmp(sub_sensor->parameter_name, "PH") == 0) {
                 reading->quality_params.ph_value = scaled_value;
+                reading->quality_params.ph_valid = true;
                 ESP_LOGI(TAG, "pH: %.2f", scaled_value);
             } else if (strcasecmp(sub_sensor->parameter_name, "TDS") == 0 || strcasecmp(sub_sensor->parameter_name, "Conductivity") == 0) {
                 reading->quality_params.tds_value = scaled_value;
+                reading->quality_params.tds_valid = true;
                 ESP_LOGI(TAG, "TDS/Conductivity: %.2f ppm", scaled_value);
             } else if (strcasecmp(sub_sensor->parameter_name, "Temp") == 0 || strcasecmp(sub_sensor->parameter_name, "Temperature") == 0) {
                 reading->quality_params.temp_value = scaled_value;
+                reading->quality_params.temp_valid = true;
                 ESP_LOGI(TAG, "Temperature: %.2f°C", scaled_value);
             } else if (strcasecmp(sub_sensor->parameter_name, "HUMIDITY") == 0 || strcasecmp(sub_sensor->parameter_name, "Humidity") == 0) {
                 reading->quality_params.humidity_value = scaled_value;
+                reading->quality_params.humidity_valid = true;
                 ESP_LOGI(TAG, "Humidity: %.2f%%", scaled_value);
             } else if (strcasecmp(sub_sensor->parameter_name, "TSS") == 0) {
                 reading->quality_params.tss_value = scaled_value;
+                reading->quality_params.tss_valid = true;
                 ESP_LOGI(TAG, "TSS: %.2f mg/L", scaled_value);
             } else if (strcasecmp(sub_sensor->parameter_name, "BOD") == 0) {
                 reading->quality_params.bod_value = scaled_value;
+                reading->quality_params.bod_valid = true;
                 ESP_LOGI(TAG, "BOD: %.2f mg/L", scaled_value);
             } else if (strcasecmp(sub_sensor->parameter_name, "COD") == 0) {
                 reading->quality_params.cod_value = scaled_value;
+                reading->quality_params.cod_valid = true;
                 ESP_LOGI(TAG, "COD: %.2f mg/L", scaled_value);
             } else {
                 ESP_LOGW(TAG, "Unknown parameter: %s (value=%.2f)", sub_sensor->parameter_name, scaled_value);

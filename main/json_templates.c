@@ -477,38 +477,50 @@ esp_err_t generate_quality_sensor_json(const sensor_reading_t* reading, char* js
     if (!reading || !json_buffer || buffer_size == 0) {
         return ESP_ERR_INVALID_ARG;
     }
-    
+
     ESP_LOGI(TAG, "Generating JSON for quality sensor reading: %s", reading->unit_id);
-    
+
     // Clear buffer
     memset(json_buffer, 0, buffer_size);
-    
-    // Create JSON for water quality sensor with actual parameter values
+
+    // Build params_data with only valid parameters
+    char params_data[256] = "";
+
+    if (reading->quality_params.ph_valid) {
+        snprintf(params_data + strlen(params_data), sizeof(params_data) - strlen(params_data),
+            "%s\"pH\":%.2f", strlen(params_data) > 0 ? "," : "", reading->quality_params.ph_value);
+    }
+    if (reading->quality_params.tds_valid) {
+        snprintf(params_data + strlen(params_data), sizeof(params_data) - strlen(params_data),
+            "%s\"TDS\":%.2f", strlen(params_data) > 0 ? "," : "", reading->quality_params.tds_value);
+    }
+    if (reading->quality_params.temp_valid) {
+        snprintf(params_data + strlen(params_data), sizeof(params_data) - strlen(params_data),
+            "%s\"Temp\":%.2f", strlen(params_data) > 0 ? "," : "", reading->quality_params.temp_value);
+    }
+    if (reading->quality_params.humidity_valid) {
+        snprintf(params_data + strlen(params_data), sizeof(params_data) - strlen(params_data),
+            "%s\"HUMIDITY\":%.2f", strlen(params_data) > 0 ? "," : "", reading->quality_params.humidity_value);
+    }
+    if (reading->quality_params.tss_valid) {
+        snprintf(params_data + strlen(params_data), sizeof(params_data) - strlen(params_data),
+            "%s\"TSS\":%.2f", strlen(params_data) > 0 ? "," : "", reading->quality_params.tss_value);
+    }
+    if (reading->quality_params.bod_valid) {
+        snprintf(params_data + strlen(params_data), sizeof(params_data) - strlen(params_data),
+            "%s\"BOD\":%.2f", strlen(params_data) > 0 ? "," : "", reading->quality_params.bod_value);
+    }
+    if (reading->quality_params.cod_valid) {
+        snprintf(params_data + strlen(params_data), sizeof(params_data) - strlen(params_data),
+            "%s\"COD\":%.2f", strlen(params_data) > 0 ? "," : "", reading->quality_params.cod_value);
+    }
+
+    // Create JSON for water quality sensor with only valid parameter values
+    // Field order: params_data → type → created_on → unit_id (matching installed device format)
     snprintf(json_buffer, buffer_size,
-        "{"
-        "\"params_data\":{"
-        "\"pH\":%.2f,"
-        "\"TDS\":%.2f,"
-        "\"Temp\":%.2f,"
-        "\"HUMIDITY\":%.2f,"
-        "\"TSS\":%.2f,"
-        "\"BOD\":%.2f,"
-        "\"COD\":%.2f"
-        "},"
-        "\"type\":\"QUALITY\","
-        "\"created_on\":\"%s\","
-        "\"unit_id\":\"%s\""
-        "}",
-        reading->quality_params.ph_value,
-        reading->quality_params.tds_value,
-        reading->quality_params.temp_value,
-        reading->quality_params.humidity_value,
-        reading->quality_params.tss_value,
-        reading->quality_params.bod_value,
-        reading->quality_params.cod_value,
-        reading->timestamp,
-        reading->unit_id);
-    
+        "{\"params_data\":{%s},\"type\":\"QUALITY\",\"created_on\":\"%s\",\"unit_id\":\"%s\"}",
+        params_data, reading->timestamp, reading->unit_id);
+
     ESP_LOGI(TAG, "Quality JSON generated (%d bytes): %s", strlen(json_buffer), json_buffer);
     return ESP_OK;
 }

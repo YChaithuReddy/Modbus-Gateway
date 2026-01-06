@@ -2137,11 +2137,59 @@ static void create_telemetry_payload(char* payload, size_t payload_size) {
                     }
 
                     // Build simple flat JSON format
-                    // Format: {"unit_id":"ZEST001","type":"FLOW","consumption":"50.000","created_on":"2025-12-20T07:11:16Z"}
                     char sensor_payload[512];
-                    snprintf(sensor_payload, sizeof(sensor_payload),
-                        "{\"unit_id\":\"%s\",\"type\":\"%s\",\"%s\":\"%.3f\",\"created_on\":\"%s\"}",
-                        matching_sensor->unit_id, type_value, value_key, readings[i].value, timestamp);
+
+                    // Special handling for QUALITY sensors - include only actually read sub-sensor values
+                    if (strcasecmp(matching_sensor->sensor_type, "QUALITY") == 0) {
+                        // Build JSON with only valid water quality parameters
+                        char params_data[256] = "";
+                        int param_count = 0;
+
+                        if (readings[i].quality_params.ph_valid) {
+                            param_count += snprintf(params_data + strlen(params_data),
+                                sizeof(params_data) - strlen(params_data),
+                                "%s\"pH\":%.2f", param_count > 0 ? "," : "", readings[i].quality_params.ph_value);
+                        }
+                        if (readings[i].quality_params.tds_valid) {
+                            param_count += snprintf(params_data + strlen(params_data),
+                                sizeof(params_data) - strlen(params_data),
+                                "%s\"TDS\":%.2f", strlen(params_data) > 0 ? "," : "", readings[i].quality_params.tds_value);
+                        }
+                        if (readings[i].quality_params.temp_valid) {
+                            param_count += snprintf(params_data + strlen(params_data),
+                                sizeof(params_data) - strlen(params_data),
+                                "%s\"Temp\":%.2f", strlen(params_data) > 0 ? "," : "", readings[i].quality_params.temp_value);
+                        }
+                        if (readings[i].quality_params.humidity_valid) {
+                            param_count += snprintf(params_data + strlen(params_data),
+                                sizeof(params_data) - strlen(params_data),
+                                "%s\"HUMIDITY\":%.2f", strlen(params_data) > 0 ? "," : "", readings[i].quality_params.humidity_value);
+                        }
+                        if (readings[i].quality_params.tss_valid) {
+                            param_count += snprintf(params_data + strlen(params_data),
+                                sizeof(params_data) - strlen(params_data),
+                                "%s\"TSS\":%.2f", strlen(params_data) > 0 ? "," : "", readings[i].quality_params.tss_value);
+                        }
+                        if (readings[i].quality_params.bod_valid) {
+                            param_count += snprintf(params_data + strlen(params_data),
+                                sizeof(params_data) - strlen(params_data),
+                                "%s\"BOD\":%.2f", strlen(params_data) > 0 ? "," : "", readings[i].quality_params.bod_value);
+                        }
+                        if (readings[i].quality_params.cod_valid) {
+                            param_count += snprintf(params_data + strlen(params_data),
+                                sizeof(params_data) - strlen(params_data),
+                                "%s\"COD\":%.2f", strlen(params_data) > 0 ? "," : "", readings[i].quality_params.cod_value);
+                        }
+
+                        snprintf(sensor_payload, sizeof(sensor_payload),
+                            "{\"params_data\":{%s},\"type\":\"QUALITY\",\"created_on\":\"%s\",\"unit_id\":\"%s\"}",
+                            params_data, timestamp, matching_sensor->unit_id);
+                    } else {
+                        // Format: {"unit_id":"ZEST001","type":"FLOW","consumption":"50.000","created_on":"2025-12-20T07:11:16Z"}
+                        snprintf(sensor_payload, sizeof(sensor_payload),
+                            "{\"unit_id\":\"%s\",\"type\":\"%s\",\"%s\":\"%.3f\",\"created_on\":\"%s\"}",
+                            matching_sensor->unit_id, type_value, value_key, readings[i].value, timestamp);
+                    }
 
                     // Send via MQTT if connected
                     if (mqtt_connected && mqtt_client != NULL) {
@@ -2201,8 +2249,16 @@ static void create_telemetry_payload(char* payload, size_t payload_size) {
                     // Generate JSON for this specific sensor using template system
                     esp_err_t json_result;
 
+                    // Check if sensor is QUALITY type - use special JSON format
+                    if (strcasecmp(matching_sensor->sensor_type, "QUALITY") == 0) {
+                        json_result = generate_quality_sensor_json(
+                            &readings[i],
+                            temp_json,
+                            MAX_JSON_PAYLOAD_SIZE
+                        );
+                    }
                     // Check if sensor is ENERGY type and has hex string available
-                    if (strcasecmp(matching_sensor->sensor_type, "ENERGY") == 0 &&
+                    else if (strcasecmp(matching_sensor->sensor_type, "ENERGY") == 0 &&
                         strlen(readings[i].raw_hex) > 0) {
                         json_result = generate_sensor_json_with_hex(
                             matching_sensor,
@@ -3698,7 +3754,7 @@ static void telemetry_task(void *pvParameters)
     ESP_LOGI(TAG, "║         📊 TELEMETRY SENDER TASK STARTED 📊              ║");
     ESP_LOGI(TAG, "╚══════════════════════════════════════════════════════════╝");
     ESP_LOGI(TAG, "[DATA] Telemetry task started on core %d", xPortGetCoreID());
-    ESP_LOGI(TAG, "[DATA] Stack: 8192 bytes | Priority: 3");
+    ESP_LOGI(TAG, "[DATA] Stack: 12288 bytes | Priority: 3");
 
     if (startup_log_mutex != NULL) {
         xSemaphoreGive(startup_log_mutex);
@@ -4652,7 +4708,7 @@ void app_main(void) {
     BaseType_t telemetry_result = xTaskCreatePinnedToCore(
         telemetry_task,
         "telemetry_task",
-        8192,  // Increased stack size to prevent overflow
+        12288,  // Increased stack size for QUALITY sensor sub-sensor handling
         NULL,
         3,  // Lower priority than MQTT
         &telemetry_task_handle,

@@ -25,6 +25,14 @@ typedef struct {
     double tss_value;       // Total Suspended Solids (mg/L)
     double bod_value;       // Biochemical Oxygen Demand (mg/L)
     double cod_value;       // Chemical Oxygen Demand (mg/L)
+    // Validity flags - true if parameter was actually read from sensor
+    bool ph_valid;
+    bool tds_valid;
+    bool temp_valid;
+    bool humidity_valid;
+    bool tss_valid;
+    bool bod_valid;
+    bool cod_valid;
 } quality_params_t;
 
 // Multi-sensor reading result
