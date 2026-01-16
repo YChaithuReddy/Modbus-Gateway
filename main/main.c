@@ -2094,7 +2094,7 @@ static void create_telemetry_payload(char* payload, size_t payload_size) {
             char *batch_payload = malloc(4096);
             if (!batch_payload) {
                 ESP_LOGE(TAG, "[ERROR] Failed to allocate batch payload buffer");
-                return ESP_ERR_NO_MEM;
+                return;
             }
 
             // Count valid sensors first to determine format

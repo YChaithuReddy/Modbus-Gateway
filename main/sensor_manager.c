@@ -384,28 +384,30 @@ esp_err_t sensor_test_live(const sensor_config_t *sensor, sensor_test_result_t *
     }
     // Special handling for ZEST sensors (AquaGen Flow Meter format)
     else if (strcmp(sensor->sensor_type, "ZEST") == 0 && reg_count >= 4) {
-        // ZEST reads 4 registers (per AquaGen Modbus documentation):
-        // Register [0] @ 0x1019: Cumulative Flow Integer part (16-bit UINT)
-        // Register [1]: Unused (0x0000)
-        // Registers [2,3] @ 0x101B-101C: Cumulative Flow Decimal part (FLOAT32, IEEE 754 Big Endian)
-        // Example: 43.675 m³ = 43 (register[0]) + 0.675 (float in registers[2-3])
+        // ZEST reads 4 registers starting at 0x1019:
+        // Actual format observed from device:
+        // Register [0]: Usually 0x0000 (or integer high word if value > 65535)
+        // Register [1]: Integer part OR float high word
+        // Register [2]: Float low word
+        // Register [3]: Usually 0x0000
+        // The float value spans registers[1] and registers[2] as IEEE 754 Big Endian (ABCD)
 
-        // First register contains the integer part (16-bit value)
+        // Check if this is a pure float value (Register[0] is 0 and Register[3] is 0)
+        // Float is in registers[1] and registers[2] as Big Endian
+        uint32_t float_bits = ((uint32_t)registers[1] << 16) | registers[2];
+        float float_value;
+        memcpy(&float_value, &float_bits, sizeof(float));
+
+        // If Register[0] has a value, add it as integer part (for larger values)
         uint32_t integer_part_raw = (uint32_t)registers[0];
         double integer_part = (double)integer_part_raw;
+        double decimal_part = (double)float_value;
 
-        // Registers 2-3 contain decimal part as 32-bit FLOAT Big Endian (ABCD)
-        // Convert to IEEE 754 float: registers[2] is HIGH word, registers[3] is LOW word
-        uint32_t float_bits = ((uint32_t)registers[2] << 16) | registers[3];
-        float decimal_part_float;
-        memcpy(&decimal_part_float, &float_bits, sizeof(float));
-        double decimal_part = (double)decimal_part_float;
-
-        // Sum integer and decimal parts, then apply scale factor
+        // Final value = integer part + float value
         result->scaled_value = (integer_part + decimal_part) * sensor->scale_factor;
-        result->raw_value = integer_part_raw; // Store integer part as raw value
+        result->raw_value = integer_part_raw;
 
-        ESP_LOGI(TAG, "ZEST Calculation: Integer=0x%04X(%lu) + Decimal(FLOAT)=0x%08lX(%.6f) = %.6f",
+        ESP_LOGI(TAG, "ZEST Calculation: Integer=0x%04X(%lu) + Float=0x%08lX(%.6f) = %.6f",
                  (unsigned int)integer_part_raw, (unsigned long)integer_part_raw,
                  (unsigned long)float_bits, decimal_part, result->scaled_value);
     }
