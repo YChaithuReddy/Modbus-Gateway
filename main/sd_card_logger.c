@@ -10,8 +10,14 @@
 #include "sdmmc_cmd.h"
 #include "driver/sdspi_host.h"
 #include "driver/spi_common.h"
+#include "freertos/FreeRTOS.h"
+#include "freertos/semphr.h"
 #include "sd_card_logger.h"
 #include "iot_configs.h"
+
+// Mutex for thread-safe SD card access
+static SemaphoreHandle_t sd_card_mutex = NULL;
+#define SD_MUTEX_TIMEOUT_MS 5000
 
 static const char *TAG = "SD_CARD";
 
@@ -141,6 +147,16 @@ static bool is_valid_timestamp(const char* timestamp) {
 
 // Initialize SD card with SPI interface
 esp_err_t sd_card_init(void) {
+    // Create mutex if not exists (only once)
+    if (sd_card_mutex == NULL) {
+        sd_card_mutex = xSemaphoreCreateMutex();
+        if (sd_card_mutex == NULL) {
+            ESP_LOGE(TAG, "Failed to create SD card mutex");
+            return ESP_ERR_NO_MEM;
+        }
+        ESP_LOGI(TAG, "✅ SD card mutex created");
+    }
+
     if (sd_initialized) {
         ESP_LOGW(TAG, "SD card already initialized");
         return ESP_OK;
@@ -520,7 +536,7 @@ static esp_err_t sd_card_save_message_internal(const char* topic, const char* pa
 
 // Save message to SD card with retry logic and RAM buffer fallback
 esp_err_t sd_card_save_message(const char* topic, const char* payload, const char* timestamp) {
-    // Validate parameters first
+    // Validate parameters first (before mutex to fail fast)
     if (topic == NULL || payload == NULL || timestamp == NULL) {
         ESP_LOGE(TAG, "Invalid message parameters");
         return ESP_ERR_INVALID_ARG;
@@ -531,11 +547,20 @@ esp_err_t sd_card_save_message(const char* topic, const char* payload, const cha
         return ESP_ERR_INVALID_SIZE;
     }
 
+    // Acquire mutex for thread safety
+    if (sd_card_mutex != NULL) {
+        if (xSemaphoreTake(sd_card_mutex, pdMS_TO_TICKS(SD_MUTEX_TIMEOUT_MS)) != pdTRUE) {
+            ESP_LOGW(TAG, "SD card mutex timeout - using RAM buffer");
+            return sd_card_add_to_ram_buffer(topic, payload, timestamp);
+        }
+    }
+
     // If SD card is not available, use RAM buffer fallback
     if (!sd_available) {
         ESP_LOGW(TAG, "SD card not available - using RAM buffer fallback");
         sd_error_count++;
         last_error_time = esp_timer_get_time() / 1000000;
+        if (sd_card_mutex != NULL) xSemaphoreGive(sd_card_mutex);
         return sd_card_add_to_ram_buffer(topic, payload, timestamp);
     }
 
@@ -547,6 +572,7 @@ esp_err_t sd_card_save_message(const char* topic, const char* payload, const cha
 
         if (sd_card_check_space(estimated_msg_size) != ESP_OK) {
             ESP_LOGE(TAG, "❌ SD card still full - using RAM buffer");
+            if (sd_card_mutex != NULL) xSemaphoreGive(sd_card_mutex);
             return sd_card_add_to_ram_buffer(topic, payload, timestamp);
         }
     }
@@ -564,6 +590,7 @@ esp_err_t sd_card_save_message(const char* topic, const char* payload, const cha
         if (result == ESP_OK) {
             ESP_LOGI(TAG, "💾 Message saved to SD card with ID: %lu", message_id_counter);
             sd_error_count = 0;  // Reset error count on success
+            if (sd_card_mutex != NULL) xSemaphoreGive(sd_card_mutex);
             return ESP_OK;
         }
 
@@ -596,12 +623,14 @@ esp_err_t sd_card_save_message(const char* topic, const char* payload, const cha
         if (result == ESP_OK) {
             ESP_LOGI(TAG, "💾 Message saved after recovery with ID: %lu", message_id_counter);
             sd_error_count = 0;
+            if (sd_card_mutex != NULL) xSemaphoreGive(sd_card_mutex);
             return ESP_OK;
         }
     }
 
     // Recovery failed - use RAM buffer as last resort
     ESP_LOGE(TAG, "❌ SD card recovery failed - saving to RAM buffer");
+    if (sd_card_mutex != NULL) xSemaphoreGive(sd_card_mutex);
     return sd_card_add_to_ram_buffer(topic, payload, timestamp);
 }
 
@@ -649,9 +678,18 @@ esp_err_t sd_card_replay_messages(void (*publish_callback)(const pending_message
         return ESP_ERR_INVALID_ARG;
     }
 
+    // Acquire mutex for thread safety
+    if (sd_card_mutex != NULL) {
+        if (xSemaphoreTake(sd_card_mutex, pdMS_TO_TICKS(SD_MUTEX_TIMEOUT_MS)) != pdTRUE) {
+            ESP_LOGW(TAG, "SD card mutex timeout in replay_messages");
+            return ESP_ERR_TIMEOUT;
+        }
+    }
+
     FILE *file = fopen(pending_messages_file, "r");
     if (file == NULL) {
         ESP_LOGI(TAG, "No pending messages file found");
+        if (sd_card_mutex != NULL) xSemaphoreGive(sd_card_mutex);
         return ESP_OK;
     }
 
@@ -661,6 +699,7 @@ esp_err_t sd_card_replay_messages(void (*publish_callback)(const pending_message
     if (total_messages == 0) {
         ESP_LOGI(TAG, "No messages to replay");
         fclose(file);
+        if (sd_card_mutex != NULL) xSemaphoreGive(sd_card_mutex);
         return ESP_OK;
     }
 
@@ -720,6 +759,7 @@ esp_err_t sd_card_replay_messages(void (*publish_callback)(const pending_message
             file = fopen(pending_messages_file, "r");
             if (file == NULL) {
                 ESP_LOGI(TAG, "No more pending messages after corruption cleanup");
+                if (sd_card_mutex != NULL) xSemaphoreGive(sd_card_mutex);
                 return ESP_OK;
             }
             continue;
@@ -818,6 +858,7 @@ esp_err_t sd_card_replay_messages(void (*publish_callback)(const pending_message
             file = fopen(pending_messages_file, "r");
             if (file == NULL) {
                 ESP_LOGI(TAG, "No more pending messages after cleanup (deleted %lu corrupted)", deleted_corrupt_count);
+                if (sd_card_mutex != NULL) xSemaphoreGive(sd_card_mutex);
                 return ESP_OK;
             }
             continue;
@@ -832,6 +873,7 @@ esp_err_t sd_card_replay_messages(void (*publish_callback)(const pending_message
             file = fopen(pending_messages_file, "r");
             if (file == NULL) {
                 ESP_LOGI(TAG, "No more pending messages after cleanup");
+                if (sd_card_mutex != NULL) xSemaphoreGive(sd_card_mutex);
                 return ESP_OK;
             }
             continue;
@@ -864,6 +906,7 @@ esp_err_t sd_card_replay_messages(void (*publish_callback)(const pending_message
         ESP_LOGW(TAG, "🧹 Cleaned up %lu corrupted/invalid messages during replay", deleted_corrupt_count);
     }
     ESP_LOGI(TAG, "✅ Replayed %lu messages", replayed_count);
+    if (sd_card_mutex != NULL) xSemaphoreGive(sd_card_mutex);
     return ESP_OK;
 }
 
@@ -873,9 +916,18 @@ esp_err_t sd_card_remove_message(uint32_t message_id) {
         return ESP_ERR_INVALID_STATE;
     }
 
+    // Acquire mutex for thread safety
+    if (sd_card_mutex != NULL) {
+        if (xSemaphoreTake(sd_card_mutex, pdMS_TO_TICKS(SD_MUTEX_TIMEOUT_MS)) != pdTRUE) {
+            ESP_LOGW(TAG, "SD card mutex timeout in remove_message");
+            return ESP_ERR_TIMEOUT;
+        }
+    }
+
     FILE *source_file = fopen(pending_messages_file, "r");
     if (source_file == NULL) {
         ESP_LOGW(TAG, "No pending messages file to clean");
+        if (sd_card_mutex != NULL) xSemaphoreGive(sd_card_mutex);
         return ESP_OK;
     }
 
@@ -883,6 +935,7 @@ esp_err_t sd_card_remove_message(uint32_t message_id) {
     if (temp_file == NULL) {
         ESP_LOGE(TAG, "Failed to create temp file");
         fclose(source_file);
+        if (sd_card_mutex != NULL) xSemaphoreGive(sd_card_mutex);
         return ESP_FAIL;
     }
 
@@ -914,12 +967,14 @@ esp_err_t sd_card_remove_message(uint32_t message_id) {
         if (remove(pending_messages_file) != 0) {
             ESP_LOGE(TAG, "❌ Failed to remove old messages file: %s", strerror(errno));
             remove(temp_messages_file);  // Clean up temp file
+            if (sd_card_mutex != NULL) xSemaphoreGive(sd_card_mutex);
             return ESP_FAIL;
         }
 
         // Rename temp file to original
         if (rename(temp_messages_file, pending_messages_file) != 0) {
             ESP_LOGE(TAG, "❌ Failed to rename temp file: %s", strerror(errno));
+            if (sd_card_mutex != NULL) xSemaphoreGive(sd_card_mutex);
             return ESP_FAIL;
         }
 
@@ -929,6 +984,7 @@ esp_err_t sd_card_remove_message(uint32_t message_id) {
         remove(temp_messages_file);
     }
 
+    if (sd_card_mutex != NULL) xSemaphoreGive(sd_card_mutex);
     return ESP_OK;
 }
 
@@ -938,11 +994,21 @@ esp_err_t sd_card_clear_all_messages(void) {
         return ESP_ERR_INVALID_STATE;
     }
 
+    // Acquire mutex for thread safety
+    if (sd_card_mutex != NULL) {
+        if (xSemaphoreTake(sd_card_mutex, pdMS_TO_TICKS(SD_MUTEX_TIMEOUT_MS)) != pdTRUE) {
+            ESP_LOGW(TAG, "SD card mutex timeout in clear_all_messages");
+            return ESP_ERR_TIMEOUT;
+        }
+    }
+
     if (remove(pending_messages_file) == 0) {
         ESP_LOGI(TAG, "✅ All pending messages cleared");
+        if (sd_card_mutex != NULL) xSemaphoreGive(sd_card_mutex);
         return ESP_OK;
     } else {
         ESP_LOGW(TAG, "No messages file to clear");
+        if (sd_card_mutex != NULL) xSemaphoreGive(sd_card_mutex);
         return ESP_OK; // Not an error if file doesn't exist
     }
 }
@@ -1110,6 +1176,14 @@ esp_err_t sd_card_flush_ram_buffer(void) {
         return ESP_OK;  // Nothing to flush
     }
 
+    // Acquire mutex for thread safety
+    if (sd_card_mutex != NULL) {
+        if (xSemaphoreTake(sd_card_mutex, pdMS_TO_TICKS(SD_MUTEX_TIMEOUT_MS)) != pdTRUE) {
+            ESP_LOGW(TAG, "SD card mutex timeout in flush_ram_buffer");
+            return ESP_ERR_TIMEOUT;
+        }
+    }
+
     ESP_LOGI(TAG, "📤 Flushing %lu messages from RAM buffer to SD card...", ram_buffer_count);
 
     uint32_t flushed = 0;
@@ -1161,5 +1235,6 @@ esp_err_t sd_card_flush_ram_buffer(void) {
 
     ESP_LOGI(TAG, "✅ RAM buffer flush complete: %lu saved, %lu failed", flushed, failed);
 
+    if (sd_card_mutex != NULL) xSemaphoreGive(sd_card_mutex);
     return (failed == 0) ? ESP_OK : ESP_FAIL;
 }

@@ -1282,6 +1282,7 @@ esp_err_t test_sensor_connection(const sensor_config_t *sensor, char *result_buf
 
 // Forward declarations for new REST API handlers
 static esp_err_t save_network_mode_handler(httpd_req_t *req);
+static esp_err_t save_wifi_config_handler(httpd_req_t *req);
 static esp_err_t save_sim_config_handler(httpd_req_t *req);
 static esp_err_t save_sd_config_handler(httpd_req_t *req);
 static esp_err_t save_rtc_config_handler(httpd_req_t *req);
@@ -1383,23 +1384,24 @@ static esp_err_t wifi_scan_handler(httpd_req_t *req)
     
     esp_wifi_scan_get_ap_records(&ap_count, ap_list);
     
-    // Build simple JSON response
-    char *response = malloc(1024);
+    // Build simple JSON response - 2KB buffer for up to 10 networks
+    #define WIFI_SCAN_BUFFER_SIZE 2048
+    char *response = malloc(WIFI_SCAN_BUFFER_SIZE);
     if (!response) {
         free(ap_list);
         httpd_resp_send_500(req);
         scan_in_progress = false;
         return ESP_FAIL;
     }
-    
-    snprintf(response, 1024, "{\"count\":%d,\"networks\":[", ap_count);
-    
+
+    size_t response_len = snprintf(response, WIFI_SCAN_BUFFER_SIZE, "{\"count\":%d,\"networks\":[", ap_count);
+
     for (int i = 0; i < ap_count; i++) {
         char network_item[150];
         const char* security = (ap_list[i].authmode == WIFI_AUTH_OPEN) ? "Open" : "Secured";
         const char* strength = (ap_list[i].rssi > -70) ? "Good" : "Weak";
-        
-        snprintf(network_item, sizeof(network_item),
+
+        int item_len = snprintf(network_item, sizeof(network_item),
             "%s{\"ssid\":\"%.32s\",\"rssi\":%d,\"auth\":\"%s\",\"signal_strength\":\"%s\",\"channel\":%d}",
             (i > 0) ? "," : "",
             ap_list[i].ssid,
@@ -1408,7 +1410,15 @@ static esp_err_t wifi_scan_handler(httpd_req_t *req)
             strength,
             ap_list[i].primary
         );
-        strcat(response, network_item);
+
+        // Safe append with bounds check
+        if (response_len + item_len < WIFI_SCAN_BUFFER_SIZE - 10) {
+            strcat(response, network_item);
+            response_len += item_len;
+        } else {
+            ESP_LOGW(TAG, "WiFi scan response buffer full, truncating");
+            break;
+        }
     }
     strcat(response, "]}");
     
@@ -1911,8 +1921,11 @@ static esp_err_t config_page_handler(httpd_req_t *req)
 
     httpd_resp_set_type(req, "text/html; charset=UTF-8");
 
-    // Cache static content for 1 hour - dramatically speeds up page reloads
-    httpd_resp_set_hdr(req, "Cache-Control", "public, max-age=3600");
+    // Disable caching - ensures form fields always show current config values
+    // Without this, browser shows stale cached data when using back button
+    httpd_resp_set_hdr(req, "Cache-Control", "no-cache, no-store, must-revalidate");
+    httpd_resp_set_hdr(req, "Pragma", "no-cache");
+    httpd_resp_set_hdr(req, "Expires", "0");
 
     // Generate escaped values for HTML safety
     char escaped_ssid[64], escaped_password[128];
@@ -2045,7 +2058,7 @@ static esp_err_t config_page_handler(httpd_req_t *req)
         "<div id='wifi_panel' style='display:%s'>"
         "<div>"
         "<h2 class='section-title'><i>📡</i>WiFi Settings</h2>"
-        "<form method='POST' action='/save_config'>"
+        "<form onsubmit='return saveWiFiConfig()'>"
         "<div class='sensor-card' style='padding:25px'>"
         "<h3 style='text-align:center;margin-top:0;margin-bottom:20px;color:#007bff;font-size:20px'>WiFi Network Configuration</h3>"
         "<div style='text-align:center;margin-bottom:20px'>"
@@ -2062,12 +2075,13 @@ static esp_err_t config_page_handler(httpd_req_t *req)
         "<span onclick='togglePassword()' style='position:absolute;right:10px;top:50%%;transform:translateY(-50%%);cursor:pointer;color:#007bff;font-size:12px;font-weight:600;user-select:none;padding:4px 8px;background:#f0f8ff;border-radius:4px'>SHOW</span>"
         "</div>"
         "</div>"
+        "<div id='wifi_save_result' style='display:none;padding:12px;border-radius:6px;margin-bottom:15px;text-align:center'></div>"
         "<div style='background:#e8f4f8;padding:var(--space-sm);border-radius:var(--radius-sm);margin-top:var(--space-md);border-left:4px solid #17a2b8'>"
         "<small style='color:#0c5460'><strong>💡 Tip:</strong> Click on any scanned network to auto-fill the SSID field.</small>"
         "</div>"
         "<div style='margin-top:25px;padding-top:20px;border-top:1px solid #e0e0e0;text-align:center'>"
-        "<button type='submit' style='background:#28a745;color:white;padding:12px 30px;border:none;border-radius:6px;font-weight:600;cursor:pointer;font-size:16px;box-shadow:0 2px 4px rgba(0,0,0,0.1)'>Save WiFi Settings</button>"
-        "<p style='color:#666;font-size:12px;margin-top:10px'>This saves WiFi settings only. Azure and sensors are configured separately.</p>"
+        "<button type='submit' id='wifi_save_btn' style='background:#28a745;color:white;padding:12px 30px;border:none;border-radius:6px;font-weight:600;cursor:pointer;font-size:16px;box-shadow:0 2px 4px rgba(0,0,0,0.1)'>Save & Connect</button>"
+        "<p style='color:#666;font-size:12px;margin-top:10px'>Saves WiFi settings and connects to the network.</p>"
         "</div>"
         "</div>",
         g_system_config.network_mode == 0 ? "block" : "none",
@@ -4188,6 +4202,54 @@ static esp_err_t config_page_handler(httpd_req_t *req)
         "}"
         "})"
         ".catch(e=>{"
+        "resultDiv.innerHTML='<span style=\"color:#dc3545\">❌ Network Error: '+e.message+'</span>';"
+        "resultDiv.style.backgroundColor='#f8d7da';"
+        "resultDiv.style.borderColor='#f5c6cb';"
+        "resultDiv.style.color='#721c24';"
+        "});"
+        "return false;"
+        "}"
+        "function saveWiFiConfig(){"
+        "const ssid=document.getElementById('wifi_ssid').value;"
+        "const password=document.getElementById('wifi_password').value;"
+        "if(!ssid){alert('Please enter a WiFi network name');return false;}"
+        "const formData=new URLSearchParams();"
+        "formData.append('wifi_ssid',ssid);"
+        "formData.append('wifi_password',password);"
+        "const resultDiv=document.getElementById('wifi_save_result');"
+        "const saveBtn=document.getElementById('wifi_save_btn');"
+        "saveBtn.disabled=true;"
+        "saveBtn.textContent='Connecting...';"
+        "resultDiv.innerHTML='<span style=\"color:#856404\">📡 Saving and connecting to WiFi...</span>';"
+        "resultDiv.style.display='block';"
+        "resultDiv.style.backgroundColor='#fff3cd';"
+        "resultDiv.style.borderColor='#ffeaa7';"
+        "resultDiv.style.color='#856404';"
+        "fetch('/save_wifi_config',{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},body:formData})"
+        ".then(r=>r.json())"
+        ".then(data=>{"
+        "saveBtn.disabled=false;"
+        "saveBtn.textContent='Save & Connect';"
+        "if(data.status==='success'){"
+        "resultDiv.innerHTML='<span style=\"color:#28a745\">✅ '+data.message+'</span>';"
+        "resultDiv.style.backgroundColor='#d4edda';"
+        "resultDiv.style.borderColor='#c3e6cb';"
+        "resultDiv.style.color='#155724';"
+        "}else if(data.status==='connecting'){"
+        "resultDiv.innerHTML='<span style=\"color:#17a2b8\">📶 '+data.message+'</span>';"
+        "resultDiv.style.backgroundColor='#d1ecf1';"
+        "resultDiv.style.borderColor='#bee5eb';"
+        "resultDiv.style.color='#0c5460';"
+        "}else{"
+        "resultDiv.innerHTML='<span style=\"color:#dc3545\">❌ '+data.message+'</span>';"
+        "resultDiv.style.backgroundColor='#f8d7da';"
+        "resultDiv.style.borderColor='#f5c6cb';"
+        "resultDiv.style.color='#721c24';"
+        "}"
+        "})"
+        ".catch(e=>{"
+        "saveBtn.disabled=false;"
+        "saveBtn.textContent='Save & Connect';"
         "resultDiv.innerHTML='<span style=\"color:#dc3545\">❌ Network Error: '+e.message+'</span>';"
         "resultDiv.style.backgroundColor='#f8d7da';"
         "resultDiv.style.borderColor='#f5c6cb';"
@@ -9751,6 +9813,15 @@ static esp_err_t start_webserver(void)
         };
         httpd_register_uri_handler(g_server, &save_network_mode_uri);
 
+        // WiFi configuration endpoint (AJAX-based, no page redirect)
+        httpd_uri_t save_wifi_config_uri = {
+            .uri = "/save_wifi_config",
+            .method = HTTP_POST,
+            .handler = save_wifi_config_handler,
+            .user_ctx = NULL
+        };
+        httpd_register_uri_handler(g_server, &save_wifi_config_uri);
+
         // SIM configuration endpoint
         httpd_uri_t save_sim_config_uri = {
             .uri = "/save_sim_config",
@@ -10150,6 +10221,86 @@ static esp_err_t save_network_mode_handler(httpd_req_t *req) {
 
     httpd_resp_set_type(req, "application/json");
     httpd_resp_sendstr(req, "{\"status\":\"success\",\"message\":\"Network mode saved\"}");
+    return ESP_OK;
+}
+
+// Handler: /save_wifi_config - Save WiFi configuration (AJAX-based, no blocking)
+static esp_err_t save_wifi_config_handler(httpd_req_t *req) {
+    char buf[256];
+    int ret = httpd_req_recv(req, buf, sizeof(buf) - 1);
+    if (ret <= 0) {
+        if (ret == HTTPD_SOCK_ERR_TIMEOUT) {
+            httpd_resp_send_408(req);
+        }
+        return ESP_FAIL;
+    }
+    buf[ret] = '\0';
+
+    // URL decode and parse WiFi credentials
+    char ssid_encoded[64] = {0};
+    char password_encoded[64] = {0};
+    char *param;
+
+    if ((param = strstr(buf, "wifi_ssid=")) != NULL) {
+        sscanf(param, "wifi_ssid=%63[^&]", ssid_encoded);
+    }
+    if ((param = strstr(buf, "wifi_password=")) != NULL) {
+        sscanf(param, "wifi_password=%63[^&\r\n]", password_encoded);
+    }
+
+    // URL decode the values
+    char ssid_decoded[64] = {0};
+    char password_decoded[64] = {0};
+    url_decode(ssid_decoded, ssid_encoded);
+    url_decode(password_decoded, password_encoded);
+
+    // Validate SSID
+    if (strlen(ssid_decoded) == 0) {
+        httpd_resp_set_type(req, "application/json");
+        httpd_resp_sendstr(req, "{\"status\":\"error\",\"message\":\"WiFi SSID cannot be empty\"}");
+        return ESP_OK;
+    }
+
+    // Save to config
+    strncpy(g_system_config.wifi_ssid, ssid_decoded, sizeof(g_system_config.wifi_ssid) - 1);
+    strncpy(g_system_config.wifi_password, password_decoded, sizeof(g_system_config.wifi_password) - 1);
+
+    esp_err_t save_result = config_save_to_nvs(&g_system_config);
+
+    if (save_result != ESP_OK) {
+        ESP_LOGE(TAG, "[WIFI] Failed to save WiFi config to NVS");
+        httpd_resp_set_type(req, "application/json");
+        httpd_resp_sendstr(req, "{\"status\":\"error\",\"message\":\"Failed to save configuration\"}");
+        return ESP_OK;
+    }
+
+    ESP_LOGI(TAG, "[WIFI] WiFi config saved: SSID='%s'", g_system_config.wifi_ssid);
+
+    // Send immediate response (don't block for WiFi connection)
+    httpd_resp_set_type(req, "application/json");
+
+    // Check if we should attempt connection
+    if (strlen(g_system_config.wifi_ssid) > 0) {
+        // Return "connecting" status - connection happens asynchronously
+        char response[256];
+        snprintf(response, sizeof(response),
+            "{\"status\":\"connecting\",\"message\":\"WiFi saved! Connecting to '%s'... Check status in a few seconds.\"}",
+            g_system_config.wifi_ssid);
+        httpd_resp_sendstr(req, response);
+
+        // Start WiFi connection after response is sent (non-blocking approach)
+        // Use a short delay to ensure response is transmitted
+        vTaskDelay(pdMS_TO_TICKS(100));
+
+        // Initiate connection (but don't wait for it to complete)
+        esp_err_t wifi_result = connect_to_wifi_network();
+        if (wifi_result != ESP_OK) {
+            ESP_LOGW(TAG, "[WIFI] WiFi connection initiation returned: %s", esp_err_to_name(wifi_result));
+        }
+    } else {
+        httpd_resp_sendstr(req, "{\"status\":\"success\",\"message\":\"WiFi configuration saved\"}");
+    }
+
     return ESP_OK;
 }
 
