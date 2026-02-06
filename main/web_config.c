@@ -6424,7 +6424,7 @@ static esp_err_t test_sensor_handler(httpd_req_t *req)
         // For QUALITY sensors, test ALL sub-sensors and display results
         if (strcmp(sensor->sensor_type, "QUALITY") == 0 && sensor->sub_sensor_count > 0) {
             // Test all sub-sensors for QUALITY sensors
-            snprintf(format_table, 10000,
+            snprintf(format_table, 6000,
                      "<div class='test-result'>"
                      "<h4>✓ Water Quality Sensor - %d Parameters</h4>"
                      "<table style='width:100%%;border-collapse:collapse;margin:10px 0'>"
@@ -6540,18 +6540,18 @@ static esp_err_t test_sensor_handler(httpd_req_t *req)
                              "<td colspan='3' style='padding:8px;border:1px solid #ddd;color:#856404'>⚠ Read Failed (Slave %d, Reg %d)</td></tr>",
                              sub->parameter_name, sub_slave, sub_reg);
                 }
-                strncat(format_table, row_html, 10000 - strlen(format_table) - 1);
+                strncat(format_table, row_html, 6000 - strlen(format_table) - 1);
 
                 // Small delay between reads
                 vTaskDelay(pdMS_TO_TICKS(50));
             }
 
-            strncat(format_table, "</table>", 10000 - strlen(format_table) - 1);
+            strncat(format_table, "</table>", 6000 - strlen(format_table) - 1);
 
             if (success_count == 0) {
-                strncat(format_table, "<p style='color:#dc3545'>⚠ No sub-sensors could be read</p>", 10000 - strlen(format_table) - 1);
+                strncat(format_table, "<p style='color:#dc3545'>⚠ No sub-sensors could be read</p>", 6000 - strlen(format_table) - 1);
             }
-            strncat(format_table, "</div>", 10000 - strlen(format_table) - 1);
+            strncat(format_table, "</div>", 6000 - strlen(format_table) - 1);
 
             // Send response and cleanup
             httpd_resp_set_type(req, "text/html");
@@ -6593,7 +6593,7 @@ static esp_err_t test_sensor_handler(httpd_req_t *req)
             // Use heap allocation for large content to prevent stack overflow
             
             // Build the comprehensive data format table
-            snprintf(format_table, 10000,
+            snprintf(format_table, 6000,
                      "<div class='test-result'>"
                      "<h4>✓ RS485 Success - %d Registers Read</h4>", reg_count);
             
@@ -6969,7 +6969,7 @@ static esp_err_t test_sensor_handler(httpd_req_t *req)
             }
             
             // Create HTML error response to match success format
-            snprintf(format_table, 10000,
+            snprintf(format_table, 6000,
                 "<div style='background:#f8d7da;padding:15px;border-radius:5px;margin:5px 0;border-left:4px solid #dc3545'>"
                 "<h4 style='color:#721c24;margin:0 0 10px 0'>❌ RS485 Communication Failed</h4>"
                 "<div style='color:#721c24;font-weight:bold'>Error: %s</div>"
@@ -7822,7 +7822,7 @@ static esp_err_t test_rs485_handler(httpd_req_t *req)
         memset(format_table, 0, 6000);  // Initialize buffer to prevent undefined behavior
 
         // Build the comprehensive data format table (using CSS classes to match saved sensor test design)
-        snprintf(format_table, 10000,
+        snprintf(format_table, 6000,
                  "<div class='test-result'>"
                  "<h4>✓ RS485 Success - %d Registers Read</h4>", reg_count);
         

@@ -1114,6 +1114,10 @@ static void mqtt_event_handler(void *handler_args, esp_event_base_t base, int32_
 
             // Subscribe to cloud-to-device messages after connection
             system_config_t* config = get_system_config();
+            if (config == NULL) {
+                ESP_LOGE(TAG, "[MQTT] Config is NULL - cannot subscribe to topics");
+                break;
+            }
             snprintf(c2d_topic, sizeof(c2d_topic), "devices/%s/messages/devicebound/#", config->azure_device_id);
             esp_mqtt_client_subscribe(mqtt_client, c2d_topic, 1);
             ESP_LOGI(TAG, "[MAIL] Subscribed to C2D messages: %s", c2d_topic);
@@ -3108,6 +3112,12 @@ static void handle_device_twin_desired_properties(const char *data, int data_len
     }
 
     system_config_t *config = get_system_config();
+    if (config == NULL) {
+        ESP_LOGE(TAG, "[TWIN] Config is NULL - cannot process Device Twin");
+        cJSON_Delete(root);
+        free(json_str);
+        return;
+    }
     bool config_changed = false;
 
     // Handle $version (Azure sends this with each update)
@@ -3956,6 +3966,11 @@ static void telemetry_task(void *pvParameters)
     }
     
     system_config_t* config = get_system_config();
+    if (config == NULL) {
+        ESP_LOGE(TAG, "[DATA] CRITICAL: System config is NULL - telemetry task cannot run");
+        vTaskDelete(NULL);
+        return;
+    }
     TickType_t last_send_time = 0;
     bool first_telemetry = true;  // Flag to send first telemetry immediately after startup
 

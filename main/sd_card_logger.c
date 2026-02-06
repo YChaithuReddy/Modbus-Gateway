@@ -36,6 +36,7 @@ static const char* temp_messages_file = "/sdcard/tmp.txt";  // Even shorter
 static uint32_t sd_error_count = 0;
 static int64_t last_error_time = 0;
 static int64_t last_recovery_attempt = 0;
+static volatile bool recovery_in_progress = false;  // Recursion guard
 
 // RAM buffer for messages when SD card fails
 typedef struct {
@@ -1015,6 +1016,13 @@ bool sd_card_needs_recovery(void) {
 
 // Attempt to recover failed SD card
 esp_err_t sd_card_attempt_recovery(void) {
+    // Recursion guard - prevent infinite loops
+    if (recovery_in_progress) {
+        ESP_LOGW(TAG, "⚠️ SD card recovery already in progress - skipping");
+        return ESP_ERR_INVALID_STATE;
+    }
+    recovery_in_progress = true;
+
     int64_t current_time = esp_timer_get_time() / 1000000;
     last_recovery_attempt = current_time;
 
@@ -1048,9 +1056,11 @@ esp_err_t sd_card_attempt_recovery(void) {
             sd_card_flush_ram_buffer();
         }
 
+        recovery_in_progress = false;  // Clear recursion guard
         return ESP_OK;
     } else {
         ESP_LOGW(TAG, "❌ SD card recovery failed (error: 0x%x)", ret);
+        recovery_in_progress = false;  // Clear recursion guard
         return ret;
     }
 }
