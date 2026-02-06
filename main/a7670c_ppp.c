@@ -705,7 +705,6 @@ esp_err_t a7670c_ppp_connect(void) {
     ESP_ERROR_CHECK(esp_netif_ppp_set_auth(ppp_netif, NETIF_PPP_AUTHTYPE_PAP, user, pass));
 
     // Create PPP over serial using UART
-    void *uart_handle = (void *)(intptr_t)modem_config.uart_num;
     esp_netif_driver_ifconfig_t driver_cfg = {
         .handle = ppp_netif,
         .transmit = ppp_output_callback,
