@@ -524,10 +524,8 @@ static const char* html_header =
 "var menuItems=document.querySelectorAll('.menu-item');"
 "sections.forEach(function(s){s.classList.remove('active');});"
 "menuItems.forEach(function(m){m.classList.remove('active');});"
-"stopTelemetryAutoRefresh();"
 "document.getElementById(sectionId).classList.add('active');"
 "var activeBtn=document.querySelector('[onclick*=\"'+sectionId+'\"]'); if(activeBtn) activeBtn.classList.add('active');"
-"if(sectionId==='telemetry'){startTelemetryAutoRefresh();}"
 "}"
 "function showAzureSection(){"
 "const password=prompt('Azure IoT Configuration Access\\n\\nPlease enter the admin password to access Azure IoT Hub settings:');"
@@ -1300,7 +1298,7 @@ static esp_err_t api_rtc_sync_handler(httpd_req_t *req);
 static esp_err_t api_rtc_set_handler(httpd_req_t *req);
 static esp_err_t api_modbus_status_handler(httpd_req_t *req);
 static esp_err_t api_azure_status_handler(httpd_req_t *req);
-static esp_err_t api_telemetry_history_handler(httpd_req_t *req);
+// static esp_err_t api_telemetry_history_handler(httpd_req_t *req);  // DISABLED to save 12KB heap
 static esp_err_t modbus_scan_handler(httpd_req_t *req);
 static esp_err_t modbus_read_live_handler(httpd_req_t *req);
 
@@ -2566,43 +2564,15 @@ static esp_err_t config_page_handler(httpd_req_t *req)
         g_system_config.modbus_retry_delay);
     httpd_resp_sendstr_chunk(req, chunk);
 
-    // Telemetry Monitor section
-    snprintf(chunk, sizeof(chunk),
+    // Telemetry Monitor section - DISABLED to save 12KB heap
+    httpd_resp_sendstr_chunk(req,
         "<div id='telemetry' class='section'>"
         "<h2 class='section-title'><i>📊</i>Azure Telemetry Monitor</h2>"
-        "<div style='background:#e3f2fd;border:1px solid #90caf9;padding:15px;margin:10px 0;border-radius:6px'>"
-        "<p style='margin:0;color:#1565c0'><strong>ℹ️ Live Telemetry Stream:</strong> View real-time data being sent to Azure IoT Hub. Last 25 messages shown (newest first). Auto-refreshes every 5 seconds.</p>"
-        "</div>"
-        "<div class='sensor-card' style='padding:20px'>"
-        "<div style='display:flex;justify-content:space-between;align-items:center;margin-bottom:15px'>"
-        "<h3 style='margin:0;color:#007bff'>Recent Telemetry Messages</h3>"
-        "<div style='display:flex;gap:10px'>"
-        "<button onclick='downloadTelemetryCSV()' style='padding:8px 15px;background:#17a2b8;color:white;border:none;border-radius:4px;cursor:pointer;font-weight:600'>📥 Download CSV</button>"
-        "<button onclick='downloadTelemetryJSON()' style='padding:8px 15px;background:#6c757d;color:white;border:none;border-radius:4px;cursor:pointer;font-weight:600'>📥 Download JSON</button>"
-        "<button onclick='refreshTelemetryNow()' style='padding:8px 15px;background:#28a745;color:white;border:none;border-radius:4px;cursor:pointer;font-weight:600'>🔄 Refresh Now</button>"
-        "</div>"
-        "</div>"
-        "<div id='telemetry-status' style='text-align:center;padding:10px;background:#f8f9fa;border-radius:4px;margin-bottom:15px;color:#666;font-size:14px'>"
-        "Loading telemetry data..."
-        "</div>"
-        "<div style='overflow-x:auto'>"
-        "<table style='width:100%%;border-collapse:collapse;font-size:13px'>"
-        "<thead>"
-        "<tr style='background:#007bff;color:white'>"
-        "<th style='padding:12px;text-align:left;border:1px solid #dee2e6'>#</th>"
-        "<th style='padding:12px;text-align:left;border:1px solid #dee2e6'>Date & Time (24h)</th>"
-        "<th style='padding:12px;text-align:left;border:1px solid #dee2e6'>Status</th>"
-        "<th style='padding:12px;text-align:left;border:1px solid #dee2e6;min-width:400px'>Payload (JSON)</th>"
-        "</tr>"
-        "</thead>"
-        "<tbody id='telemetry-table-body'>"
-        "<tr><td colspan='4' style='text-align:center;padding:20px;color:#888'>No data yet...</td></tr>"
-        "</tbody>"
-        "</table>"
-        "</div>"
+        "<div class='sensor-card' style='padding:20px;text-align:center'>"
+        "<p style='color:#6c757d;font-size:16px'>Feature disabled to optimize memory usage.</p>"
+        "<p style='color:#888;font-size:13px'>Telemetry data is still being sent to Azure IoT Hub.</p>"
         "</div>"
         "</div>");
-    httpd_resp_sendstr_chunk(req, chunk);
 
     // Sensors section with sub-menus
     int regular_sensor_count = 0;
@@ -3881,87 +3851,7 @@ static esp_err_t config_page_handler(httpd_req_t *req)
         "const toggle=event.target;"
         "if(input.type==='password'){input.type='text';toggle.textContent='HIDE';}else{input.type='password';toggle.textContent='SHOW';}"
         "}"
-        "let telemetryRefreshInterval=null;"
-        "function updateTelemetryDisplay(){"
-        "fetch('/api/telemetry/history').then(r=>r.json()).then(data=>{"
-        "const tbody=document.getElementById('telemetry-table-body');"
-        "const status=document.getElementById('telemetry-status');"
-        "if(!Array.isArray(data)||data.length===0){"
-        "tbody.innerHTML='<tr><td colspan=\"4\" style=\"text-align:center;padding:20px;color:#888\">No telemetry data yet. Waiting for first send...</td></tr>';"
-        "status.textContent='No messages yet';"
-        "status.style.background='#fff3cd';"
-        "status.style.color='#856404';"
-        "}else{"
-        "let html='';"
-        "data.forEach((item,idx)=>{"
-        "const statusColor=item.success?'#28a745':'#dc3545';"
-        "const statusText=item.success?'✅ Sent':'❌ Failed';"
-        "let payloadStr='N/A';"
-        "try{payloadStr=typeof item.payload==='string'?item.payload:JSON.stringify(item.payload,null,2);}catch(e){payloadStr='Error parsing payload';}"
-        "html+=`<tr style=\"border-bottom:1px solid #dee2e6\">`;"
-        "html+=`<td style=\"padding:8px;border:1px solid #dee2e6;font-weight:600\">${idx+1}</td>`;"
-        "html+=`<td style=\"padding:8px;border:1px solid #dee2e6\">${item.timestamp||'N/A'}</td>`;"
-        "html+=`<td style=\"padding:8px;border:1px solid #dee2e6;color:${statusColor};font-weight:600\">${statusText}</td>`;"
-        "html+=`<td style=\"padding:8px;border:1px solid #dee2e6\"><pre style=\"margin:0;font-size:11px;white-space:pre-wrap;word-wrap:break-word\">${payloadStr}</pre></td>`;"
-        "html+='</tr>';"
-        "});"
-        "tbody.innerHTML=html;"
-        "const now=new Date().toLocaleTimeString();"
-        "status.textContent=`Last updated: ${now} | Total messages: ${data.length}/25`;"
-        "status.style.background='#d4edda';"
-        "status.style.color='#155724';"
-        "}"
-        "}).catch(err=>{"
-        "console.error('Telemetry fetch error:',err);"
-        "document.getElementById('telemetry-status').textContent='⚠️ Error loading telemetry data';"
-        "document.getElementById('telemetry-status').style.background='#f8d7da';"
-        "document.getElementById('telemetry-status').style.color='#721c24';"
-        "});"
-        "}"
-        "function refreshTelemetryNow(){"
-        "updateTelemetryDisplay();"
-        "}"
-        "function startTelemetryAutoRefresh(){"
-        "if(telemetryRefreshInterval)clearInterval(telemetryRefreshInterval);"
-        "updateTelemetryDisplay();"
-        "telemetryRefreshInterval=setInterval(updateTelemetryDisplay,5000);"
-        "}"
-        "function stopTelemetryAutoRefresh(){"
-        "if(telemetryRefreshInterval){"
-        "clearInterval(telemetryRefreshInterval);"
-        "telemetryRefreshInterval=null;"
-        "}"
-        "}"
-        "function downloadTelemetryCSV(){"
-        "fetch('/api/telemetry/history').then(r=>r.json()).then(data=>{"
-        "if(!data.messages||data.messages.length===0){alert('No telemetry data to download');return;}"
-        "let csv='Index,Timestamp,Status,Payload\\n';"
-        "data.messages.forEach((msg,i)=>{"
-        "const payload=msg.payload.replace(/\"/g,'\"\"');"
-        "csv+=`${i+1},${msg.timestamp},${msg.status},\"${payload}\"\\n`;"
-        "});"
-        "const blob=new Blob([csv],{type:'text/csv'});"
-        "const url=URL.createObjectURL(blob);"
-        "const a=document.createElement('a');"
-        "a.href=url;"
-        "a.download='telemetry_'+new Date().toISOString().replace(/[:.]/g,'-').slice(0,-5)+'.csv';"
-        "a.click();"
-        "URL.revokeObjectURL(url);"
-        "}).catch(err=>alert('Error downloading CSV: '+err.message));"
-        "}"
-        "function downloadTelemetryJSON(){"
-        "fetch('/api/telemetry/history').then(r=>r.json()).then(data=>{"
-        "if(!data.messages||data.messages.length===0){alert('No telemetry data to download');return;}"
-        "const jsonStr=JSON.stringify(data,null,2);"
-        "const blob=new Blob([jsonStr],{type:'application/json'});"
-        "const url=URL.createObjectURL(blob);"
-        "const a=document.createElement('a');"
-        "a.href=url;"
-        "a.download='telemetry_'+new Date().toISOString().replace(/[:.]/g,'-').slice(0,-5)+'.json';"
-        "a.click();"
-        "URL.revokeObjectURL(url);"
-        "}).catch(err=>alert('Error downloading JSON: '+err.message));"
-        "}"
+// Telemetry Monitor JavaScript - DISABLED to save 12KB heap
         "function toggleNetworkMode(){"
         "const wifiMode=document.getElementById('mode_wifi').checked;"
         "const simMode=document.getElementById('mode_sim').checked;"
@@ -6076,7 +5966,7 @@ static void parse_form_param(const char *param, const char *value) {
     } else if (strncmp(param, "sensor_", 7) == 0) {
         // Parse sensor parameters
         int sensor_idx = atoi(param + 7);
-        if (sensor_idx >= 0 && sensor_idx < 15) {
+        if (sensor_idx >= 0 && sensor_idx < 10) {  // Max 10 sensors
             char *param_type = strchr(param + 7, '_');
             if (param_type) {
                 param_type++; // Skip the underscore
@@ -6516,13 +6406,13 @@ static esp_err_t test_sensor_handler(httpd_req_t *req)
         
         // Perform real Modbus communication
         // Allocate format_table buffer before modbus operation (needed for both success/error paths)
-        char *format_table = (char*)malloc(10000);  // Increased buffer for 4-register sensors like ZEST
+        char *format_table = (char*)malloc(6000);  // Reduced from 10KB - CSS classes save space
         if (format_table == NULL) {
             ESP_LOGE(TAG, "Failed to allocate format_table buffer");
             httpd_resp_send_500(req);
             return ESP_FAIL;
         }
-        memset(format_table, 0, 10000);  // Initialize buffer to prevent undefined behavior
+        memset(format_table, 0, 6000);  // Initialize buffer to prevent undefined behavior
 
         // Perform Modbus read based on register type
         modbus_result_t result;
@@ -6729,9 +6619,22 @@ static esp_err_t test_sensor_handler(httpd_req_t *req)
                 conv64.i = raw_val64;
                 primary_value = conv64.d * test_scale_factor;
             } else if (reg_count >= 2 && strstr(test_data_type, "FLOAT32")) {
-                uint32_t raw_val = strstr(test_data_type, "4321") ?
-                    ((uint32_t)registers[1] << 16) | registers[0] :
-                    ((uint32_t)registers[0] << 16) | registers[1];
+                uint32_t raw_val;
+                if (strstr(test_data_type, "4321") || strstr(test_data_type, "DCBA")) {
+                    // FLOAT32_4321 or FLOAT32_DCBA - Little endian
+                    raw_val = ((uint32_t)registers[1] << 16) | registers[0];
+                } else if (strstr(test_data_type, "2143") || strstr(test_data_type, "BADC")) {
+                    // FLOAT32_2143 or FLOAT32_BADC - Mixed byte swap
+                    raw_val = ((uint32_t)(((registers[0] & 0xFF) << 8) | ((registers[0] >> 8) & 0xFF)) << 16) |
+                             (((registers[1] & 0xFF) << 8) | ((registers[1] >> 8) & 0xFF));
+                } else if (strstr(test_data_type, "3412") || strstr(test_data_type, "CDAB")) {
+                    // FLOAT32_3412 or FLOAT32_CDAB - Word swap
+                    raw_val = ((uint32_t)(((registers[1] & 0xFF) << 8) | ((registers[1] >> 8) & 0xFF)) << 16) |
+                             (((registers[0] & 0xFF) << 8) | ((registers[0] >> 8) & 0xFF));
+                } else {
+                    // Default: FLOAT32_1234 or FLOAT32_ABCD - Big endian
+                    raw_val = ((uint32_t)registers[0] << 16) | registers[1];
+                }
                 union { uint32_t i; float f; } conv;
                 conv.i = raw_val;
                 primary_value = (double)conv.f * test_scale_factor;
@@ -6740,18 +6643,20 @@ static esp_err_t test_sensor_handler(httpd_req_t *req)
 
                 // Handle comprehensive INT32/UINT32 byte order patterns
                 if (strstr(test_data_type, "4321") || strstr(test_data_type, "DCBA")) {
-                    // UINT32_4321 (DCBA) - Little endian
-                    raw_val32 = ((uint32_t)registers[1] << 16) | registers[0];
-                } else if (strstr(test_data_type, "3412") || strstr(test_data_type, "CDAB")) {
-                    // UINT32_3412 - Word swap (DCBA) - reg[1] high, reg[0] low
+                    // UINT32_4321 or UINT32_DCBA - Little endian
                     raw_val32 = ((uint32_t)registers[1] << 16) | registers[0];
                 } else if (strstr(test_data_type, "2143") || strstr(test_data_type, "BADC")) {
-                    // UINT32_2143 (BADC) - Mixed byte swap
+                    // UINT32_2143 or UINT32_BADC - Mixed byte swap
                     uint16_t reg0_swapped = ((registers[0] & 0xFF) << 8) | ((registers[0] >> 8) & 0xFF);
                     uint16_t reg1_swapped = ((registers[1] & 0xFF) << 8) | ((registers[1] >> 8) & 0xFF);
                     raw_val32 = ((uint32_t)reg0_swapped << 16) | reg1_swapped;
+                } else if (strstr(test_data_type, "3412") || strstr(test_data_type, "CDAB")) {
+                    // UINT32_3412 or UINT32_CDAB - Word swap (byte swap each register, then swap order)
+                    uint16_t reg0_swapped = ((registers[0] & 0xFF) << 8) | ((registers[0] >> 8) & 0xFF);
+                    uint16_t reg1_swapped = ((registers[1] & 0xFF) << 8) | ((registers[1] >> 8) & 0xFF);
+                    raw_val32 = ((uint32_t)reg1_swapped << 16) | reg0_swapped;
                 } else {
-                    // Default: UINT32_1234 (ABCD) - Big endian
+                    // Default: UINT32_1234 or UINT32_ABCD - Big endian
                     raw_val32 = ((uint32_t)registers[0] << 16) | registers[1];
                 }
 
@@ -7154,7 +7059,7 @@ static esp_err_t save_single_sensor_handler(httpd_req_t *req)
                     int sub_idx = atoi(sub_start + 5);
                     char *param_type = strchr(sub_start + 5, '_');
                     
-                    if (param_type && sensor_idx >= 0 && sensor_idx < 15 && sub_idx >= 0 && sub_idx < 8) {
+                    if (param_type && sensor_idx >= 0 && sensor_idx < 10 && sub_idx >= 0 && sub_idx < 8) {  // Max 10 sensors
                         param_type++; // Skip the underscore
                         ESP_LOGI(TAG, "Processing sub-sensor: sensor[%d].sub[%d].%s = %s", sensor_idx, sub_idx, param_type, decoded_value);
                         
@@ -7228,7 +7133,7 @@ static esp_err_t save_single_sensor_handler(httpd_req_t *req)
                     int current_sensor_idx = atoi(param_name + 7);
                     if (sensor_id == -1) sensor_id = current_sensor_idx;
 
-                    if (current_sensor_idx >= 0 && current_sensor_idx < 15) {
+                    if (current_sensor_idx >= 0 && current_sensor_idx < 10) {  // Max 10 sensors
                         char *param_type = strchr(param_name + 7, '_');
                         if (param_type) {
                             param_type++; // Skip the underscore
@@ -7908,18 +7813,18 @@ static esp_err_t test_rs485_handler(httpd_req_t *req)
         
         // Create comprehensive ScadaCore format interpretation table (heap allocated for large content)
         // Increased buffer size to handle ZEST sensors with 4 registers and extensive format interpretations
-        char *format_table = (char*)malloc(10000);  // Increased buffer for 4-register ZEST sensors
+        char *format_table = (char*)malloc(6000);  // Reduced from 10KB - CSS classes save space
         if (format_table == NULL) {
             ESP_LOGE(TAG, "Failed to allocate format_table buffer");
             httpd_resp_send_500(req);
             return ESP_FAIL;
         }
-        memset(format_table, 0, 10000);  // Initialize buffer to prevent undefined behavior
+        memset(format_table, 0, 6000);  // Initialize buffer to prevent undefined behavior
 
-        // Build the comprehensive data format table
+        // Build the comprehensive data format table (using CSS classes to match saved sensor test design)
         snprintf(format_table, 10000,
-                 "<div style='background:#d4edda;padding:15px;border-radius:8px;margin:10px 0;border:1px solid #c3e6cb;box-shadow:0 2px 4px rgba(0,0,0,0.1)'>"
-                 "<h4 style='color:#155724;margin:0 0 10px 0;font-weight:bold'>✓ RS485 Success - %d Registers Read</h4>", reg_count);
+                 "<div class='test-result'>"
+                 "<h4>✓ RS485 Success - %d Registers Read</h4>", reg_count);
         
         // Add primary configured value first
         double primary_value = 0.0;
@@ -7956,15 +7861,19 @@ static esp_err_t test_rs485_handler(httpd_req_t *req)
             primary_value = conv64.d * scale_factor;
         } else if (reg_count >= 2 && strstr(data_type, "FLOAT32")) {
             uint32_t raw_val;
-            if (strstr(data_type, "4321")) {
+            if (strstr(data_type, "4321") || strstr(data_type, "DCBA")) {
+                // FLOAT32_4321 or FLOAT32_DCBA - Little endian
                 raw_val = ((uint32_t)registers[1] << 16) | registers[0];
-            } else if (strstr(data_type, "2143")) {
+            } else if (strstr(data_type, "2143") || strstr(data_type, "BADC")) {
+                // FLOAT32_2143 or FLOAT32_BADC - Mixed byte swap
                 raw_val = ((uint32_t)(((registers[0] & 0xFF) << 8) | ((registers[0] >> 8) & 0xFF)) << 16) |
                          (((registers[1] & 0xFF) << 8) | ((registers[1] >> 8) & 0xFF));
-            } else if (strstr(data_type, "3412")) {
+            } else if (strstr(data_type, "3412") || strstr(data_type, "CDAB")) {
+                // FLOAT32_3412 or FLOAT32_CDAB - Word swap
                 raw_val = ((uint32_t)(((registers[1] & 0xFF) << 8) | ((registers[1] >> 8) & 0xFF)) << 16) |
                          (((registers[0] & 0xFF) << 8) | ((registers[0] >> 8) & 0xFF));
             } else {
+                // Default: FLOAT32_1234 or FLOAT32_ABCD - Big endian
                 raw_val = ((uint32_t)registers[0] << 16) | registers[1];
             }
             union { uint32_t i; float f; } conv;
@@ -7972,29 +7881,37 @@ static esp_err_t test_rs485_handler(httpd_req_t *req)
             primary_value = (double)conv.f * scale_factor;
         } else if (reg_count >= 2 && strstr(data_type, "UINT32")) {
             uint32_t raw_val;
-            if (strstr(data_type, "4321")) {
+            if (strstr(data_type, "4321") || strstr(data_type, "DCBA")) {
+                // UINT32_4321 or UINT32_DCBA - Little endian
                 raw_val = ((uint32_t)registers[1] << 16) | registers[0];
-            } else if (strstr(data_type, "2143")) {
+            } else if (strstr(data_type, "2143") || strstr(data_type, "BADC")) {
+                // UINT32_2143 or UINT32_BADC - Mixed byte swap
                 raw_val = ((uint32_t)(((registers[0] & 0xFF) << 8) | ((registers[0] >> 8) & 0xFF)) << 16) |
                          (((registers[1] & 0xFF) << 8) | ((registers[1] >> 8) & 0xFF));
-            } else if (strstr(data_type, "3412")) {
+            } else if (strstr(data_type, "3412") || strstr(data_type, "CDAB")) {
+                // UINT32_3412 or UINT32_CDAB - Word swap
                 raw_val = ((uint32_t)(((registers[1] & 0xFF) << 8) | ((registers[1] >> 8) & 0xFF)) << 16) |
                          (((registers[0] & 0xFF) << 8) | ((registers[0] >> 8) & 0xFF));
             } else {
+                // Default: UINT32_1234 or UINT32_ABCD - Big endian
                 raw_val = ((uint32_t)registers[0] << 16) | registers[1];
             }
             primary_value = (double)raw_val * scale_factor;
         } else if (reg_count >= 2 && strstr(data_type, "INT32")) {
             uint32_t raw_val;
-            if (strstr(data_type, "4321")) {
+            if (strstr(data_type, "4321") || strstr(data_type, "DCBA")) {
+                // INT32_4321 or INT32_DCBA - Little endian
                 raw_val = ((uint32_t)registers[1] << 16) | registers[0];
-            } else if (strstr(data_type, "2143")) {
+            } else if (strstr(data_type, "2143") || strstr(data_type, "BADC")) {
+                // INT32_2143 or INT32_BADC - Mixed byte swap
                 raw_val = ((uint32_t)(((registers[0] & 0xFF) << 8) | ((registers[0] >> 8) & 0xFF)) << 16) |
                          (((registers[1] & 0xFF) << 8) | ((registers[1] >> 8) & 0xFF));
-            } else if (strstr(data_type, "3412")) {
+            } else if (strstr(data_type, "3412") || strstr(data_type, "CDAB")) {
+                // INT32_3412 or INT32_CDAB - Word swap
                 raw_val = ((uint32_t)(((registers[1] & 0xFF) << 8) | ((registers[1] >> 8) & 0xFF)) << 16) |
                          (((registers[0] & 0xFF) << 8) | ((registers[0] >> 8) & 0xFF));
             } else {
+                // Default: INT32_1234 or INT32_ABCD - Big endian
                 raw_val = ((uint32_t)registers[0] << 16) | registers[1];
             }
             primary_value = (double)((int32_t)raw_val) * scale_factor;
@@ -8111,33 +8028,33 @@ static esp_err_t test_rs485_handler(httpd_req_t *req)
             snprintf(test_value_desc, sizeof(test_value_desc), "%s×%.3f", data_type, scale_factor);
         }
         
-        snprintf(temp_str, sizeof(temp_str), 
-                 "<b>Test Value:</b> %.6f (%s)<br>"
-                 "<b>Raw Hex:</b> ", test_display_value, test_value_desc);
-        
-        // Add operation team comparison display for Level/Radar Level sensors
-        if ((strcmp(sensor_type, "Radar Level") == 0 || strcmp(sensor_type, "Level") == 0) && max_water_level > 0) {
-            char comparison_str[200];
-            snprintf(comparison_str, sizeof(comparison_str), 
-                     "<br><b>Operation Comparison:</b> %.0f → %.1f%% ✅<br>", 
-                     primary_value, test_display_value);
-            strcat(format_table, temp_str);
-            strcat(format_table, comparison_str);
-        } else {
-            strcat(format_table, temp_str);
-        }
-        
+        // Use same layout as saved sensor test (value-box and hex-display classes)
+        snprintf(temp_str, sizeof(temp_str),
+                 "<div class='value-box'><b>Configured Value:</b> %.6f (%s)</div>"
+                 "<div><b>Raw Hex:</b> <span class='hex-display'>", test_display_value, test_value_desc);
+        strcat(format_table, temp_str);
+
+        // Add hex values
         for (int i = 0; i < reg_count && i < 4; i++) {
             snprintf(temp_str, sizeof(temp_str), "%04X ", registers[i]);
             strcat(format_table, temp_str);
         }
-        strcat(format_table, "<br>");
+        strcat(format_table, "</span></div>");
+
+        // Add operation team comparison display for Level/Radar Level sensors
+        if ((strcmp(sensor_type, "Radar Level") == 0 || strcmp(sensor_type, "Level") == 0) && max_water_level > 0) {
+            char comparison_str[200];
+            snprintf(comparison_str, sizeof(comparison_str),
+                     "<div style='margin-top:8px'><b style='color:#28a745'>Operation Comparison:</b> %.0f → %.1f%% ✅</div>",
+                     primary_value, test_display_value);
+            strcat(format_table, comparison_str);
+        }
         
-        // Add comprehensive format interpretations table
+        // Add comprehensive format interpretations table (using CSS classes to match saved sensor test)
         strcat(format_table,
-               "<div style='overflow-x:auto;margin-top:15px'>"
-               "<table style='width:100%;font-size:11px;border-collapse:collapse;min-width:320px'>"
-               "<tr style='background:#495057;color:white'><th colspan='4' style='padding:10px;font-weight:bold;text-align:center'>ALL SCADACORE DATA FORMAT INTERPRETATIONS</th></tr>");
+               "<div style='overflow-x:auto;margin-top:var(--space-md)'>"
+               "<table class='scada-table'>"
+               "<tr class='scada-header-main'><th colspan='4'>ALL SCADACORE DATA FORMAT INTERPRETATIONS</th></tr>");
         
         // 16-bit formats (if 1+ registers)
         if (reg_count >= 1) {
@@ -8169,25 +8086,25 @@ static esp_err_t test_rs485_handler(httpd_req_t *req)
             
             // FLOAT32 comprehensive variations - ScadaCore compatible
             snprintf(temp_str, sizeof(temp_str),
-                     "<tr style='background:#0d6efd;color:white'><th colspan='4' style='padding:8px;font-weight:bold'>FLOAT32 FORMAT INTERPRETATIONS</th></tr>"
-                     "<tr><td style='padding:6px;word-break:break-word'><strong>FLOAT32_1234 (ABCD):</strong></td><td style='padding:6px'>%.6f</td><td style='padding:6px;word-break:break-word'><strong>FLOAT32_4321 (DCBA):</strong></td><td style='padding:6px'>%.6f</td></tr>"
-                     "<tr style='background:#f8f8f8'><td style='padding:6px;word-break:break-word'><strong>FLOAT32_2143 (BADC):</strong></td><td style='padding:6px'>%.6f</td><td style='padding:6px;word-break:break-word'><strong>FLOAT32_3412 (CDAB):</strong></td><td style='padding:6px'>%.6f</td></tr>",
+                     "<tr class='scada-header-float'><th colspan='4'>FLOAT32 FORMAT INTERPRETATIONS</th></tr>"
+                     "<tr><td><strong>FLOAT32_1234 (ABCD):</strong></td><td>%.6f</td><td><strong>FLOAT32_4321 (DCBA):</strong></td><td>%.6f</td></tr>"
+                     "<tr><td><strong>FLOAT32_2143 (BADC):</strong></td><td>%.6f</td><td><strong>FLOAT32_3412 (CDAB):</strong></td><td>%.6f</td></tr>",
                      float_1234_abcd, float_4321_dcba, float_2143_badc, float_3412_cdab);
             strcat(format_table, temp_str);
 
             // INT32 comprehensive variations - ScadaCore compatible
             snprintf(temp_str, sizeof(temp_str),
-                     "<tr style='background:#28a745;color:white'><th colspan='4' style='padding:8px;font-weight:bold'>INT32 FORMAT INTERPRETATIONS</th></tr>"
-                     "<tr><td style='padding:6px;word-break:break-word'><strong>INT32_1234 (ABCD):</strong></td><td style='padding:6px'>%ld</td><td style='padding:6px;word-break:break-word'><strong>INT32_4321 (DCBA):</strong></td><td style='padding:6px'>%ld</td></tr>"
-                     "<tr style='background:#f8f8f8'><td style='padding:6px;word-break:break-word'><strong>INT32_2143 (BADC):</strong></td><td style='padding:6px'>%ld</td><td style='padding:6px;word-break:break-word'><strong>INT32_3412 (CDAB):</strong></td><td style='padding:6px'>%ld</td></tr>",
+                     "<tr class='scada-header-int'><th colspan='4'>INT32 FORMAT INTERPRETATIONS</th></tr>"
+                     "<tr><td><strong>INT32_1234 (ABCD):</strong></td><td>%ld</td><td><strong>INT32_4321 (DCBA):</strong></td><td>%ld</td></tr>"
+                     "<tr><td><strong>INT32_2143 (BADC):</strong></td><td>%ld</td><td><strong>INT32_3412 (CDAB):</strong></td><td>%ld</td></tr>",
                      (int32_t)val_1234_abcd, (int32_t)val_4321_dcba, (int32_t)val_2143_badc, (int32_t)val_3412_cdab);
             strcat(format_table, temp_str);
 
             // UINT32 comprehensive variations - ScadaCore compatible
             snprintf(temp_str, sizeof(temp_str),
-                     "<tr style='background:#fd7e14;color:white'><th colspan='4' style='padding:8px;font-weight:bold'>UINT32 FORMAT INTERPRETATIONS</th></tr>"
-                     "<tr><td style='padding:6px;word-break:break-word'><strong>UINT32_1234 (ABCD):</strong></td><td style='padding:6px'>%lu</td><td style='padding:6px;word-break:break-word'><strong>UINT32_4321 (DCBA):</strong></td><td style='padding:6px'>%lu</td></tr>"
-                     "<tr style='background:#f8f8f8'><td style='padding:6px;word-break:break-word'><strong>UINT32_2143 (BADC):</strong></td><td style='padding:6px'>%lu</td><td style='padding:6px;word-break:break-word'><strong>UINT32_3412 (CDAB):</strong></td><td style='padding:6px'>%lu</td></tr>",
+                     "<tr class='scada-header-uint'><th colspan='4'>UINT32 FORMAT INTERPRETATIONS</th></tr>"
+                     "<tr><td><strong>UINT32_1234 (ABCD):</strong></td><td>%lu</td><td><strong>UINT32_4321 (DCBA):</strong></td><td>%lu</td></tr>"
+                     "<tr><td><strong>UINT32_2143 (BADC):</strong></td><td>%lu</td><td><strong>UINT32_3412 (CDAB):</strong></td><td>%lu</td></tr>",
                      val_1234_abcd, val_4321_dcba, val_2143_badc, val_3412_cdab);
             strcat(format_table, temp_str);
         }
@@ -8218,25 +8135,25 @@ static esp_err_t test_rs485_handler(httpd_req_t *req)
             
             // FLOAT64 comprehensive variations - ScadaCore compatible
             snprintf(temp_str, sizeof(temp_str),
-                     "<tr style='background:#6610f2;color:white'><th colspan='4' style='padding:8px;font-weight:bold'>FLOAT64 FORMAT INTERPRETATIONS</th></tr>"
-                     "<tr><td style='padding:6px;word-break:break-word'><strong>FLOAT64_12345678 (ABCDEFGH):</strong></td><td style='padding:6px;word-break:break-all'>%.3f</td><td style='padding:6px;word-break:break-word'><strong>FLOAT64_87654321 (HGFEDCBA):</strong></td><td style='padding:6px;word-break:break-all'>%.3f</td></tr>"
-                     "<tr style='background:#f8f8f8'><td style='padding:6px;word-break:break-word'><strong>FLOAT64_21436587 (BADCFEHG):</strong></td><td style='padding:6px;word-break:break-all'>%.3f</td><td style='padding:6px;word-break:break-word'><strong>FLOAT64_78563412 (GHEFCDAB):</strong></td><td style='padding:6px;word-break:break-all'>%.3f</td></tr>",
+                     "<tr class='scada-header-float64'><th colspan='4'>FLOAT64 FORMAT INTERPRETATIONS</th></tr>"
+                     "<tr><td><strong>FLOAT64_12345678 (ABCDEFGH):</strong></td><td>%.3f</td><td><strong>FLOAT64_87654321 (HGFEDCBA):</strong></td><td>%.3f</td></tr>"
+                     "<tr><td><strong>FLOAT64_21436587 (BADCFEHG):</strong></td><td>%.3f</td><td><strong>FLOAT64_78563412 (GHEFCDAB):</strong></td><td>%.3f</td></tr>",
                      float64_12345678, float64_87654321, float64_21436587, float64_78563412);
             strcat(format_table, temp_str);
 
             // INT64 comprehensive variations - ScadaCore compatible
             snprintf(temp_str, sizeof(temp_str),
-                     "<tr style='background:#20c997;color:white'><th colspan='4' style='padding:8px;font-weight:bold'>INT64 FORMAT INTERPRETATIONS</th></tr>"
-                     "<tr><td style='padding:6px;word-break:break-word'><strong>INT64_12345678 (ABCDEFGH):</strong></td><td style='padding:6px;word-break:break-all'>%lld</td><td style='padding:6px;word-break:break-word'><strong>INT64_87654321 (HGFEDCBA):</strong></td><td style='padding:6px;word-break:break-all'>%lld</td></tr>"
-                     "<tr style='background:#f8f8f8'><td style='padding:6px;word-break:break-word'><strong>INT64_21436587 (BADCFEHG):</strong></td><td style='padding:6px;word-break:break-all'>%lld</td><td style='padding:6px;word-break:break-word'><strong>INT64_78563412 (GHEFCDAB):</strong></td><td style='padding:6px;word-break:break-all'>%lld</td></tr>",
+                     "<tr class='scada-header-int64'><th colspan='4'>INT64 FORMAT INTERPRETATIONS</th></tr>"
+                     "<tr><td><strong>INT64_12345678 (ABCDEFGH):</strong></td><td>%lld</td><td><strong>INT64_87654321 (HGFEDCBA):</strong></td><td>%lld</td></tr>"
+                     "<tr><td><strong>INT64_21436587 (BADCFEHG):</strong></td><td>%lld</td><td><strong>INT64_78563412 (GHEFCDAB):</strong></td><td>%lld</td></tr>",
                      (int64_t)val64_12345678, (int64_t)val64_87654321, (int64_t)val64_21436587, (int64_t)val64_78563412);
             strcat(format_table, temp_str);
 
             // UINT64 comprehensive variations - ScadaCore compatible
             snprintf(temp_str, sizeof(temp_str),
-                     "<tr style='background:#dc3545;color:white'><th colspan='4' style='padding:8px;font-weight:bold'>UINT64 FORMAT INTERPRETATIONS</th></tr>"
-                     "<tr><td style='padding:6px;word-break:break-word'><strong>UINT64_12345678 (ABCDEFGH):</strong></td><td style='padding:6px;word-break:break-all;max-width:150px'>%llu</td><td style='padding:6px;word-break:break-word'><strong>UINT64_87654321 (HGFEDCBA):</strong></td><td style='padding:6px;word-break:break-all;max-width:150px'>%llu</td></tr>"
-                     "<tr style='background:#f8f8f8'><td style='padding:6px;word-break:break-word'><strong>UINT64_21436587 (BADCFEHG):</strong></td><td style='padding:6px;word-break:break-all;max-width:150px'>%llu</td><td style='padding:6px;word-break:break-word'><strong>UINT64_78563412 (GHEFCDAB):</strong></td><td style='padding:6px;word-break:break-all;max-width:150px'>%llu</td></tr>",
+                     "<tr class='scada-header-uint64'><th colspan='4'>UINT64 FORMAT INTERPRETATIONS</th></tr>"
+                     "<tr><td><strong>UINT64_12345678 (ABCDEFGH):</strong></td><td>%llu</td><td><strong>UINT64_87654321 (HGFEDCBA):</strong></td><td>%llu</td></tr>"
+                     "<tr><td><strong>UINT64_21436587 (BADCFEHG):</strong></td><td>%llu</td><td><strong>UINT64_78563412 (GHEFCDAB):</strong></td><td>%llu</td></tr>",
                      val64_12345678, val64_87654321, val64_21436587, val64_78563412);
             strcat(format_table, temp_str);
             
@@ -8277,478 +8194,7 @@ static esp_err_t test_rs485_handler(httpd_req_t *req)
         free(response);
         free(format_table);
         return ESP_OK;
-        
-        // Feed watchdog before intensive processing
-        // Skip watchdog reset in HTTP handler (task not registered with watchdog)
-        // esp_task_wdt_reset();
-        
-        // Build comprehensive HTML table response like saved sensors (for <= 3 registers)
-        // Increased buffer size to handle ZEST sensor data properly (4 registers)
-        char *data_output = malloc(2400);
-        char *temp = malloc(500);
-        if (!data_output || !temp) {
-            ESP_LOGE(TAG, "Failed to allocate data buffers");
-            if (data_output) free(data_output);
-            if (temp) free(temp);
-            free(response);
-            httpd_resp_send_500(req);
-            return ESP_FAIL;
-        }
-
-        memset(data_output, 0, 2400);
-        memset(temp, 0, 500);
-        
-        // Success header with styling like saved sensors
-        strcat(data_output, "<div style='background:#e8f5e8;padding:10px;border-radius:5px;margin:5px 0'>");
-        strcat(data_output, "<h4 style='color:green;margin:0 0 10px 0'>RS485 Communication Success</h4>");
-        
-        // Primary value interpretation based on selected data type
-        // primary_value already declared above
-        char primary_desc[100] = "";
-        
-        // Interpret based on selected data type
-        if (strstr(data_type, "FLOAT32") && reg_count >= 2) {
-            uint32_t raw_val;
-            if (strstr(data_type, "4321") || strstr(data_type, "DCBA")) {
-                raw_val = ((uint32_t)registers[1] << 16) | registers[0];
-            } else if (strstr(data_type, "2143") || strstr(data_type, "BADC")) {
-                raw_val = ((uint32_t)(((registers[0] & 0xFF) << 8) | ((registers[0] >> 8) & 0xFF)) << 16) | 
-                         (((registers[1] & 0xFF) << 8) | ((registers[1] >> 8) & 0xFF));
-            } else if (strstr(data_type, "3412") || strstr(data_type, "CDAB")) {
-                raw_val = ((uint32_t)(((registers[1] & 0xFF) << 8) | ((registers[1] >> 8) & 0xFF)) << 16) | 
-                         (((registers[0] & 0xFF) << 8) | ((registers[0] >> 8) & 0xFF));
-            } else {
-                raw_val = ((uint32_t)registers[0] << 16) | registers[1]; // 1234/ABCD
-            }
-            union { uint32_t i; float f; } conv;
-            conv.i = raw_val;
-            primary_value = (double)conv.f;
-            snprintf(primary_desc, sizeof(primary_desc), "FLOAT32 (%s)", data_type);
-        } else if (strstr(data_type, "UINT32") && reg_count >= 2) {
-            if (strstr(data_type, "4321") || strstr(data_type, "DCBA")) {
-                primary_value = (double)(((uint32_t)registers[1] << 16) | registers[0]);
-            } else if (strstr(data_type, "2143") || strstr(data_type, "BADC")) {
-                primary_value = (double)(((uint32_t)(((registers[0] & 0xFF) << 8) | ((registers[0] >> 8) & 0xFF)) << 16) | 
-                                        (((registers[1] & 0xFF) << 8) | ((registers[1] >> 8) & 0xFF)));
-            } else if (strstr(data_type, "3412") || strstr(data_type, "CDAB")) {
-                primary_value = (double)(((uint32_t)(((registers[1] & 0xFF) << 8) | ((registers[1] >> 8) & 0xFF)) << 16) | 
-                                        (((registers[0] & 0xFF) << 8) | ((registers[0] >> 8) & 0xFF)));
-            } else {
-                primary_value = (double)(((uint32_t)registers[0] << 16) | registers[1]);
-            }
-            snprintf(primary_desc, sizeof(primary_desc), "UINT32 (%s)", data_type);
-        } else if (strstr(data_type, "INT32") && reg_count >= 2) {
-            uint32_t raw_val;
-            if (strstr(data_type, "4321") || strstr(data_type, "DCBA")) {
-                raw_val = ((uint32_t)registers[1] << 16) | registers[0];
-            } else if (strstr(data_type, "2143") || strstr(data_type, "BADC")) {
-                raw_val = ((uint32_t)(((registers[0] & 0xFF) << 8) | ((registers[0] >> 8) & 0xFF)) << 16) | 
-                         (((registers[1] & 0xFF) << 8) | ((registers[1] >> 8) & 0xFF));
-            } else if (strstr(data_type, "3412") || strstr(data_type, "CDAB")) {
-                raw_val = ((uint32_t)(((registers[1] & 0xFF) << 8) | ((registers[1] >> 8) & 0xFF)) << 16) | 
-                         (((registers[0] & 0xFF) << 8) | ((registers[0] >> 8) & 0xFF));
-            } else {
-                raw_val = ((uint32_t)registers[0] << 16) | registers[1];
-            }
-            primary_value = (double)(int32_t)raw_val;
-            snprintf(primary_desc, sizeof(primary_desc), "INT32 (%s)", data_type);
-        } else if (strstr(data_type, "INT64") && reg_count >= 4) {
-            int64_t int64_val;
-            if (strstr(data_type, "_87654321")) {
-                int64_val = ((int64_t)registers[3] << 48) | ((int64_t)registers[2] << 32) | 
-                           ((int64_t)registers[1] << 16) | registers[0];
-            } else if (strstr(data_type, "_21436587")) {
-                int64_val = ((int64_t)(((registers[0] & 0xFF) << 8) | ((registers[0] >> 8) & 0xFF)) << 48) |
-                           ((int64_t)(((registers[1] & 0xFF) << 8) | ((registers[1] >> 8) & 0xFF)) << 32) |
-                           ((int64_t)(((registers[2] & 0xFF) << 8) | ((registers[2] >> 8) & 0xFF)) << 16) |
-                           (((registers[3] & 0xFF) << 8) | ((registers[3] >> 8) & 0xFF));
-            } else if (strstr(data_type, "_78563412")) {
-                int64_val = ((int64_t)(((registers[3] & 0xFF) << 8) | ((registers[3] >> 8) & 0xFF)) << 48) |
-                           ((int64_t)(((registers[2] & 0xFF) << 8) | ((registers[2] >> 8) & 0xFF)) << 32) |
-                           ((int64_t)(((registers[1] & 0xFF) << 8) | ((registers[1] >> 8) & 0xFF)) << 16) |
-                           (((registers[0] & 0xFF) << 8) | ((registers[0] >> 8) & 0xFF));
-            } else {
-                int64_val = ((int64_t)registers[0] << 48) | ((int64_t)registers[1] << 32) | 
-                           ((int64_t)registers[2] << 16) | registers[3]; // 12345678
-            }
-            primary_value = (double)int64_val;
-            snprintf(primary_desc, sizeof(primary_desc), "INT64 (%s)", data_type);
-        } else if (strstr(data_type, "UINT64") && reg_count >= 4) {
-            uint64_t uint64_val;
-            if (strstr(data_type, "_87654321")) {
-                uint64_val = ((uint64_t)registers[3] << 48) | ((uint64_t)registers[2] << 32) | 
-                            ((uint64_t)registers[1] << 16) | registers[0];
-            } else if (strstr(data_type, "_21436587")) {
-                uint64_val = ((uint64_t)(((registers[0] & 0xFF) << 8) | ((registers[0] >> 8) & 0xFF)) << 48) |
-                            ((uint64_t)(((registers[1] & 0xFF) << 8) | ((registers[1] >> 8) & 0xFF)) << 32) |
-                            ((uint64_t)(((registers[2] & 0xFF) << 8) | ((registers[2] >> 8) & 0xFF)) << 16) |
-                            (((registers[3] & 0xFF) << 8) | ((registers[3] >> 8) & 0xFF));
-            } else if (strstr(data_type, "_78563412")) {
-                uint64_val = ((uint64_t)(((registers[3] & 0xFF) << 8) | ((registers[3] >> 8) & 0xFF)) << 48) |
-                            ((uint64_t)(((registers[2] & 0xFF) << 8) | ((registers[2] >> 8) & 0xFF)) << 32) |
-                            ((uint64_t)(((registers[1] & 0xFF) << 8) | ((registers[1] >> 8) & 0xFF)) << 16) |
-                            (((registers[0] & 0xFF) << 8) | ((registers[0] >> 8) & 0xFF));
-            } else {
-                uint64_val = ((uint64_t)registers[0] << 48) | ((uint64_t)registers[1] << 32) | 
-                            ((uint64_t)registers[2] << 16) | registers[3]; // 12345678
-            }
-            primary_value = (double)uint64_val;
-            snprintf(primary_desc, sizeof(primary_desc), "UINT64 (%s)", data_type);
-        } else if (strstr(data_type, "FLOAT64") && reg_count >= 4) {
-            uint64_t raw_bits;
-            if (strstr(data_type, "_87654321")) {
-                raw_bits = ((uint64_t)registers[3] << 48) | ((uint64_t)registers[2] << 32) | 
-                          ((uint64_t)registers[1] << 16) | registers[0];
-            } else if (strstr(data_type, "_21436587")) {
-                raw_bits = ((uint64_t)(((registers[0] & 0xFF) << 8) | ((registers[0] >> 8) & 0xFF)) << 48) |
-                          ((uint64_t)(((registers[1] & 0xFF) << 8) | ((registers[1] >> 8) & 0xFF)) << 32) |
-                          ((uint64_t)(((registers[2] & 0xFF) << 8) | ((registers[2] >> 8) & 0xFF)) << 16) |
-                          (((registers[3] & 0xFF) << 8) | ((registers[3] >> 8) & 0xFF));
-            } else if (strstr(data_type, "_78563412")) {
-                raw_bits = ((uint64_t)(((registers[3] & 0xFF) << 8) | ((registers[3] >> 8) & 0xFF)) << 48) |
-                          ((uint64_t)(((registers[2] & 0xFF) << 8) | ((registers[2] >> 8) & 0xFF)) << 32) |
-                          ((uint64_t)(((registers[1] & 0xFF) << 8) | ((registers[1] >> 8) & 0xFF)) << 16) |
-                          (((registers[0] & 0xFF) << 8) | ((registers[0] >> 8) & 0xFF));
-            } else {
-                raw_bits = ((uint64_t)registers[0] << 48) | ((uint64_t)registers[1] << 32) | 
-                          ((uint64_t)registers[2] << 16) | registers[3]; // 12345678
-            }
-            union { uint64_t i; double d; } conv64;
-            conv64.i = raw_bits;
-            primary_value = conv64.d;
-            snprintf(primary_desc, sizeof(primary_desc), "FLOAT64 (%s)", data_type);
-        } else if (strstr(data_type, "INT8") && reg_count >= 1) {
-            if (strstr(data_type, "High")) {
-                primary_value = (double)(int8_t)((registers[0] >> 8) & 0xFF);
-            } else {
-                primary_value = (double)(int8_t)(registers[0] & 0xFF);
-            }
-            snprintf(primary_desc, sizeof(primary_desc), "INT8 (%s)", data_type);
-        } else if (strstr(data_type, "UINT8") && reg_count >= 1) {
-            if (strstr(data_type, "High")) {
-                primary_value = (double)((registers[0] >> 8) & 0xFF);
-            } else {
-                primary_value = (double)(registers[0] & 0xFF);
-            }
-            snprintf(primary_desc, sizeof(primary_desc), "UINT8 (%s)", data_type);
-        } else if (strstr(data_type, "UINT16") && reg_count >= 1) {
-            if (strstr(data_type, "LO") || strstr(data_type, "LE")) {
-                primary_value = (double)(((registers[0] & 0xFF) << 8) | ((registers[0] >> 8) & 0xFF));
-            } else {
-                primary_value = (double)registers[0];
-            }
-            snprintf(primary_desc, sizeof(primary_desc), "UINT16 (%s)", data_type);
-        } else if (strstr(data_type, "INT16") && reg_count >= 1) {
-            if (strstr(data_type, "LO") || strstr(data_type, "LE")) {
-                primary_value = (double)(int16_t)(((registers[0] & 0xFF) << 8) | ((registers[0] >> 8) & 0xFF));
-            } else {
-                primary_value = (double)(int16_t)registers[0];
-            }
-            snprintf(primary_desc, sizeof(primary_desc), "INT16 (%s)", data_type);
-        } else if (strstr(data_type, "ZEST_FIXED") && reg_count >= 4) {
-            // ZEST_FIXED: Special format - INT32_BE (first 2 registers) + INT32_LE_SWAP (last 2 registers)
-            // First value: INT32 big-endian from registers[0] and registers[1]
-            int32_t first_value = (int32_t)(((uint32_t)registers[0] << 16) | registers[1]);
-            // Second value: INT32 with byte swap from registers[2] and registers[3]
-            int32_t second_value = (int32_t)(((uint32_t)registers[3] << 16) | registers[2]);
-            // Use first value as primary for display
-            primary_value = (double)first_value;
-            snprintf(primary_desc, sizeof(primary_desc), "ZEST_FIXED (INT32_BE: %ld, INT32_SWAP: %ld)", first_value, second_value);
-        } else if (strstr(data_type, "CLAMPON_FIXED") && reg_count >= 4) {
-            // CLAMPON_FIXED: INT32 (word-swapped) + FLOAT32 (word-swapped)
-            // Registers [0-1]: Integer part (BADC word-swapped) = (reg[1] << 16) | reg[0]
-            // Registers [2-3]: Decimal part as FLOAT32 (BADC word-swapped) = (reg[3] << 16) | reg[2]
-            uint32_t integer_part = ((uint32_t)registers[1] << 16) | registers[0];
-            uint32_t float_bits = ((uint32_t)registers[3] << 16) | registers[2];
-            float decimal_part;
-            memcpy(&decimal_part, &float_bits, sizeof(float));
-            // Total = Integer + Float decimal
-            primary_value = (double)integer_part + (double)decimal_part;
-            snprintf(primary_desc, sizeof(primary_desc), "CLAMPON (INT: %lu + FLOAT: %.6f)", (unsigned long)integer_part, decimal_part);
-        } else if (strstr(data_type, "DAILIAN_EMF_FIXED") && reg_count >= 2) {
-            // DAILIAN_EMF_FIXED: UINT32 word-swapped totaliser
-            // Registers [0-1]: Totaliser value (word-swapped) = (reg[1] << 16) | reg[0]
-            uint32_t totaliser = ((uint32_t)registers[1] << 16) | registers[0];
-            primary_value = (double)totaliser;
-            snprintf(primary_desc, sizeof(primary_desc), "DAILIAN_EMF (Totaliser: %lu)", (unsigned long)totaliser);
-        } else if (strstr(data_type, "PANDA_EMF_FIXED") && reg_count >= 4) {
-            // PANDA_EMF_FIXED: INT32_BE (Integer) + FLOAT32_BE (Decimal)
-            // Registers [0-1]: Totalizer integer part (32-bit INT, big-endian) = (reg[0] << 16) | reg[1]
-            // Registers [2-3]: Totalizer decimal part (32-bit FLOAT, big-endian) = (reg[2] << 16) | reg[3]
-            int32_t integer_part = (int32_t)(((uint32_t)registers[0] << 16) | registers[1]);
-            uint32_t float_bits = ((uint32_t)registers[2] << 16) | registers[3];
-            float decimal_part;
-            memcpy(&decimal_part, &float_bits, sizeof(float));
-            // Total = Integer + Float decimal
-            primary_value = (double)integer_part + (double)decimal_part;
-            snprintf(primary_desc, sizeof(primary_desc), "PANDA_EMF (INT: %ld + FLOAT: %.6f)", (long)integer_part, decimal_part);
-        } else if (strstr(data_type, "PANDA_LEVEL_FIXED") && reg_count >= 1) {
-            // PANDA_LEVEL_FIXED: UINT16 - single 16-bit level value
-            // Register [0]: Level value (distance in raw units)
-            // Calculation: Level % = ((Sensor Height - Raw Value) / Tank Height) * 100
-            primary_value = (double)registers[0];
-            snprintf(primary_desc, sizeof(primary_desc), "PANDA_LEVEL (Raw: %u)", registers[0]);
-        } else if (strstr(data_type, "ASCII") && reg_count >= 1) {
-            // ASCII - show first character's ASCII value
-            primary_value = (double)((registers[0] >> 8) & 0xFF);
-            snprintf(primary_desc, sizeof(primary_desc), "ASCII (%s)", data_type);
-        } else if (strstr(data_type, "HEX") && reg_count >= 1) {
-            // HEX - show raw hex value
-            primary_value = (double)registers[0];
-            snprintf(primary_desc, sizeof(primary_desc), "HEX (%s)", data_type);
-        } else if (strstr(data_type, "BOOL") && reg_count >= 1) {
-            // Boolean - show 0 or 1
-            primary_value = registers[0] ? 1.0 : 0.0;
-            snprintf(primary_desc, sizeof(primary_desc), "BOOL (%s)", data_type);
-        } else if (strstr(data_type, "PDU") && reg_count >= 1) {
-            // PDU - show raw value
-            primary_value = (double)registers[0];
-            snprintf(primary_desc, sizeof(primary_desc), "PDU (%s)", data_type);
-        } else {
-            // Default to UINT16 for any other type
-            primary_value = (double)registers[0];
-            snprintf(primary_desc, sizeof(primary_desc), "UINT16 (default)");
-        }
-        
-        double scaled_value;
-        char scale_desc[50];
-        
-        // Apply sensor type-specific calculation
-        if ((strcmp(sensor_type, "Level") == 0 || strcmp(sensor_type, "Panda_Level") == 0) && max_water_level > 0) {
-            // Level sensor calculation: (Sensor Height - Raw Value) / Tank Height * 100
-            // For Panda_Level: Raw value is distance in mm, convert to meters if needed
-            double raw_scaled_value = primary_value * scale_factor;
-            scaled_value = ((sensor_height - raw_scaled_value) / max_water_level) * 100.0;
-            // Ensure percentage is within reasonable bounds
-            if (scaled_value < 0) scaled_value = 0.0;
-            if (scaled_value > 100) scaled_value = 100.0;
-            snprintf(scale_desc, sizeof(scale_desc), "Level: %.2f%%", scaled_value);
-        } else if ((strcmp(sensor_type, "Radar Level") == 0 || strcmp(sensor_type, "Hydrostatic_Level") == 0) && max_water_level > 0) {
-            // Hydrostatic/Radar Level sensor calculation: (Raw Value / Tank Height) * 100
-            // Raw value IS the water level (not distance from sensor)
-            scaled_value = (primary_value / max_water_level) * 100.0;
-            // Ensure percentage is not negative (but allow over 100% to show overflow)
-            if (scaled_value < 0) scaled_value = 0.0;
-            snprintf(scale_desc, sizeof(scale_desc), "%s: %.2f%%",
-                     strcmp(sensor_type, "Hydrostatic_Level") == 0 ? "Hydrostatic Level" : "Radar Level", scaled_value);
-        } else {
-            // Flow-Meter or other sensor types use direct scale factor
-            scaled_value = primary_value * scale_factor;
-            snprintf(scale_desc, sizeof(scale_desc), "×%.3f", scale_factor);
-        }
-        
-        snprintf(temp, 500, "<strong>Primary Value:</strong> %.6f (%s) | <strong>Scaled Value:</strong> %.6f (%s)<br>",
-                 primary_value, primary_desc, scaled_value, scale_desc);
-        strcat(data_output, temp);
-
-        // Add Level Filled display for Level, Panda_Level, Hydrostatic_Level and Radar Level sensors
-        if ((strcmp(sensor_type, "Level") == 0 || strcmp(sensor_type, "Panda_Level") == 0) && max_water_level > 0) {
-            snprintf(temp, 500, "<strong style='color:#28a745'>Level Filled: %.2f%%</strong> (Formula: (%.2f - %.2f) / %.2f × 100)<br>",
-                     scaled_value, sensor_height, primary_value * scale_factor, max_water_level);
-            strcat(data_output, temp);
-        } else if ((strcmp(sensor_type, "Level") == 0 || strcmp(sensor_type, "Panda_Level") == 0) && max_water_level <= 0) {
-            // Show warning if sensor_height and max_water_level are not configured
-            snprintf(temp, 500, "<strong style='color:#dc3545'>⚠ Configure Sensor Height and Tank Height to see Level %%</strong><br>"
-                     "<span style='color:#6c757d'>Raw Value: %.0f | Set Sensor Height & Max Water Level in sensor config</span><br>",
-                     primary_value);
-            strcat(data_output, temp);
-        } else if ((strcmp(sensor_type, "Radar Level") == 0 || strcmp(sensor_type, "Hydrostatic_Level") == 0) && max_water_level > 0) {
-            // Hydrostatic and Radar Level: Raw value IS the water level
-            snprintf(temp, 500, "<strong style='color:#28a745'>Level Filled: %.2f%%</strong> (Formula: %.0f / %.2f × 100)<br>",
-                     scaled_value, primary_value, max_water_level);
-            strcat(data_output, temp);
-        } else if ((strcmp(sensor_type, "Radar Level") == 0 || strcmp(sensor_type, "Hydrostatic_Level") == 0) && max_water_level <= 0) {
-            // Show warning if max_water_level (tank height) is not configured
-            snprintf(temp, 500, "<strong style='color:#dc3545'>⚠ Configure Tank Height (Max Water Level) to see Level %%</strong><br>"
-                     "<span style='color:#6c757d'>Raw Value: %.0f | Set Max Water Level in sensor config</span><br>",
-                     primary_value);
-            strcat(data_output, temp);
-        }
-
-        // Raw registers
-        strcat(data_output, "<strong>Raw Registers:</strong> [");
-        for (int i = 0; i < reg_count; i++) {
-            snprintf(temp, 500, "%s%d", i > 0 ? ", " : "", registers[i]);
-            strcat(data_output, temp);
-        }
-        strcat(data_output, "]<br>");
-
-        // Hex string
-        strcat(data_output, "<strong>HexString:</strong> ");
-        for (int i = 0; i < reg_count; i++) {
-            snprintf(temp, 500, "%04X", registers[i]);
-            strcat(data_output, temp);
-        }
-        strcat(data_output, "<br>");
-        
-        // HTML table for comprehensive data format interpretations
-        strcat(data_output, "<table class='format-table' style='width:100%;border-collapse:collapse;font-size:10px;font-family:monospace'>");
-        strcat(data_output, "<tr style='background:#ddd'><th colspan='4'>All Available Data Format Interpretations (Industrial Grade)</th></tr>");
-        
-        // 8-bit interpretations (0.5 register)
-        if (reg_count >= 1) {
-            uint8_t high_byte = (registers[0] >> 8) & 0xFF;
-            uint8_t low_byte = registers[0] & 0xFF;
-            snprintf(temp, 500,
-                     "<tr><td><strong>INT8 (High):</strong> %d</td><td><strong>INT8 (Low):</strong> %d</td><td><strong>UINT8 (High):</strong> %u</td><td><strong>UINT8 (Low):</strong> %u</td></tr>",
-                     (int8_t)high_byte, (int8_t)low_byte, high_byte, low_byte);
-            strcat(data_output, temp);
-            vTaskDelay(pdMS_TO_TICKS(1)); // Yield after section
-        }
-
-        // 16-bit interpretations (1 register)
-        if (reg_count >= 1) {
-            uint16_t reg0 = registers[0];
-            uint16_t reg0_le = ((reg0 & 0xFF) << 8) | ((reg0 >> 8) & 0xFF);
-            snprintf(temp, 500,
-                     "<tr style='background:#f8f8f8'><td><strong>INT16_HI:</strong> %d</td><td><strong>INT16_LO:</strong> %d</td><td><strong>UINT16_HI:</strong> %u</td><td><strong>UINT16_LO:</strong> %u</td></tr>",
-                     (int16_t)reg0, (int16_t)reg0_le, reg0, reg0_le);
-            strcat(data_output, temp);
-            vTaskDelay(pdMS_TO_TICKS(1)); // Yield after section
-        }
-
-        // 32-bit interpretations (2 registers)
-        if (reg_count >= 2) {
-            uint32_t val_1234 = ((uint32_t)registers[0] << 16) | registers[1];
-            uint32_t val_4321 = ((uint32_t)registers[1] << 16) | registers[0];
-            uint32_t val_2143 = ((uint32_t)(((registers[0] & 0xFF) << 8) | ((registers[0] >> 8) & 0xFF)) << 16) |
-                               (((registers[1] & 0xFF) << 8) | ((registers[1] >> 8) & 0xFF));
-            uint32_t val_3412 = ((uint32_t)(((registers[1] & 0xFF) << 8) | ((registers[1] >> 8) & 0xFF)) << 16) |
-                               (((registers[0] & 0xFF) << 8) | ((registers[0] >> 8) & 0xFF));
-
-            // 32-bit Float interpretations
-            union { uint32_t i; float f; } conv_1234, conv_4321, conv_2143, conv_3412;
-            conv_1234.i = val_1234; conv_4321.i = val_4321; conv_2143.i = val_2143; conv_3412.i = val_3412;
-
-            snprintf(temp, 500,
-                     "<tr><td><strong>FLOAT32_1234:</strong> %.3e</td><td><strong>FLOAT32_4321:</strong> %.3e</td><td><strong>FLOAT32_2143:</strong> %.3e</td><td><strong>FLOAT32_3412:</strong> %.3e</td></tr>",
-                     conv_1234.f, conv_4321.f, conv_2143.f, conv_3412.f);
-            strcat(data_output, temp);
-            
-            // 32-bit Integer interpretations
-            snprintf(temp, 500,
-                     "<tr style='background:#f8f8f8'><td><strong>INT32_1234:</strong> %ld</td><td><strong>INT32_3412:</strong> %ld</td><td><strong>INT32_2143:</strong> %ld</td><td><strong>INT32_4321:</strong> %ld</td></tr>",
-                     (int32_t)val_1234, (int32_t)val_4321, (int32_t)val_2143, (int32_t)val_3412);
-            strcat(data_output, temp);
-
-            // 32-bit Unsigned Integer interpretations
-            snprintf(temp, 500,
-                     "<tr><td><strong>UINT32_1234:</strong> %lu</td><td><strong>UINT32_4321:</strong> %lu</td><td><strong>UINT32_2143:</strong> %lu</td><td><strong>UINT32_3412:</strong> %lu</td></tr>",
-                     val_1234, val_4321, val_2143, val_3412);
-            strcat(data_output, temp);
-        }
-        
-        // 64-bit interpretations (4 registers)
-        if (reg_count >= 4) {
-            uint64_t val64_12345678 = ((uint64_t)registers[0] << 48) | ((uint64_t)registers[1] << 32) | 
-                                     ((uint64_t)registers[2] << 16) | registers[3];
-            uint64_t val64_87654321 = ((uint64_t)registers[3] << 48) | ((uint64_t)registers[2] << 32) | 
-                                     ((uint64_t)registers[1] << 16) | registers[0];
-            
-            snprintf(temp, 300, 
-                     "<tr style='background:#f0f0f0'><td><strong>INT64_12345678:</strong> %lld</td><td><strong>INT64_87654321:</strong> %lld</td><td><strong>UINT64_12345678:</strong> %llu</td><td><strong>UINT64_87654321:</strong> %llu</td></tr>",
-                     (int64_t)val64_12345678, (int64_t)val64_87654321, val64_12345678, val64_87654321);
-            strcat(data_output, temp);
-            
-            // 64-bit Float interpretations
-            union { uint64_t i; double d; } conv64_12345678, conv64_87654321;
-            conv64_12345678.i = val64_12345678; conv64_87654321.i = val64_87654321;
-            
-            snprintf(temp, 500,
-                     "<tr><td><strong>FLOAT64_12345678:</strong> %.3e</td><td><strong>FLOAT64_87654321:</strong> %.3e</td><td><strong>ASCII (4 chars):</strong> %c%c%c%c</td><td><strong>HEX:</strong> 0x%04X%04X%04X%04X</td></tr>",
-                     conv64_12345678.d, conv64_87654321.d,
-                     (char)(registers[0] >> 8), (char)(registers[0] & 0xFF), (char)(registers[1] >> 8), (char)(registers[1] & 0xFF),
-                     registers[0], registers[1], registers[2], registers[3]);
-            strcat(data_output, temp);
-        } else if (reg_count >= 2) {
-            // ASCII and HEX for 2 registers
-            snprintf(temp, 500,
-                     "<tr style='background:#f0f0f0'><td><strong>ASCII (2 chars):</strong> %c%c</td><td><strong>HEX:</strong> 0x%04X%04X</td><td><strong>BOOL (R0):</strong> %s</td><td><strong>BOOL (R1):</strong> %s</td></tr>",
-                     (char)(registers[0] >> 8), (char)(registers[0] & 0xFF),
-                     registers[0], registers[1],
-                     registers[0] ? "True" : "False", registers[1] ? "True" : "False");
-            strcat(data_output, temp);
-        } else if (reg_count >= 1) {
-            // Single register special formats
-            snprintf(temp, 500,
-                     "<tr style='background:#f0f0f0'><td><strong>ASCII (1 char):</strong> %c</td><td><strong>HEX:</strong> 0x%04X</td><td><strong>BOOL:</strong> %s</td><td><strong>PDU:</strong> Raw</td></tr>",
-                     (char)(registers[0] >> 8), registers[0],
-                     registers[0] ? "True" : "False");
-            strcat(data_output, temp);
-        }
-
-        // Close table and div
-        strcat(data_output, "</table></div>");
-
-        // Feed watchdog before largest memory allocation and JSON escaping
-        // Skip watchdog reset in HTTP handler (task not registered with watchdog)
-        // esp_task_wdt_reset();
-
-        // Build final JSON response - properly escape HTML for JSON
-        // Increased buffer size for ZEST sensor handling
-        char *escaped_output = malloc(4000);
-        if (!escaped_output) {
-            ESP_LOGE(TAG, "Failed to allocate escape buffer");
-            free(data_output);
-            free(temp);
-            free(response);
-            httpd_resp_send_500(req);
-            return ESP_FAIL;
-        }
-        
-        // Enhanced JSON escaping for HTML content
-        int j = 0;
-        for (int i = 0; data_output[i] && j < 3980; i++) {
-            // Yield frequently during intensive JSON escaping to prevent watchdog timeout
-            if (i % 100 == 0) {
-                vTaskDelay(pdMS_TO_TICKS(1)); // Brief yield to prevent blocking
-            }
-            
-            unsigned char c = (unsigned char)data_output[i];
-            if (c == '"') {
-                escaped_output[j++] = '\\';
-                escaped_output[j++] = '"';
-            } else if (c == '\\') {
-                escaped_output[j++] = '\\';
-                escaped_output[j++] = '\\';
-            } else if (c == '\n') {
-                escaped_output[j++] = '\\';
-                escaped_output[j++] = 'n';
-            } else if (c == '\r') {
-                escaped_output[j++] = '\\';
-                escaped_output[j++] = 'r';
-            } else if (c == '\t') {
-                escaped_output[j++] = '\\';
-                escaped_output[j++] = 't';
-            } else if (c == '\b') {
-                escaped_output[j++] = '\\';
-                escaped_output[j++] = 'b';
-            } else if (c == '\f') {
-                escaped_output[j++] = '\\';
-                escaped_output[j++] = 'f';
-            } else if (c < 32 || c > 126) {
-                // Escape non-printable characters
-                escaped_output[j++] = '\\';
-                escaped_output[j++] = 'u';
-                escaped_output[j++] = '0';
-                escaped_output[j++] = '0';
-                escaped_output[j++] = (c >> 4) < 10 ? '0' + (c >> 4) : 'A' + (c >> 4) - 10;
-                escaped_output[j++] = (c & 15) < 10 ? '0' + (c & 15) : 'A' + (c & 15) - 10;
-            } else {
-                escaped_output[j++] = c;
-            }
-        }
-        escaped_output[j] = '\0';
-        
-        snprintf(response, 2048,
-                 "{\"status\":\"success\",\"message\":\"RS485 communication successful\","
-                 "\"scada_formats\":\"%s\"}", escaped_output);
-        
-        free(escaped_output);
-        
-        // Clean up allocated buffers
-        free(data_output);
-        free(temp);
+        // NOTE: Dead code removed here - saved ~4KB heap (escaped_output malloc was 4KB)
     } else {
         snprintf(response, 1500,
                  "{\"status\":\"error\",\"message\":\"RS485 communication failed. Error code: %d. "
@@ -10449,14 +9895,14 @@ static esp_err_t start_webserver(void)
         };
         httpd_register_uri_handler(g_server, &api_azure_status_uri);
 
-        // Azure telemetry history API endpoint
-        httpd_uri_t api_telemetry_history_uri = {
-            .uri = "/api/telemetry/history",
-            .method = HTTP_GET,
-            .handler = api_telemetry_history_handler,
-            .user_ctx = NULL
-        };
-        httpd_register_uri_handler(g_server, &api_telemetry_history_uri);
+        // Azure telemetry history API endpoint - DISABLED to save 12KB heap
+        // httpd_uri_t api_telemetry_history_uri = {
+        //     .uri = "/api/telemetry/history",
+        //     .method = HTTP_GET,
+        //     .handler = api_telemetry_history_handler,
+        //     .user_ctx = NULL
+        // };
+        // httpd_register_uri_handler(g_server, &api_telemetry_history_uri);
 
         // Modbus Explorer: Device Scanner endpoint
         httpd_uri_t modbus_scan_uri = {
@@ -11548,31 +10994,31 @@ static esp_err_t api_azure_status_handler(httpd_req_t *req) {
     return ESP_OK;
 }
 
-// Azure telemetry history handler (for web interface)
-static esp_err_t api_telemetry_history_handler(httpd_req_t *req) {
-    httpd_resp_set_type(req, "application/json");
-
-    // Allocate buffer for telemetry history JSON (25 messages * ~450 bytes each)
-    char *history_buffer = (char *)malloc(12000);
-    if (history_buffer == NULL) {
-        const char* error_response = "{\"error\":\"Out of memory\"}";
-        httpd_resp_sendstr(req, error_response);
-        return ESP_OK;
-    }
-
-    // Get telemetry history from main.c
-    int written = get_telemetry_history_json(history_buffer, 12000);
-
-    if (written > 0) {
-        httpd_resp_sendstr(req, history_buffer);
-    } else {
-        const char* empty_response = "[]";
-        httpd_resp_sendstr(req, empty_response);
-    }
-
-    free(history_buffer);
-    return ESP_OK;
-}
+// Azure telemetry history handler - DISABLED to save 12KB heap
+// static esp_err_t api_telemetry_history_handler(httpd_req_t *req) {
+//     httpd_resp_set_type(req, "application/json");
+//
+//     // Allocate buffer for telemetry history JSON (25 messages * ~450 bytes each)
+//     char *history_buffer = (char *)malloc(12000);
+//     if (history_buffer == NULL) {
+//         const char* error_response = "{\"error\":\"Out of memory\"}";
+//         httpd_resp_sendstr(req, error_response);
+//         return ESP_OK;
+//     }
+//
+//     // Get telemetry history from main.c
+//     int written = get_telemetry_history_json(history_buffer, 12000);
+//
+//     if (written > 0) {
+//         httpd_resp_sendstr(req, history_buffer);
+//     } else {
+//         const char* empty_response = "[]";
+//         httpd_resp_sendstr(req, empty_response);
+//     }
+//
+//     free(history_buffer);
+//     return ESP_OK;
+// }
 
 // Modbus Explorer: Device Scanner Handler
 static esp_err_t modbus_scan_handler(httpd_req_t *req) {

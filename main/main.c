@@ -65,7 +65,14 @@ static const char *TAG = "AZURE_IOT";
 TaskHandle_t modbus_task_handle = NULL;
 TaskHandle_t mqtt_task_handle = NULL;
 TaskHandle_t telemetry_task_handle = NULL;
+TaskHandle_t memory_monitor_handle = NULL;  // Memory health monitor
 QueueHandle_t sensor_data_queue = NULL;
+
+// Memory Monitor thresholds (bytes)
+#define HEAP_WARNING_THRESHOLD    30000   // 30KB - start monitoring closely
+#define HEAP_CRITICAL_THRESHOLD   20000   // 20KB - stop non-essential features
+#define HEAP_EMERGENCY_THRESHOLD  10000   // 10KB - emergency mode
+#define MEMORY_CHECK_INTERVAL_MS  10000   // Check every 10 seconds
 
 // Global variables
 static esp_mqtt_client_handle_t mqtt_client;
@@ -112,23 +119,23 @@ static volatile bool sd_replay_should_stop = false;    // Flag to stop replay on
 static volatile uint32_t sd_replay_messages_sent = 0;  // Messages sent in current batch
 static volatile uint32_t sd_replay_last_msg_id = 0;    // Track last message ID being replayed
 
-// Static buffers to avoid stack overflow
-static char mqtt_broker_uri[256];
-static char mqtt_username[256];
-static char telemetry_topic[256];
-static char telemetry_payload[4096];  // Reduced to save 4KB RAM (supports ~10 sensors)
-static char c2d_topic[256];
+// Static buffers to avoid stack overflow (sizes reduced to save heap)
+static char mqtt_broker_uri[128];   // Reduced from 256 - Azure URIs ~50-80 bytes
+static char mqtt_username[128];     // Reduced from 256 - Username ~80-100 bytes
+static char telemetry_topic[128];   // Reduced from 256 - Topic ~50-70 bytes
+static char telemetry_payload[2560];  // Reduced from 4096 to save 1.5KB (supports 10 sensors at ~200 bytes each)
+static char c2d_topic[128];  // Reduced from 256 - C2D topic ~50-70 bytes
 
 // Device Twin topic patterns for Azure IoT Hub
 static const char *DEVICE_TWIN_DESIRED_TOPIC = "$iothub/twin/PATCH/properties/desired/#";
 static const char *DEVICE_TWIN_RES_TOPIC = "$iothub/twin/res/#";
-static char device_twin_reported_topic[128];
+static char device_twin_reported_topic[96];  // Reduced from 128 - Twin topic ~60-70 bytes
 static int device_twin_request_id = 0;
 
 
 // Static buffers for telemetry to prevent heap fragmentation
 // These replace malloc/free calls that were causing memory exhaustion
-static sensor_reading_t telemetry_readings[15];  // Supports up to 15 sensors
+static sensor_reading_t telemetry_readings[10];  // Reduced from 15 to 10 sensors to save ~1.1KB heap
 static char telemetry_temp_json[MAX_JSON_PAYLOAD_SIZE];  // Pre-allocated JSON buffer
 static int sensors_already_published = 0;  // Track sensors published in create_telemetry_payload
 
@@ -160,7 +167,7 @@ static volatile bool sensor_led_on = false;
 static SemaphoreHandle_t startup_log_mutex = NULL;
 
 // Telemetry history buffer for web interface
-#define TELEMETRY_HISTORY_SIZE 10  // Reduced from 25 to save ~6.5KB RAM
+#define TELEMETRY_HISTORY_SIZE 5  // Reduced from 10 to save ~1.1KB RAM (shows 25min history at 5min interval)
 typedef struct {
     char timestamp[32];
     char payload[200];  // Reduced from 400 to save ~5KB RAM
@@ -1051,9 +1058,21 @@ static void check_telemetry_timeout_recovery(void) {
     int64_t time_since_last_success = current_time - last_successful_telemetry_time;
 
     if (time_since_last_success > TELEMETRY_TIMEOUT_SEC) {
+        // Skip restart if SD card is available and caching data (offline mode working)
+        if (sd_card_is_available()) {
+            // Log once per hour that we're in offline caching mode
+            static int64_t last_offline_log = 0;
+            if (current_time - last_offline_log > 3600) {
+                ESP_LOGW(TAG, "[RECOVERY] No telemetry for %lld seconds, but SD card is caching data - skipping restart",
+                         (long long)time_since_last_success);
+                last_offline_log = current_time;
+            }
+            return;  // Don't restart - SD card is caching data for later replay
+        }
+
         ESP_LOGE(TAG, "[RECOVERY] No successful telemetry for %lld seconds (limit: %d)",
                  (long long)time_since_last_success, TELEMETRY_TIMEOUT_SEC);
-        ESP_LOGE(TAG, "[RECOVERY] Forcing system restart to recover...");
+        ESP_LOGE(TAG, "[RECOVERY] SD card not available - forcing system restart to recover...");
 
         // Log to SD before restart
         log_heartbeat_to_sd();
@@ -1147,7 +1166,7 @@ static void mqtt_event_handler(void *handler_args, esp_event_base_t base, int32_
                         BaseType_t result = xTaskCreate(
                             modem_reset_task,
                             "modem_reset",
-                            4096,  // Increased stack for SIM mode operations
+                            3072,  // Reduced from 4096 to save 1KB heap
                             NULL,
                             2,  // Low priority
                             &modem_reset_task_handle
@@ -2062,7 +2081,7 @@ static void create_telemetry_payload(char* payload, size_t payload_size) {
     memset(temp_json, 0, sizeof(telemetry_temp_json));
 
     int actual_count = 0;
-    esp_err_t ret = sensor_read_all_configured(readings, 15, &actual_count);
+    esp_err_t ret = sensor_read_all_configured(readings, 10, &actual_count);  // Max 10 sensors
     
     if (ret == ESP_OK && actual_count > 0) {
         ESP_LOGI(TAG, "[FLOW] Creating merged JSON for %d sensors", actual_count);
@@ -2090,12 +2109,8 @@ static void create_telemetry_payload(char* payload, size_t payload_size) {
             gmtime_r(&now, &timeinfo);
             strftime(timestamp, sizeof(timestamp), "%Y-%m-%dT%H:%M:%SZ", &timeinfo);
 
-            // Allocate buffer for combined payload (4KB should be enough for 15 sensors)
-            char *batch_payload = malloc(4096);
-            if (!batch_payload) {
-                ESP_LOGE(TAG, "[ERROR] Failed to allocate batch payload buffer");
-                return;
-            }
+            // Use static buffer to avoid heap fragmentation (was malloc(4096))
+            char *batch_payload = telemetry_payload;  // Reuse static buffer (2560 bytes for 10 sensors)
 
             // Count valid sensors first to determine format
             int valid_count = 0;
@@ -2109,7 +2124,7 @@ static void create_telemetry_payload(char* payload, size_t payload_size) {
             int batch_pos = 0;
             bool use_body_array = (valid_count > 1);
             if (use_body_array) {
-                batch_pos = snprintf(batch_payload, 4096, "{\"body\":[");
+                batch_pos = snprintf(batch_payload, sizeof(telemetry_payload), "{\"body\":[");
                 ESP_LOGI(TAG, "[BATCH] Multiple sensors (%d) - using body array format", valid_count);
             } else {
                 ESP_LOGI(TAG, "[BATCH] Single sensor - using flat format (no body array)");
@@ -2134,7 +2149,7 @@ static void create_telemetry_payload(char* payload, size_t payload_size) {
 
                     // Add comma separator if not first sensor (only for body array)
                     if (valid_sensors > 0 && use_body_array) {
-                        batch_pos += snprintf(batch_payload + batch_pos, 4096 - batch_pos, ",");
+                        batch_pos += snprintf(batch_payload + batch_pos, sizeof(telemetry_payload) - batch_pos, ",");
                     }
 
                     // Determine value key and type based on sensor type
@@ -2211,12 +2226,12 @@ static void create_telemetry_payload(char* payload, size_t payload_size) {
                                 "%s\"COD\":%.2f", strlen(params_data) > 0 ? "," : "", readings[i].quality_params.cod_value);
                         }
 
-                        batch_pos += snprintf(batch_payload + batch_pos, 4096 - batch_pos,
+                        batch_pos += snprintf(batch_payload + batch_pos, sizeof(telemetry_payload) - batch_pos,
                             "{\"params_data\":{%s},\"type\":\"QUALITY\",\"created_on\":\"%s\",\"unit_id\":\"%s\"}",
                             params_data, timestamp, matching_sensor->unit_id);
                     } else {
                         // Regular sensor with value field
-                        batch_pos += snprintf(batch_payload + batch_pos, 4096 - batch_pos,
+                        batch_pos += snprintf(batch_payload + batch_pos, sizeof(telemetry_payload) - batch_pos,
                             "{\"%s\":%.3f,\"type\":\"%s\",\"created_on\":\"%s\",\"unit_id\":\"%s\"}",
                             value_key, readings[i].value, type_value, timestamp, matching_sensor->unit_id);
                     }
@@ -2228,10 +2243,18 @@ static void create_telemetry_payload(char* payload, size_t payload_size) {
 
             // Close the JSON - only add body array closing if multiple sensors
             if (use_body_array) {
-                batch_pos += snprintf(batch_payload + batch_pos, 4096 - batch_pos, "]}");
+                batch_pos += snprintf(batch_payload + batch_pos, sizeof(telemetry_payload) - batch_pos, "]}");
             }
 
-            // Send single MQTT message with all sensors
+            // ALWAYS copy payload to output buffer (critical for SD card caching when offline)
+            // This fixes bug where stale payload was cached due to copy being inside mqtt_connected block
+            // Note: Only copy if buffers are different (batch_payload now points to telemetry_payload)
+            if (valid_sensors > 0 && payload != batch_payload) {
+                strncpy(payload, batch_payload, payload_size - 1);
+                payload[payload_size - 1] = '\0';
+            }
+
+            // Send single MQTT message with all sensors (only if connected)
             if (mqtt_connected && mqtt_client != NULL && valid_sensors > 0) {
                 char sensor_topic[256];
                 snprintf(sensor_topic, sizeof(sensor_topic),
@@ -2253,13 +2276,9 @@ static void create_telemetry_payload(char* payload, size_t payload_size) {
                 } else {
                     ESP_LOGW(TAG, "[WARN] Failed to publish batch message");
                 }
-
-                // Store payload for logging
-                strncpy(payload, batch_payload, payload_size - 1);
-                payload[payload_size - 1] = '\0';
             }
 
-            free(batch_payload);
+            // Note: No free() needed - using static telemetry_payload buffer
             if (use_body_array) {
                 ESP_LOGI(TAG, "[OK] Sent %d sensors in single batch message with body array", valid_sensors);
             } else {
@@ -2871,6 +2890,139 @@ static void update_led_status(void)
     if (sensors_responding != sensor_led_on) {
         sensor_led_on = sensors_responding;
         set_status_led(SENSOR_LED_GPIO_PIN, sensor_led_on);
+    }
+}
+
+// ============================================================================
+// MEMORY MONITOR TASK - Prevents crashes by managing heap proactively
+// ============================================================================
+static volatile bool memory_emergency_mode = false;  // Flag for emergency mode
+static volatile bool web_server_stopped_for_memory = false;  // Track if we stopped web server
+
+static void memory_monitor_task(void *pvParameters)
+{
+    ESP_LOGI(TAG, "[MEMORY] Memory monitor started - checking every %d seconds",
+             MEMORY_CHECK_INTERVAL_MS / 1000);
+
+    size_t last_free_heap = esp_get_free_heap_size();
+    int consecutive_low_memory = 0;
+
+    while (1) {
+        size_t free_heap = esp_get_free_heap_size();
+        size_t min_free_heap = esp_get_minimum_free_heap_size();
+
+        // Calculate heap change since last check
+        int heap_change = (int)free_heap - (int)last_free_heap;
+        last_free_heap = free_heap;
+
+        // Log memory status periodically (every 5 minutes in normal operation)
+        static int log_counter = 0;
+        log_counter++;
+        if (log_counter >= 30 || free_heap < HEAP_WARNING_THRESHOLD) {  // 30 * 10s = 5 min
+            ESP_LOGI(TAG, "[MEMORY] Free: %u KB | Min: %u KB | Change: %+d bytes",
+                     free_heap / 1024, min_free_heap / 1024, heap_change);
+            log_counter = 0;
+        }
+
+        // ===== LEVEL 1: WARNING (30KB) - Monitor closely =====
+        if (free_heap < HEAP_WARNING_THRESHOLD && free_heap >= HEAP_CRITICAL_THRESHOLD) {
+            consecutive_low_memory++;
+            ESP_LOGW(TAG, "[MEMORY] ⚠️ LOW HEAP: %u bytes (warning threshold: %u)",
+                     free_heap, HEAP_WARNING_THRESHOLD);
+
+            // Hint to FreeRTOS to clean up
+            vTaskDelay(pdMS_TO_TICKS(10));  // Brief yield for cleanup
+        }
+
+        // ===== LEVEL 2: CRITICAL (20KB) - Take action =====
+        else if (free_heap < HEAP_CRITICAL_THRESHOLD && free_heap >= HEAP_EMERGENCY_THRESHOLD) {
+            consecutive_low_memory++;
+            ESP_LOGW(TAG, "[MEMORY] 🔴 CRITICAL HEAP: %u bytes - taking action!", free_heap);
+
+            // Stop web server if running (frees ~15-20KB)
+            if (web_server_running && !web_server_stopped_for_memory) {
+                ESP_LOGW(TAG, "[MEMORY] Stopping web server to free memory...");
+                web_config_stop();
+                web_server_running = false;
+                web_server_stopped_for_memory = true;
+                vTaskDelay(pdMS_TO_TICKS(500));  // Wait for cleanup
+
+                size_t after_stop = esp_get_free_heap_size();
+                ESP_LOGI(TAG, "[MEMORY] After stopping web server: %u bytes (freed %u bytes)",
+                         after_stop, after_stop - free_heap);
+            }
+        }
+
+        // ===== LEVEL 3: EMERGENCY (10KB) - Minimal mode =====
+        else if (free_heap < HEAP_EMERGENCY_THRESHOLD) {
+            if (!memory_emergency_mode) {
+                memory_emergency_mode = true;
+                ESP_LOGE(TAG, "[MEMORY] 🚨 EMERGENCY: Only %u bytes! Entering minimal mode", free_heap);
+
+                // Stop web server if not already stopped
+                if (web_server_running) {
+                    ESP_LOGE(TAG, "[MEMORY] Emergency: Forcing web server stop");
+                    web_config_stop();
+                    web_server_running = false;
+                    web_server_stopped_for_memory = true;
+                }
+
+                // Log detailed task memory info for debugging
+                ESP_LOGE(TAG, "[MEMORY] Task high water marks:");
+                if (modbus_task_handle) {
+                    ESP_LOGE(TAG, "  - Modbus: %u bytes free",
+                             uxTaskGetStackHighWaterMark(modbus_task_handle) * sizeof(StackType_t));
+                }
+                if (mqtt_task_handle) {
+                    ESP_LOGE(TAG, "  - MQTT: %u bytes free",
+                             uxTaskGetStackHighWaterMark(mqtt_task_handle) * sizeof(StackType_t));
+                }
+                if (telemetry_task_handle) {
+                    ESP_LOGE(TAG, "  - Telemetry: %u bytes free",
+                             uxTaskGetStackHighWaterMark(telemetry_task_handle) * sizeof(StackType_t));
+                }
+            }
+        }
+
+        // ===== RECOVERY: Memory returned to normal =====
+        else if (free_heap >= HEAP_WARNING_THRESHOLD) {
+            if (consecutive_low_memory > 0) {
+                ESP_LOGI(TAG, "[MEMORY] ✅ Heap recovered to %u bytes", free_heap);
+                consecutive_low_memory = 0;
+            }
+
+            // Exit emergency mode if we have enough memory
+            if (memory_emergency_mode && free_heap > HEAP_CRITICAL_THRESHOLD) {
+                memory_emergency_mode = false;
+                ESP_LOGI(TAG, "[MEMORY] Exiting emergency mode - heap stable at %u bytes", free_heap);
+            }
+
+            // Optionally restart web server if it was stopped for memory
+            // Only do this if heap is well above critical and user might need it
+            if (web_server_stopped_for_memory && free_heap > 50000) {
+                // Don't auto-restart - let user request it via GPIO trigger
+                // This prevents oscillation between starting/stopping
+                ESP_LOGI(TAG, "[MEMORY] Web server can be restarted (GPIO trigger) - heap: %u bytes", free_heap);
+                web_server_stopped_for_memory = false;  // Reset flag so it can be started
+            }
+        }
+
+        // Detect memory leak (heap continuously decreasing)
+        static size_t leak_check_heap = 0;
+        static int leak_count = 0;
+        if (leak_check_heap > 0 && free_heap < leak_check_heap - 1000) {
+            leak_count++;
+            if (leak_count >= 6) {  // 6 consecutive drops = potential leak
+                ESP_LOGW(TAG, "[MEMORY] ⚠️ Possible memory leak detected! Lost %u bytes over %d checks",
+                         leak_check_heap - free_heap, leak_count);
+                leak_count = 0;
+            }
+        } else {
+            leak_count = 0;
+        }
+        leak_check_heap = free_heap;
+
+        vTaskDelay(pdMS_TO_TICKS(MEMORY_CHECK_INTERVAL_MS));
     }
 }
 
@@ -4120,10 +4272,10 @@ static bool send_telemetry(void) {
 
                     // Read sensors and create payload
                     char live_payload[512];
-                    sensor_reading_t live_readings[15];
+                    sensor_reading_t live_readings[10];  // Reduced from 15 to save stack
                     int live_count = 0;
 
-                    esp_err_t read_ret = sensor_read_all_configured(live_readings, 15, &live_count);
+                    esp_err_t read_ret = sensor_read_all_configured(live_readings, 10, &live_count);
 
                     if (read_ret == ESP_OK && live_count > 0) {
                         // Get timestamp
@@ -4719,7 +4871,7 @@ void app_main(void) {
     BaseType_t modbus_result = xTaskCreatePinnedToCore(
         modbus_task,
         "modbus_task",
-        8192,  // Increased from 4096 to handle sensor_manager integration
+        6144,  // Reduced from 8192 to save 2KB heap (actual usage ~3-4KB)
         NULL,
         5,  // High priority for sensor reading
         &modbus_task_handle,
@@ -4751,7 +4903,7 @@ void app_main(void) {
     BaseType_t telemetry_result = xTaskCreatePinnedToCore(
         telemetry_task,
         "telemetry_task",
-        12288,  // Increased stack size for QUALITY sensor sub-sensor handling
+        10240,  // Reduced from 12288 to save 2KB heap (still safe for QUALITY sensors)
         NULL,
         3,  // Lower priority than MQTT
         &telemetry_task_handle,
@@ -4762,11 +4914,28 @@ void app_main(void) {
         ESP_LOGE(TAG, "[ERROR] Failed to create Telemetry task");
         return;
     }
-    
+
+    // Create Memory Monitor task (low priority, small stack - just monitors heap)
+    BaseType_t memory_result = xTaskCreatePinnedToCore(
+        memory_monitor_task,
+        "mem_monitor",
+        2048,  // Small stack - only does heap monitoring
+        NULL,
+        1,     // Lowest priority - runs when others idle
+        &memory_monitor_handle,
+        1      // Core 1
+    );
+
+    if (memory_result != pdPASS) {
+        ESP_LOGW(TAG, "[WARN] Failed to create Memory Monitor task - continuing without it");
+        // Don't return - system can run without memory monitor
+    }
+
     ESP_LOGI(TAG, "[OK] All tasks created successfully");
     ESP_LOGI(TAG, "[CORE] Modbus reading: Core 0 (priority 5)");
     ESP_LOGI(TAG, "[NET] MQTT handling: Core 1 (priority 4)");
     ESP_LOGI(TAG, "[DATA] Telemetry sending: Core 1 (priority 3)");
+    ESP_LOGI(TAG, "[HEALTH] Memory monitor: Core 1 (priority 1)");
     ESP_LOGI(TAG, "[WEB] GPIO %d: Pull LOW to toggle web server ON/OFF", trigger_gpio);
 
     // Wait for all tasks to display their startup messages
@@ -4867,6 +5036,21 @@ void app_main(void) {
         if (current_time_sec - last_heartbeat_time >= HEARTBEAT_LOG_INTERVAL_SEC) {
             log_heartbeat_to_sd();
             last_heartbeat_time = current_time_sec;
+        }
+
+        // SD Card recovery check - try to recover failed SD card periodically
+        if (config->sd_config.enabled && sd_card_needs_recovery()) {
+            ESP_LOGI(TAG, "[SD] 🔄 Attempting periodic SD card recovery...");
+            if (sd_card_attempt_recovery() == ESP_OK) {
+                ESP_LOGI(TAG, "[SD] ✅ SD card recovered successfully!");
+                // RAM buffer is automatically flushed during recovery
+            }
+        }
+
+        // Flush RAM buffer to SD card if available
+        if (config->sd_config.enabled && sd_card_is_available() && sd_card_get_ram_buffer_count() > 0) {
+            ESP_LOGI(TAG, "[SD] 📤 Flushing %lu messages from RAM buffer...", sd_card_get_ram_buffer_count());
+            sd_card_flush_ram_buffer();
         }
 
         // Device Twin reporting to Azure (every 1 minute when connected)

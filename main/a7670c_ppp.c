@@ -2,6 +2,7 @@
 #include <string.h>
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
+#include "freertos/semphr.h"
 #include "freertos/event_groups.h"
 #include "driver/uart.h"
 #include "driver/gpio.h"
@@ -28,6 +29,10 @@ static const int PPP_CONNECTED_BIT = BIT0;
 // UART RX task control
 static TaskHandle_t uart_rx_task_handle = NULL;
 static volatile bool uart_rx_task_running = false;
+
+// Modem mutex to prevent race conditions during init/deinit
+static SemaphoreHandle_t modem_mutex = NULL;
+static volatile bool uart_initialized = false;
 
 // Signal strength storage (checked before entering PPP mode)
 static signal_strength_t current_signal = {0};
@@ -59,6 +64,12 @@ static uint8_t uart_rx_buffer[2048];
 
 // Send AT command and wait for response
 static esp_err_t send_at_command(const char* cmd, const char* expected, int timeout_ms) {
+    // Check if UART is still initialized (prevents crash during deinit race condition)
+    if (!uart_initialized) {
+        ESP_LOGW(TAG, "UART not initialized, cannot send AT command");
+        return ESP_ERR_INVALID_STATE;
+    }
+
     char response[1024] = {0};
 
     ESP_LOGI(TAG, ">>> %s", cmd);
@@ -74,6 +85,11 @@ static esp_err_t send_at_command(const char* cmd, const char* expected, int time
     int64_t start_time = esp_timer_get_time() / 1000;
 
     while ((esp_timer_get_time() / 1000 - start_time) < timeout_ms) {
+        // Check if UART was deinitialized during wait
+        if (!uart_initialized) {
+            ESP_LOGW(TAG, "UART deinitialized during AT command, aborting");
+            return ESP_ERR_INVALID_STATE;
+        }
         len = uart_read_bytes(modem_config.uart_num, uart_rx_buffer, sizeof(uart_rx_buffer),
                              pdMS_TO_TICKS(100));
         if (len > 0) {
@@ -543,6 +559,7 @@ esp_err_t a7670c_ppp_init(const ppp_config_t* config) {
     ESP_ERROR_CHECK(uart_set_pin(modem_config.uart_num, modem_config.tx_pin,
                                  modem_config.rx_pin, UART_PIN_NO_CHANGE, UART_PIN_NO_CHANGE));
     ESP_ERROR_CHECK(uart_driver_install(modem_config.uart_num, 2048, 2048, 0, NULL, 0));
+    uart_initialized = true;  // Mark UART as ready for use
 
     // Configure power pin
     gpio_config_t pwr_io_conf = {
@@ -582,6 +599,21 @@ esp_err_t a7670c_ppp_init(const ppp_config_t* config) {
 esp_err_t a7670c_ppp_connect(void) {
     esp_err_t ret;
 
+    // Create mutex if not exists (thread-safe initialization)
+    if (modem_mutex == NULL) {
+        modem_mutex = xSemaphoreCreateMutex();
+        if (modem_mutex == NULL) {
+            ESP_LOGE(TAG, "Failed to create modem mutex");
+            return ESP_ERR_NO_MEM;
+        }
+    }
+
+    // Try to acquire mutex with timeout (prevents deadlock)
+    if (xSemaphoreTake(modem_mutex, pdMS_TO_TICKS(30000)) != pdTRUE) {
+        ESP_LOGW(TAG, "Could not acquire modem mutex - another operation in progress");
+        return ESP_ERR_TIMEOUT;
+    }
+
     ESP_LOGI(TAG, "===========================================");
     ESP_LOGI(TAG, "📡 Initializing A7670C Modem...");
     ESP_LOGI(TAG, "===========================================");
@@ -618,6 +650,7 @@ esp_err_t a7670c_ppp_connect(void) {
             ESP_LOGW(TAG, "💡 Automatic modem power cycle will be triggered on next connection attempt");
         }
 
+        xSemaphoreGive(modem_mutex);
         return ret;
     }
 
@@ -655,6 +688,7 @@ esp_err_t a7670c_ppp_connect(void) {
     ppp_netif = esp_netif_new(&ppp_netif_config);
     if (ppp_netif == NULL) {
         ESP_LOGE(TAG, "Failed to create PPP netif");
+        xSemaphoreGive(modem_mutex);
         return ESP_FAIL;
     }
 
@@ -687,7 +721,7 @@ esp_err_t a7670c_ppp_connect(void) {
     esp_netif_action_start(ppp_netif, 0, 0, NULL);
 
     // Start UART receive task to feed data to PPP
-    xTaskCreate(uart_rx_task, "uart_rx", 4096, NULL, 12, &uart_rx_task_handle);
+    xTaskCreate(uart_rx_task, "uart_rx", 3072, NULL, 12, &uart_rx_task_handle);  // Reduced from 4096 to save 1KB
 
     // Wait for IP
     ESP_LOGI(TAG, "⏳ Waiting for PPP IP address...");
@@ -696,9 +730,11 @@ esp_err_t a7670c_ppp_connect(void) {
 
     if (bits & PPP_CONNECTED_BIT) {
         ESP_LOGI(TAG, "✅ Internet connected via PPP!");
+        xSemaphoreGive(modem_mutex);
         return ESP_OK;
     } else {
         ESP_LOGE(TAG, "Failed to get PPP IP");
+        xSemaphoreGive(modem_mutex);
         return ESP_ERR_TIMEOUT;
     }
 }
@@ -788,6 +824,16 @@ esp_err_t a7670c_ppp_disconnect(void) {
 esp_err_t a7670c_ppp_deinit(void) {
     ESP_LOGI(TAG, "Deinitializing A7670C PPP...");
 
+    // Acquire mutex to prevent concurrent operations
+    if (modem_mutex != NULL) {
+        if (xSemaphoreTake(modem_mutex, pdMS_TO_TICKS(60000)) != pdTRUE) {
+            ESP_LOGW(TAG, "Could not acquire modem mutex for deinit - forcing anyway");
+        }
+    }
+
+    // Mark UART as unavailable immediately to stop any pending operations
+    uart_initialized = false;
+
     // Disconnect PPP if still connected (this also stops UART RX task)
     if (ppp_connected || ppp_netif != NULL) {
         a7670c_ppp_disconnect();
@@ -819,6 +865,7 @@ esp_err_t a7670c_ppp_deinit(void) {
 
     // Now safe to deinitialize UART
     ESP_LOGI(TAG, "Deleting UART driver...");
+    vTaskDelay(pdMS_TO_TICKS(100));  // Give any pending operations time to abort
     uart_driver_delete(modem_config.uart_num);
 
     // Reset GPIO pins to input
@@ -836,6 +883,12 @@ esp_err_t a7670c_ppp_deinit(void) {
     modem_power_cycle_count = 0;
 
     ESP_LOGI(TAG, "A7670C PPP deinitialized");
+
+    // Release mutex
+    if (modem_mutex != NULL) {
+        xSemaphoreGive(modem_mutex);
+    }
+
     return ESP_OK;
 }
 
@@ -1174,7 +1227,7 @@ esp_err_t a7670c_ppp_resume(void) {
     // Restart UART RX task
     if (uart_rx_task_handle == NULL && ppp_netif != NULL) {
         ESP_LOGI(TAG, "   Restarting UART RX task...");
-        xTaskCreate(uart_rx_task, "uart_rx", 4096, NULL, 12, &uart_rx_task_handle);
+        xTaskCreate(uart_rx_task, "uart_rx", 3072, NULL, 12, &uart_rx_task_handle);  // Reduced from 4096 to save 1KB
     }
 
     // Wait for PPP to reconnect

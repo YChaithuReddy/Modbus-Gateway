@@ -5,6 +5,7 @@
 #include <dirent.h>
 #include <errno.h>
 #include "esp_log.h"
+#include "esp_timer.h"
 #include "esp_vfs_fat.h"
 #include "sdmmc_cmd.h"
 #include "driver/sdspi_host.h"
@@ -30,6 +31,26 @@ static const char* mount_point = "/sdcard";
 // Use 8.3 short filenames for maximum FAT compatibility
 static const char* pending_messages_file = "/sdcard/msgs.txt";  // Even shorter
 static const char* temp_messages_file = "/sdcard/tmp.txt";  // Even shorter
+
+// Error tracking for recovery
+static uint32_t sd_error_count = 0;
+static int64_t last_error_time = 0;
+static int64_t last_recovery_attempt = 0;
+
+// RAM buffer for messages when SD card fails
+typedef struct {
+    bool valid;
+    char timestamp[32];
+    char topic[128];
+    char payload[512];
+} ram_buffer_message_t;
+
+static ram_buffer_message_t ram_buffer[SD_CARD_RAM_BUFFER_SIZE];
+static uint32_t ram_buffer_count = 0;
+static uint32_t ram_buffer_write_index = 0;
+
+// Forward declarations
+static esp_err_t sd_card_add_to_ram_buffer(const char* topic, const char* payload, const char* timestamp);
 
 // Minimum free space required (in bytes) - 1MB
 #define MIN_FREE_SPACE_BYTES (1024 * 1024)
@@ -237,6 +258,11 @@ esp_err_t sd_card_init(void) {
             ESP_LOGE(TAG, "❌ Failed to mount filesystem - card may not be formatted");
         }
 
+        // CRITICAL: Free SPI bus on mount failure to allow recovery attempts
+        // Without this, the SPI bus remains allocated and subsequent init attempts fail
+        spi_bus_free(SD_CARD_SPI_HOST);
+        ESP_LOGI(TAG, "SPI bus freed for future recovery attempts");
+
         sd_initialized = false;
         sd_available = false;
         return ret;
@@ -267,9 +293,11 @@ esp_err_t sd_card_init(void) {
     // Restore message ID counter
     sd_card_restore_message_counter();
 
-    // Simple write test (matching Arduino approach)
+    // Write test with proper validation
     ESP_LOGI(TAG, "🧪 Testing SD card write capability...");
     const char* test_file = "/sdcard/test.txt";
+    const char* test_content = "SD card test\n";
+    const size_t expected_size = strlen(test_content);
 
     FILE* test_fp = fopen(test_file, "w");
     if (test_fp == NULL) {
@@ -282,19 +310,53 @@ esp_err_t sd_card_init(void) {
         return ESP_FAIL;
     }
 
-    fprintf(test_fp, "SD card test\n");
+    // Write and check return value
+    int written = fprintf(test_fp, "%s", test_content);
+    if (written < 0) {
+        ESP_LOGE(TAG, "❌ fprintf failed: errno %d (%s)", errno, strerror(errno));
+        fclose(test_fp);
+        unlink(test_file);
+        sd_available = false;
+        return ESP_FAIL;
+    }
+
+    // Flush to ensure data is written to card
+    if (fflush(test_fp) != 0) {
+        ESP_LOGE(TAG, "❌ fflush failed: errno %d (%s)", errno, strerror(errno));
+        fclose(test_fp);
+        unlink(test_file);
+        sd_available = false;
+        return ESP_FAIL;
+    }
+
+    // Sync to disk (force physical write)
+    fsync(fileno(test_fp));
     fclose(test_fp);
 
-    // Verify and clean up
+    // Verify file was written with correct size
     struct stat test_st;
-    if (stat(test_file, &test_st) == 0) {
-        ESP_LOGI(TAG, "✅ SD card write test successful! (test file: %ld bytes)", test_st.st_size);
-        unlink(test_file);
-    } else {
+    if (stat(test_file, &test_st) != 0) {
         ESP_LOGE(TAG, "❌ Test file was not created!");
         sd_available = false;
         return ESP_FAIL;
     }
+
+    if (test_st.st_size == 0) {
+        ESP_LOGE(TAG, "❌ Test file is 0 bytes - write failed!");
+        ESP_LOGE(TAG, "   This usually indicates SD card communication issues.");
+        ESP_LOGE(TAG, "   Try: 1) Re-seat the SD card  2) Use a different card  3) Check wiring");
+        unlink(test_file);
+        sd_available = false;
+        return ESP_FAIL;
+    }
+
+    if ((size_t)test_st.st_size < expected_size) {
+        ESP_LOGW(TAG, "⚠️ Test file size mismatch: expected %u, got %ld bytes",
+                 expected_size, test_st.st_size);
+    }
+
+    ESP_LOGI(TAG, "✅ SD card write test successful! (%ld bytes written)", test_st.st_size);
+    unlink(test_file);
 
     return ESP_OK;
 }
@@ -418,111 +480,28 @@ static esp_err_t sd_card_cleanup_oldest_messages(uint32_t count_to_delete) {
     return ESP_OK;
 }
 
-// Save message to SD card (matching Arduino approach with added reliability)
-esp_err_t sd_card_save_message(const char* topic, const char* payload, const char* timestamp) {
-    if (!sd_available) {
-        ESP_LOGW(TAG, "SD card not available for logging");
-        return ESP_ERR_INVALID_STATE;
-    }
-
-    if (topic == NULL || payload == NULL || timestamp == NULL) {
-        ESP_LOGE(TAG, "Invalid message parameters");
-        return ESP_ERR_INVALID_ARG;
-    }
-
-    // Validate message sizes (matching Arduino limits: topic=100, payload=200)
-    if (strlen(topic) > 128 || strlen(payload) > 512) {
-        ESP_LOGE(TAG, "Message too large to save");
-        return ESP_ERR_INVALID_SIZE;
-    }
-
-    // Check available space and cleanup if needed
-    uint64_t estimated_msg_size = strlen(topic) + strlen(payload) + 64;  // Extra for ID, timestamp, delimiters
-    if (sd_card_check_space(estimated_msg_size) != ESP_OK) {
-        ESP_LOGW(TAG, "⚠️ SD card low on space - cleaning up old messages...");
-
-        // Delete 10 oldest messages to make room
-        sd_card_cleanup_oldest_messages(10);
-
-        // Check again after cleanup
-        if (sd_card_check_space(estimated_msg_size) != ESP_OK) {
-            ESP_LOGE(TAG, "❌ SD card still full after cleanup - cannot save message");
-            return ESP_ERR_NO_MEM;
-        }
-    }
-
+// Internal function to attempt saving message (single try)
+static esp_err_t sd_card_save_message_internal(const char* topic, const char* payload, const char* timestamp) {
     // Quick filesystem health check (verify mount point exists)
     struct stat mount_st;
     if (stat(mount_point, &mount_st) != 0) {
-        ESP_LOGE(TAG, "❌ Mount point %s no longer exists! SD card may have been unmounted", mount_point);
-        sd_available = false;
+        ESP_LOGE(TAG, "❌ Mount point %s no longer exists!", mount_point);
         return ESP_ERR_INVALID_STATE;
     }
 
-    // Try a simple test file first to verify filesystem is still writable
-    // Use same naming pattern as actual file (no dot prefix)
-    const char* test_file = "/sdcard/test.txt";
-    FILE *test_fp = fopen(test_file, "w");
-    if (test_fp == NULL) {
-        ESP_LOGE(TAG, "❌ Filesystem health check failed! errno: %d (%s)", errno, strerror(errno));
-        ESP_LOGW(TAG, "⚠️ Attempting to recover SD card filesystem...");
-
-        // Try to unmount and remount
-        if (card != NULL) {
-            ESP_LOGI(TAG, "Unmounting SD card...");
-            esp_vfs_fat_sdcard_unmount(mount_point, card);
-            card = NULL;
-        }
-
-        sd_available = false;
-        sd_initialized = false;
-        vTaskDelay(pdMS_TO_TICKS(500));  // Wait for cleanup
-
-        // Attempt reinit
-        ESP_LOGI(TAG, "Attempting to reinitialize SD card...");
-        if (sd_card_init() == ESP_OK) {
-            ESP_LOGI(TAG, "✅ SD card reinitialized successfully");
-            // Retry test file after reinit
-            test_fp = fopen(test_file, "w");
-        }
-
-        if (test_fp == NULL) {
-            ESP_LOGE(TAG, "❌ SD card recovery failed, cannot save message");
-            return ESP_FAIL;
-        }
-    }
-
-    // Clean up test file
-    fprintf(test_fp, "ok\n");
-    fclose(test_fp);
-    unlink(test_file);
-
-    // Now try to open the actual message file
-    ESP_LOGI(TAG, "Opening message file: %s", pending_messages_file);
+    // Try to open the actual message file
     FILE *file = fopen(pending_messages_file, "a");
-    ESP_LOGI(TAG, "fopen() result: %s (errno: %d)", file ? "SUCCESS" : "FAILED", errno);
 
     // If append fails with EINVAL, try creating file explicitly first
     if (file == NULL && errno == EINVAL) {
-        ESP_LOGW(TAG, "Append mode failed, trying to create file first...");
-
-        // Create file if it doesn't exist
         FILE *create_file = fopen(pending_messages_file, "w");
         if (create_file) {
             fclose(create_file);
-            ESP_LOGI(TAG, "File created, retrying append...");
-
-            // Retry append
             file = fopen(pending_messages_file, "a");
-        } else {
-            ESP_LOGE(TAG, "Failed to create file, errno: %d (%s)", errno, strerror(errno));
         }
     }
 
     if (file == NULL) {
-        ESP_LOGE(TAG, "Failed to open pending messages file for writing");
-        ESP_LOGE(TAG, "errno: %d (%s)", errno, strerror(errno));
-        ESP_LOGE(TAG, "File path: %s", pending_messages_file);
         return ESP_FAIL;
     }
 
@@ -533,12 +512,96 @@ esp_err_t sd_card_save_message(const char* topic, const char* payload, const cha
     fclose(file);
 
     if (written > 0) {
-        ESP_LOGI(TAG, "💾 Message saved to SD card with ID: %lu (%d bytes)", message_id_counter, written);
         return ESP_OK;
-    } else {
-        ESP_LOGE(TAG, "Failed to write message to file");
-        return ESP_FAIL;
     }
+    return ESP_FAIL;
+}
+
+// Save message to SD card with retry logic and RAM buffer fallback
+esp_err_t sd_card_save_message(const char* topic, const char* payload, const char* timestamp) {
+    // Validate parameters first
+    if (topic == NULL || payload == NULL || timestamp == NULL) {
+        ESP_LOGE(TAG, "Invalid message parameters");
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    if (strlen(topic) > 128 || strlen(payload) > 512) {
+        ESP_LOGE(TAG, "Message too large to save");
+        return ESP_ERR_INVALID_SIZE;
+    }
+
+    // If SD card is not available, use RAM buffer fallback
+    if (!sd_available) {
+        ESP_LOGW(TAG, "SD card not available - using RAM buffer fallback");
+        sd_error_count++;
+        last_error_time = esp_timer_get_time() / 1000000;
+        return sd_card_add_to_ram_buffer(topic, payload, timestamp);
+    }
+
+    // Check available space and cleanup if needed
+    uint64_t estimated_msg_size = strlen(topic) + strlen(payload) + 64;
+    if (sd_card_check_space(estimated_msg_size) != ESP_OK) {
+        ESP_LOGW(TAG, "⚠️ SD card low on space - cleaning up old messages...");
+        sd_card_cleanup_oldest_messages(10);
+
+        if (sd_card_check_space(estimated_msg_size) != ESP_OK) {
+            ESP_LOGE(TAG, "❌ SD card still full - using RAM buffer");
+            return sd_card_add_to_ram_buffer(topic, payload, timestamp);
+        }
+    }
+
+    // Try to save with retries
+    esp_err_t result = ESP_FAIL;
+    for (int retry = 0; retry < SD_CARD_MAX_RETRIES; retry++) {
+        if (retry > 0) {
+            ESP_LOGW(TAG, "🔄 Retry %d/%d for SD card write...", retry + 1, SD_CARD_MAX_RETRIES);
+            vTaskDelay(pdMS_TO_TICKS(SD_CARD_RETRY_DELAY_MS * (retry + 1)));  // Increasing delay
+        }
+
+        result = sd_card_save_message_internal(topic, payload, timestamp);
+
+        if (result == ESP_OK) {
+            ESP_LOGI(TAG, "💾 Message saved to SD card with ID: %lu", message_id_counter);
+            sd_error_count = 0;  // Reset error count on success
+            return ESP_OK;
+        }
+
+        ESP_LOGW(TAG, "⚠️ SD card write attempt %d failed (errno: %d)", retry + 1, errno);
+    }
+
+    // All retries failed - try recovery
+    ESP_LOGE(TAG, "❌ All SD card write retries failed - attempting recovery...");
+    sd_error_count++;
+    last_error_time = esp_timer_get_time() / 1000000;
+
+    // Try to unmount and remount
+    if (card != NULL) {
+        ESP_LOGI(TAG, "Unmounting SD card for recovery...");
+        esp_vfs_fat_sdcard_unmount(mount_point, card);
+        card = NULL;
+    }
+
+    sd_available = false;
+    sd_initialized = false;
+    vTaskDelay(pdMS_TO_TICKS(500));
+
+    // Attempt reinit
+    ESP_LOGI(TAG, "Attempting to reinitialize SD card...");
+    if (sd_card_init() == ESP_OK) {
+        ESP_LOGI(TAG, "✅ SD card reinitialized - retrying save...");
+
+        // One more try after recovery
+        result = sd_card_save_message_internal(topic, payload, timestamp);
+        if (result == ESP_OK) {
+            ESP_LOGI(TAG, "💾 Message saved after recovery with ID: %lu", message_id_counter);
+            sd_error_count = 0;
+            return ESP_OK;
+        }
+    }
+
+    // Recovery failed - use RAM buffer as last resort
+    ESP_LOGE(TAG, "❌ SD card recovery failed - saving to RAM buffer");
+    return sd_card_add_to_ram_buffer(topic, payload, timestamp);
 }
 
 // Get count of pending messages
@@ -924,4 +987,169 @@ esp_err_t sd_card_restore_message_counter(void) {
     ESP_LOGI(TAG, "📋 Found %lu existing messages on SD card", message_count);
 
     return ESP_OK;
+}
+
+// ============================================================================
+// SD Card Recovery and RAM Buffer Functions
+// ============================================================================
+
+// Reset error counter (call after successful operation)
+void sd_card_reset_error_count(void) {
+    sd_error_count = 0;
+}
+
+// Check if SD card needs recovery attempt
+bool sd_card_needs_recovery(void) {
+    if (sd_available) {
+        return false;  // SD card is working, no recovery needed
+    }
+
+    // Check if enough time has passed since last recovery attempt
+    int64_t current_time = esp_timer_get_time() / 1000000;  // Convert to seconds
+    if (current_time - last_recovery_attempt < SD_CARD_RECOVERY_INTERVAL_SEC) {
+        return false;  // Too soon to retry
+    }
+
+    return true;
+}
+
+// Attempt to recover failed SD card
+esp_err_t sd_card_attempt_recovery(void) {
+    int64_t current_time = esp_timer_get_time() / 1000000;
+    last_recovery_attempt = current_time;
+
+    ESP_LOGI(TAG, "🔄 Attempting SD card recovery...");
+
+    // If card was previously initialized, try to unmount first
+    if (card != NULL) {
+        ESP_LOGI(TAG, "   Unmounting previous SD card instance...");
+        esp_vfs_fat_sdcard_unmount(mount_point, card);
+        card = NULL;
+        vTaskDelay(pdMS_TO_TICKS(500));  // Wait for cleanup
+    }
+
+    // Reset state
+    sd_initialized = false;
+    sd_available = false;
+
+    // Wait a bit before trying to reinitialize
+    vTaskDelay(pdMS_TO_TICKS(1000));
+
+    // Try to reinitialize
+    esp_err_t ret = sd_card_init();
+
+    if (ret == ESP_OK) {
+        ESP_LOGI(TAG, "✅ SD card recovery successful!");
+        sd_error_count = 0;
+
+        // Try to flush RAM buffer to SD card
+        if (ram_buffer_count > 0) {
+            ESP_LOGI(TAG, "📤 Flushing %lu messages from RAM buffer to SD card...", ram_buffer_count);
+            sd_card_flush_ram_buffer();
+        }
+
+        return ESP_OK;
+    } else {
+        ESP_LOGW(TAG, "❌ SD card recovery failed (error: 0x%x)", ret);
+        return ret;
+    }
+}
+
+// Get count of messages in RAM buffer
+uint32_t sd_card_get_ram_buffer_count(void) {
+    return ram_buffer_count;
+}
+
+// Add message to RAM buffer (fallback when SD fails)
+static esp_err_t sd_card_add_to_ram_buffer(const char* topic, const char* payload, const char* timestamp) {
+    if (ram_buffer_count >= SD_CARD_RAM_BUFFER_SIZE) {
+        // Buffer full - overwrite oldest message (circular buffer)
+        ESP_LOGW(TAG, "⚠️ RAM buffer full, overwriting oldest message");
+    }
+
+    // Find next slot (circular buffer)
+    uint32_t index = ram_buffer_write_index % SD_CARD_RAM_BUFFER_SIZE;
+
+    ram_buffer[index].valid = true;
+    strncpy(ram_buffer[index].timestamp, timestamp, sizeof(ram_buffer[index].timestamp) - 1);
+    ram_buffer[index].timestamp[sizeof(ram_buffer[index].timestamp) - 1] = '\0';
+    strncpy(ram_buffer[index].topic, topic, sizeof(ram_buffer[index].topic) - 1);
+    ram_buffer[index].topic[sizeof(ram_buffer[index].topic) - 1] = '\0';
+    strncpy(ram_buffer[index].payload, payload, sizeof(ram_buffer[index].payload) - 1);
+    ram_buffer[index].payload[sizeof(ram_buffer[index].payload) - 1] = '\0';
+
+    ram_buffer_write_index++;
+    if (ram_buffer_count < SD_CARD_RAM_BUFFER_SIZE) {
+        ram_buffer_count++;
+    }
+
+    ESP_LOGI(TAG, "💾 Message saved to RAM buffer (%lu/%d messages)",
+             ram_buffer_count, SD_CARD_RAM_BUFFER_SIZE);
+
+    return ESP_OK;
+}
+
+// Flush RAM buffer to SD card
+esp_err_t sd_card_flush_ram_buffer(void) {
+    if (!sd_available) {
+        ESP_LOGW(TAG, "Cannot flush RAM buffer - SD card not available");
+        return ESP_ERR_INVALID_STATE;
+    }
+
+    if (ram_buffer_count == 0) {
+        return ESP_OK;  // Nothing to flush
+    }
+
+    ESP_LOGI(TAG, "📤 Flushing %lu messages from RAM buffer to SD card...", ram_buffer_count);
+
+    uint32_t flushed = 0;
+    uint32_t failed = 0;
+
+    // Calculate starting index for reading (handle circular buffer)
+    uint32_t start_index = 0;
+    if (ram_buffer_write_index > SD_CARD_RAM_BUFFER_SIZE) {
+        start_index = ram_buffer_write_index % SD_CARD_RAM_BUFFER_SIZE;
+    }
+
+    for (uint32_t i = 0; i < ram_buffer_count; i++) {
+        uint32_t index = (start_index + i) % SD_CARD_RAM_BUFFER_SIZE;
+
+        if (!ram_buffer[index].valid) {
+            continue;
+        }
+
+        // Open file for append
+        FILE *file = fopen(pending_messages_file, "a");
+        if (file == NULL) {
+            ESP_LOGE(TAG, "Failed to open file for RAM buffer flush");
+            failed++;
+            continue;
+        }
+
+        message_id_counter++;
+        int written = fprintf(file, "%lu|%s|%s|%s\n",
+                              message_id_counter,
+                              ram_buffer[index].timestamp,
+                              ram_buffer[index].topic,
+                              ram_buffer[index].payload);
+        fflush(file);
+        fclose(file);
+
+        if (written > 0) {
+            ram_buffer[index].valid = false;
+            flushed++;
+        } else {
+            failed++;
+        }
+
+        vTaskDelay(pdMS_TO_TICKS(50));  // Small delay between writes
+    }
+
+    // Reset RAM buffer
+    ram_buffer_count = 0;
+    ram_buffer_write_index = 0;
+
+    ESP_LOGI(TAG, "✅ RAM buffer flush complete: %lu saved, %lu failed", flushed, failed);
+
+    return (failed == 0) ? ESP_OK : ESP_FAIL;
 }

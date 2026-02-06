@@ -119,6 +119,69 @@ if (sta_netif == NULL) {
 - Partition table is now FROZEN - no future changes allowed
 **Prevention**: Plan partition sizes generously from initial deployment
 
+### Issue #9: SD Card Cached Messages Have Wrong Timestamp (v1.3.7)
+**Problem**: All offline-cached messages had identical `created_on` timestamp instead of actual reading time
+**Root Cause**: In `create_telemetry_payload()`, the payload copy to output buffer was inside `if (mqtt_connected)` block
+- When MQTT was connected: payload was built AND copied to static buffer
+- When MQTT was disconnected: payload was built but NOT copied (old data remained in static buffer)
+- SD card then saved the stale payload with old timestamp
+**Location**: `main/main.c`, `create_telemetry_payload()` function (lines ~2235-2260)
+**Solution**: Moved `strncpy(payload, batch_payload, ...)` OUTSIDE the `if (mqtt_connected)` block
+**Prevention**:
+- When using static buffers, always update them regardless of connection state
+- Output parameters should be set before any conditional logic that might skip them
+**File**: `main/main.c`
+
+### Issue #10: SD Card I/O Errors Cause Data Loss (v1.3.8)
+**Problem**: When SD card has transient I/O errors (0x107), all subsequent telemetry is lost
+**Root Cause**: SD card operations had no retry logic and no fallback when failures occurred
+**Symptoms**:
+- `sdmmc_write_sectors_dma: sdmmc_send_cmd returned 0x107`
+- `errno: 5 (I/O error)`
+- Messages lost when SD card temporarily fails
+**Solution**: Added comprehensive SD card error recovery:
+1. **Retry logic**: 3 retries with increasing delays for transient errors
+2. **RAM buffer fallback**: 5-message buffer when SD fails completely
+3. **Periodic recovery**: Auto-attempts SD card recovery every 60 seconds
+4. **Auto-flush**: RAM buffer automatically saved to SD when it recovers
+**Files**: `main/sd_card_logger.c`, `main/sd_card_logger.h`, `main/main.c`
+**Configuration** (in `sd_card_logger.h`):
+- `SD_CARD_MAX_RETRIES`: 3 retries per operation
+- `SD_CARD_RETRY_DELAY_MS`: 100ms between retries
+- `SD_CARD_RECOVERY_INTERVAL_SEC`: 60 seconds between recovery attempts
+- `SD_CARD_RAM_BUFFER_SIZE`: 5 messages in RAM fallback
+
+### Issue #11: System Restarts After 30min WiFi Disconnect (v1.3.8)
+**Problem**: When WiFi is disconnected, system restarts after 30 minutes even though SD card is caching data
+**Root Cause**: `TELEMETRY_TIMEOUT_SEC` (1800 seconds) triggers forced restart when no successful telemetry
+- Restart logic didn't check if SD card was successfully caching offline data
+- Location: `main/main.c` `check_telemetry_timeout_recovery()` function
+**Solution**: Added check for `sd_card_is_available()` - skip restart if SD card is caching data
+- System now runs indefinitely offline when SD card is working
+- Only restarts if both: no telemetry AND no SD card available
+**Files**: `main/main.c`
+
+### Issue #12: SD Card Fails After Restart - SPI Bus Not Freed (v1.3.8)
+**Problem**: After system restart, SD card initialization fails permanently
+**Root Cause**: When `esp_vfs_fat_sdspi_mount()` fails, SPI bus was not freed
+- SPI bus allocated at line 176, but not freed on mount failure at line 263
+- Recovery attempts found SPI bus already allocated (ESP_ERR_INVALID_STATE)
+- Bus in corrupted state prevented all future SD card operations
+**Solution**: Added `spi_bus_free(SD_CARD_SPI_HOST)` before returning error in `sd_card_init()`
+**Files**: `main/sd_card_logger.c`
+
+### Issue #13: Memory Optimization - Heap Reduction (v1.3.8)
+**Problem**: System running low on heap memory, risk of crashes during high load
+**Solution**: Comprehensive heap memory optimization saving ~20KB:
+- **Max sensors reduced**: 15 → 10 (saves ~9KB in arrays)
+- **Static buffer reductions**: mqtt_broker_uri, mqtt_username, telemetry_topic, c2d_topic (256→128), device_twin_reported_topic (128→96)
+- **Task stack reductions**: modbus_task (8192→6144), telemetry_task (12288→10240), modem_reset_task (4096→3072), uart_rx (4096→3072)
+- **Config reductions**: TELEMETRY_HISTORY_SIZE (10→5), SD_CARD_RAM_BUFFER_SIZE (5→3)
+- **telemetry_payload**: 4096→2560 bytes
+- **Eliminated heap fragmentation**: batch_payload malloc replaced with static buffer
+**Files**: `main/main.c`, `main/web_config.h`, `main/web_config.c`, `main/sd_card_logger.h`, `main/a7670c_ppp.c`
+**Important**: Max sensor count is now 10, not 15. All bounds checks updated.
+
 ## 📋 BEFORE EDITING CHECKLIST
 
 ### Before Editing web_config.c:
@@ -251,8 +314,9 @@ See `docs/DEVICE_TWIN_GUIDE.md` for complete usage documentation.
 
 ---
 
-**Last Updated**: January 6, 2025
+**Last Updated**: February 6, 2026
 **Last Known Working Commit**: 83dc356
-**Current Version**: v1.3.7
-**Partition Table**: FROZEN as of v1.3.7 (NVS: 40KB, required for 15 sensors)
-**Recent Features Added**: QUALITY sensor support with sub-sensors, partition table locked for OTA compatibility
+**Current Version**: v1.3.8
+**Partition Table**: FROZEN as of v1.3.7 (NVS: 40KB)
+**Max Sensors**: 10 (reduced from 15 to save ~20KB heap)
+**Recent Features Added**: Memory optimizations (v1.3.8), telemetry timeout skip when SD caching active
