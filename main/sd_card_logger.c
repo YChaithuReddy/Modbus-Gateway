@@ -58,6 +58,7 @@ static uint32_t ram_buffer_write_index = 0;
 
 // Forward declarations
 static esp_err_t sd_card_add_to_ram_buffer(const char* topic, const char* payload, const char* timestamp);
+static esp_err_t sd_card_remove_message_internal(uint32_t message_id);
 
 // Minimum free space required (in bytes) - 1MB
 #define MIN_FREE_SPACE_BYTES (1024 * 1024)
@@ -482,7 +483,7 @@ static esp_err_t sd_card_cleanup_oldest_messages(uint32_t count_to_delete) {
         if (id_str != NULL) {
             uint32_t msg_id = atoi(id_str);
             fclose(file);
-            sd_card_remove_message(msg_id);
+            sd_card_remove_message_internal(msg_id);
             ESP_LOGI(TAG, "🗑️ Deleted old message ID %lu to free space", msg_id);
             deleted++;
 
@@ -823,7 +824,7 @@ esp_err_t sd_card_replay_messages(void (*publish_callback)(const pending_message
                 uint32_t invalid_msg_id = atoi(id_str);
                 ESP_LOGW(TAG, "🗑️ Deleting message ID %lu - %s", invalid_msg_id, delete_reason);
                 fclose(file);
-                sd_card_remove_message(invalid_msg_id);
+                sd_card_remove_message_internal(invalid_msg_id);
             } else {
                 // Can't get valid ID, need to clean the whole file of corrupt lines
                 ESP_LOGW(TAG, "🗑️ Removing malformed line - %s", delete_reason);
@@ -869,7 +870,7 @@ esp_err_t sd_card_replay_messages(void (*publish_callback)(const pending_message
             uint32_t invalid_msg_id = atoi(id_str);
             ESP_LOGW(TAG, "🗑️ Deleting message ID %s - invalid topic with placeholder device ID", id_str);
             fclose(file);
-            sd_card_remove_message(invalid_msg_id);
+            sd_card_remove_message_internal(invalid_msg_id);
             file = fopen(pending_messages_file, "r");
             if (file == NULL) {
                 ESP_LOGI(TAG, "No more pending messages after cleanup");
@@ -891,13 +892,32 @@ esp_err_t sd_card_replay_messages(void (*publish_callback)(const pending_message
 
         ESP_LOGI(TAG, "📤 Replaying message ID: %lu from %s", msg.message_id, msg.timestamp);
 
+        // Release mutex before callback - callback calls sd_card_remove_message()
+        // which needs to acquire the mutex (prevents deadlock)
+        fclose(file);
+        file = NULL;
+        if (sd_card_mutex != NULL) xSemaphoreGive(sd_card_mutex);
+
         // Call publish callback (rate limiting is handled in the callback using iot_configs.h values)
         publish_callback(&msg);
         replayed_count++;
 
         // Minimal yield to prevent watchdog and allow other tasks to run
-        // Rate limiting delays are handled by the callback function
         vTaskDelay(pdMS_TO_TICKS(10));
+
+        // Re-acquire mutex and reopen file for next message
+        if (sd_card_mutex != NULL) {
+            if (xSemaphoreTake(sd_card_mutex, pdMS_TO_TICKS(SD_MUTEX_TIMEOUT_MS)) != pdTRUE) {
+                ESP_LOGW(TAG, "SD card mutex timeout after replay callback");
+                return ESP_ERR_TIMEOUT;
+            }
+        }
+        file = fopen(pending_messages_file, "r");
+        if (file == NULL) {
+            ESP_LOGI(TAG, "No more pending messages after replay");
+            if (sd_card_mutex != NULL) xSemaphoreGive(sd_card_mutex);
+            return ESP_OK;
+        }
     }
 
     fclose(file);
@@ -910,24 +930,15 @@ esp_err_t sd_card_replay_messages(void (*publish_callback)(const pending_message
     return ESP_OK;
 }
 
-// Remove a specific message by ID
-esp_err_t sd_card_remove_message(uint32_t message_id) {
+// Internal: Remove a specific message by ID (caller must hold mutex)
+static esp_err_t sd_card_remove_message_internal(uint32_t message_id) {
     if (!sd_available || message_id == 0) {
         return ESP_ERR_INVALID_STATE;
-    }
-
-    // Acquire mutex for thread safety
-    if (sd_card_mutex != NULL) {
-        if (xSemaphoreTake(sd_card_mutex, pdMS_TO_TICKS(SD_MUTEX_TIMEOUT_MS)) != pdTRUE) {
-            ESP_LOGW(TAG, "SD card mutex timeout in remove_message");
-            return ESP_ERR_TIMEOUT;
-        }
     }
 
     FILE *source_file = fopen(pending_messages_file, "r");
     if (source_file == NULL) {
         ESP_LOGW(TAG, "No pending messages file to clean");
-        if (sd_card_mutex != NULL) xSemaphoreGive(sd_card_mutex);
         return ESP_OK;
     }
 
@@ -935,7 +946,6 @@ esp_err_t sd_card_remove_message(uint32_t message_id) {
     if (temp_file == NULL) {
         ESP_LOGE(TAG, "Failed to create temp file");
         fclose(source_file);
-        if (sd_card_mutex != NULL) xSemaphoreGive(sd_card_mutex);
         return ESP_FAIL;
     }
 
@@ -967,14 +977,12 @@ esp_err_t sd_card_remove_message(uint32_t message_id) {
         if (remove(pending_messages_file) != 0) {
             ESP_LOGE(TAG, "❌ Failed to remove old messages file: %s", strerror(errno));
             remove(temp_messages_file);  // Clean up temp file
-            if (sd_card_mutex != NULL) xSemaphoreGive(sd_card_mutex);
             return ESP_FAIL;
         }
 
         // Rename temp file to original
         if (rename(temp_messages_file, pending_messages_file) != 0) {
             ESP_LOGE(TAG, "❌ Failed to rename temp file: %s", strerror(errno));
-            if (sd_card_mutex != NULL) xSemaphoreGive(sd_card_mutex);
             return ESP_FAIL;
         }
 
@@ -984,8 +992,23 @@ esp_err_t sd_card_remove_message(uint32_t message_id) {
         remove(temp_messages_file);
     }
 
-    if (sd_card_mutex != NULL) xSemaphoreGive(sd_card_mutex);
     return ESP_OK;
+}
+
+// Public: Remove a specific message by ID (acquires mutex)
+esp_err_t sd_card_remove_message(uint32_t message_id) {
+    // Acquire mutex for thread safety
+    if (sd_card_mutex != NULL) {
+        if (xSemaphoreTake(sd_card_mutex, pdMS_TO_TICKS(SD_MUTEX_TIMEOUT_MS)) != pdTRUE) {
+            ESP_LOGW(TAG, "SD card mutex timeout in remove_message");
+            return ESP_ERR_TIMEOUT;
+        }
+    }
+
+    esp_err_t result = sd_card_remove_message_internal(message_id);
+
+    if (sd_card_mutex != NULL) xSemaphoreGive(sd_card_mutex);
+    return result;
 }
 
 // Clear all pending messages
