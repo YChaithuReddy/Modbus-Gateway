@@ -7931,9 +7931,8 @@ static esp_err_t test_rs485_handler(httpd_req_t *req)
                 raw_val = ((uint32_t)(((registers[0] & 0xFF) << 8) | ((registers[0] >> 8) & 0xFF)) << 16) |
                          (((registers[1] & 0xFF) << 8) | ((registers[1] >> 8) & 0xFF));
             } else if (strstr(data_type, "3412") || strstr(data_type, "CDAB")) {
-                // FLOAT32_3412 or FLOAT32_CDAB - Word swap
-                raw_val = ((uint32_t)(((registers[1] & 0xFF) << 8) | ((registers[1] >> 8) & 0xFF)) << 16) |
-                         (((registers[0] & 0xFF) << 8) | ((registers[0] >> 8) & 0xFF));
+                // FLOAT32_3412 or FLOAT32_CDAB - Word swap (swap register order only)
+                raw_val = ((uint32_t)registers[1] << 16) | registers[0];
             } else {
                 // Default: FLOAT32_1234 or FLOAT32_ABCD - Big endian
                 raw_val = ((uint32_t)registers[0] << 16) | registers[1];
@@ -7951,9 +7950,8 @@ static esp_err_t test_rs485_handler(httpd_req_t *req)
                 raw_val = ((uint32_t)(((registers[0] & 0xFF) << 8) | ((registers[0] >> 8) & 0xFF)) << 16) |
                          (((registers[1] & 0xFF) << 8) | ((registers[1] >> 8) & 0xFF));
             } else if (strstr(data_type, "3412") || strstr(data_type, "CDAB")) {
-                // UINT32_3412 or UINT32_CDAB - Word swap
-                raw_val = ((uint32_t)(((registers[1] & 0xFF) << 8) | ((registers[1] >> 8) & 0xFF)) << 16) |
-                         (((registers[0] & 0xFF) << 8) | ((registers[0] >> 8) & 0xFF));
+                // UINT32_3412 or UINT32_CDAB - Word swap (swap register order only)
+                raw_val = ((uint32_t)registers[1] << 16) | registers[0];
             } else {
                 // Default: UINT32_1234 or UINT32_ABCD - Big endian
                 raw_val = ((uint32_t)registers[0] << 16) | registers[1];
@@ -7969,9 +7967,8 @@ static esp_err_t test_rs485_handler(httpd_req_t *req)
                 raw_val = ((uint32_t)(((registers[0] & 0xFF) << 8) | ((registers[0] >> 8) & 0xFF)) << 16) |
                          (((registers[1] & 0xFF) << 8) | ((registers[1] >> 8) & 0xFF));
             } else if (strstr(data_type, "3412") || strstr(data_type, "CDAB")) {
-                // INT32_3412 or INT32_CDAB - Word swap
-                raw_val = ((uint32_t)(((registers[1] & 0xFF) << 8) | ((registers[1] >> 8) & 0xFF)) << 16) |
-                         (((registers[0] & 0xFF) << 8) | ((registers[0] >> 8) & 0xFF));
+                // INT32_3412 or INT32_CDAB - Word swap (swap register order only)
+                raw_val = ((uint32_t)registers[1] << 16) | registers[0];
             } else {
                 // Default: INT32_1234 or INT32_ABCD - Big endian
                 raw_val = ((uint32_t)registers[0] << 16) | registers[1];
@@ -8044,9 +8041,9 @@ static esp_err_t test_rs485_handler(httpd_req_t *req)
             primary_value = ((double)integer_part + (double)decimal_part) * scale_factor;
         } else if (reg_count >= 4 && strstr(data_type, "ZEST_FIXED")) {
             // ZEST_FIXED: UINT16 (Integer) + FLOAT32_BE (Decimal)
-            // Register[0]: Integer part, Register[1]: unused, Registers[2-3]: Float decimal (Big Endian)
+            // Register[0]: Integer part, Registers[1-2]: Float decimal (Big Endian), Register[3]: unused
             uint32_t integer_part = (uint32_t)registers[0];
-            uint32_t float_bits = ((uint32_t)registers[2] << 16) | registers[3];
+            uint32_t float_bits = ((uint32_t)registers[1] << 16) | registers[2];
             float decimal_part;
             memcpy(&decimal_part, &float_bits, sizeof(float));
             primary_value = ((double)integer_part + (double)decimal_part) * scale_factor;
@@ -8086,7 +8083,7 @@ static esp_err_t test_rs485_handler(httpd_req_t *req)
             if (test_display_value > 100) test_display_value = 100.0;
             snprintf(test_value_desc, sizeof(test_value_desc), "Level %.2f%%", test_display_value);
         } else {
-            test_display_value = primary_value * scale_factor;
+            test_display_value = primary_value;  // scale_factor already applied during data type conversion
             snprintf(test_value_desc, sizeof(test_value_desc), "%s×%.3f", data_type, scale_factor);
         }
         

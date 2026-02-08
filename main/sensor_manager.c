@@ -156,13 +156,23 @@ esp_err_t convert_modbus_data(uint16_t *registers, int reg_count,
         
     } else if (strcmp(actual_data_type, "FLOAT32") == 0 && reg_count >= 2) {
         uint32_t combined_value;
-        
+
         if (strcmp(actual_byte_order, "BIG_ENDIAN") == 0) {
             combined_value = ((uint32_t)registers[0] << 16) | registers[1];
         } else if (strcmp(actual_byte_order, "LITTLE_ENDIAN") == 0) {
             combined_value = ((uint32_t)registers[1] << 16) | registers[0];
+        } else if (strcmp(actual_byte_order, "MIXED_BADC") == 0) {
+            // BADC - byte swap within each register
+            uint16_t reg0_swapped = ((registers[0] & 0xFF) << 8) | ((registers[0] >> 8) & 0xFF);
+            uint16_t reg1_swapped = ((registers[1] & 0xFF) << 8) | ((registers[1] >> 8) & 0xFF);
+            combined_value = ((uint32_t)reg0_swapped << 16) | reg1_swapped;
+        } else if (strcmp(actual_byte_order, "MIXED_DCBA") == 0) {
+            // DCBA - byte swap within each register + word swap
+            uint16_t reg0_swapped = ((registers[0] & 0xFF) << 8) | ((registers[0] >> 8) & 0xFF);
+            uint16_t reg1_swapped = ((registers[1] & 0xFF) << 8) | ((registers[1] >> 8) & 0xFF);
+            combined_value = ((uint32_t)reg1_swapped << 16) | reg0_swapped;
         } else {
-            ESP_LOGE(TAG, "FLOAT32 only supports BIG_ENDIAN and LITTLE_ENDIAN");
+            ESP_LOGE(TAG, "FLOAT32 unsupported byte order: %s", actual_byte_order);
             return ESP_ERR_INVALID_ARG;
         }
         
