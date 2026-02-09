@@ -2790,7 +2790,7 @@ static esp_err_t config_page_handler(httpd_req_t *req)
                     "<div class='sensor-card' id='sensor-card-%d'>"
                     "<h3>%s (Sensor %d) - <span style='color:#17a2b8;font-weight:bold;'>Aquadax Quality</span></h3>"
                     "<p><strong>Unit ID:</strong> %s | <strong>Slave ID:</strong> %d | <strong>Register:</strong> %d | <strong>Qty:</strong> %d</p>"
-                    "<p style='color:#28a745;font-size:12px;margin:5px 0'><strong>Parameters:</strong> COD, BOD, TSS, pH, Temperature (5x FLOAT32 bulk read)</p>",
+                    "<p style='color:#28a745;font-size:12px;margin:5px 0'><strong>Parameters:</strong> COD, BOD, TSS, pH, Temperature (5x FLOAT32 CDAB bulk read)</p>",
                     i, g_system_config.sensors[i].name, i + 1,
                     g_system_config.sensors[i].unit_id, g_system_config.sensors[i].slave_id,
                     g_system_config.sensors[i].register_address, g_system_config.sensors[i].quantity);
@@ -3150,7 +3150,7 @@ static esp_err_t config_page_handler(httpd_req_t *req)
         "  h += '<input type=\"hidden\" name=\"sensor_' + sensorCount + '_scale_factor\" value=\"1.0\">';"
         "  h += '<input type=\"hidden\" name=\"sensor_' + sensorCount + '_sensor_height\" value=\"0\">';"
         "  h += '<input type=\"hidden\" name=\"sensor_' + sensorCount + '_max_water_level\" value=\"0\">';"
-        "  h += '<p style=\"color:#0d6efd;font-weight:600;margin:15px 0;padding:10px;background:#e7f1ff;border-radius:6px;font-size:14px\">Aquadax Quality Sensor - Reads COD, BOD, TSS, pH, Temperature (5x FLOAT32 bulk read)</p>';"
+        "  h += '<p style=\"color:#0d6efd;font-weight:600;margin:15px 0;padding:10px;background:#e7f1ff;border-radius:6px;font-size:14px\">Aquadax Quality Sensor - Reads COD, BOD, TSS, pH, Temperature (5x FLOAT32 CDAB bulk read)</p>';"
         "  h += '<div id=\"sensor-form-' + sensorCount + '\" style=\"display:block\">';"
         "  h += '<div style=\"display:grid;grid-template-columns:180px 1fr;gap:20px;align-items:start;margin-bottom:20px\">';"
         "  h += '<label style=\"font-weight:600;padding-top:10px\">Sensor Name:</label>';"
@@ -3421,7 +3421,7 @@ static esp_err_t config_page_handler(httpd_req_t *req)
         "formHtml += '<p style=\"color:#007bff;font-size:11px;margin:5px 0\"><em>Hydrostatic Level defaults: Register 4 (0x0004), Quantity 1 - Level percentage = (Raw Value / Tank Height) × 100</em></p>';"
         "} else if (sensorType === 'Aquadax_Quality') {"
         "formHtml += '<input type=\"hidden\" name=\"sensor_' + sensorId + '_data_type\" value=\"AQUADAX_QUALITY_FIXED\">';"
-        "formHtml += '<p style=\"color:#28a745;font-size:12px;margin:10px 0\"><strong>Data Format:</strong> Fixed - 5x FLOAT32 BIG_ENDIAN (ABCD)</p>';"
+        "formHtml += '<p style=\"color:#28a745;font-size:12px;margin:10px 0\"><strong>Data Format:</strong> Fixed - 5x FLOAT32 CDAB (word-swap)</p>';"
         "formHtml += '<p style=\"color:#007bff;font-size:11px;margin:5px 0\"><em>Aquadax Quality defaults: Address 1280 (0x0500), Qty 12 - Reads COD, BOD, TSS, pH, Temperature as Float32</em></p>';"
         "} else if (sensorType === 'Piezometer') {"
         "formHtml += '<input type=\"hidden\" name=\"sensor_' + sensorId + '_data_type\" value=\"UINT16_HI\">';"
@@ -6696,6 +6696,92 @@ static esp_err_t test_sensor_handler(httpd_req_t *req)
             return ESP_OK;
         }
 
+        // For Aquadax_Quality sensors, do single bulk read and show water quality table
+        if (strcmp(sensor->sensor_type, "Aquadax_Quality") == 0) {
+            // Always read 12 registers for Aquadax Quality
+            result = modbus_read_holding_registers(sensor->slave_id, sensor->register_address, 12);
+
+            if (result != MODBUS_SUCCESS) {
+                snprintf(format_table, 6000,
+                    "<div class='test-result'>"
+                    "<h4 style='color:#dc3545'>&#10007; RS485 Failed - Aquadax Quality</h4>"
+                    "<p>Modbus read failed for slave %d, register %d</p>"
+                    "</div>", sensor->slave_id, sensor->register_address);
+                httpd_resp_set_type(req, "text/html");
+                httpd_resp_send(req, format_table, strlen(format_table));
+                free(format_table);
+                return ESP_OK;
+            }
+
+            int reg_count = modbus_get_response_length();
+            uint16_t registers[16] = {0};
+            for (int i = 0; i < reg_count && i < 16; i++) {
+                registers[i] = modbus_get_response_buffer(i);
+            }
+
+            if (reg_count < 10) {
+                snprintf(format_table, 6000,
+                    "<div class='test-result'>"
+                    "<h4 style='color:#dc3545'>&#10007; Insufficient registers (%d, need 12)</h4>"
+                    "</div>", reg_count);
+                httpd_resp_set_type(req, "text/html");
+                httpd_resp_send(req, format_table, strlen(format_table));
+                free(format_table);
+                return ESP_OK;
+            }
+
+            // Parse 5 FLOAT32 values with byte-swap + word-swap
+            const char *aq_names[] = {"COD", "BOD", "TSS", "pH", "Temperature"};
+            const char *aq_units[] = {"mg/L", "mg/L", "mg/L", "pH", "\xC2\xB0""C"};
+            int aq_offsets[] = {0, 2, 4, 6, 10}; // skip unused at 8-9
+            float aq_scale = sensor->scale_factor > 0 ? sensor->scale_factor : 1.0f;
+
+            snprintf(format_table, 6000,
+                "<div class='test-result'>"
+                "<h4 style='color:#28a745'>&#10003; Water Quality Sensor - 5 Parameters</h4>"
+                "<table style='width:100%%;border-collapse:collapse;margin:10px 0'>"
+                "<tr style='background:#28a745;color:white'>"
+                "<th style='padding:10px;text-align:left'>PARAMETER</th>"
+                "<th style='padding:10px;text-align:left'>RAW VALUE</th>"
+                "<th style='padding:10px;text-align:left'>SCALED VALUE</th>"
+                "<th style='padding:10px;text-align:left'>DATA TYPE</th></tr>");
+
+            char row_buf[300];
+            for (int aq = 0; aq < 5; aq++) {
+                int off = aq_offsets[aq];
+                if (off + 1 >= reg_count) break;
+                uint16_t lo_s = ((registers[off] & 0xFF) << 8) | ((registers[off] >> 8) & 0xFF);
+                uint16_t hi_s = ((registers[off+1] & 0xFF) << 8) | ((registers[off+1] >> 8) & 0xFF);
+                uint32_t fb = ((uint32_t)hi_s << 16) | lo_s;
+                float fv;
+                memcpy(&fv, &fb, sizeof(float));
+                snprintf(row_buf, sizeof(row_buf),
+                    "<tr style='border-bottom:1px solid #e0e0e0'>"
+                    "<td style='padding:8px;font-weight:bold'>%s</td>"
+                    "<td style='padding:8px'>%.2f</td>"
+                    "<td style='padding:8px;color:#28a745;font-weight:bold'>%.2f %s</td>"
+                    "<td style='padding:8px;font-size:12px'>FLOAT32_CDAB&times;%.2f</td></tr>",
+                    aq_names[aq], (double)fv, (double)fv * aq_scale, aq_units[aq], aq_scale);
+                strncat(format_table, row_buf, 6000 - strlen(format_table) - 1);
+            }
+
+            strncat(format_table, "</table>", 6000 - strlen(format_table) - 1);
+
+            // Add raw hex for all 12 registers
+            strncat(format_table, "<div style='margin-top:10px'><b>Raw Hex:</b> <span class='hex-display'>",
+                    6000 - strlen(format_table) - 1);
+            for (int i = 0; i < reg_count && i < 12; i++) {
+                snprintf(row_buf, sizeof(row_buf), "%04X ", registers[i]);
+                strncat(format_table, row_buf, 6000 - strlen(format_table) - 1);
+            }
+            strncat(format_table, "</span></div></div>", 6000 - strlen(format_table) - 1);
+
+            httpd_resp_set_type(req, "text/html");
+            httpd_resp_send(req, format_table, strlen(format_table));
+            free(format_table);
+            return ESP_OK;
+        }
+
         // For non-QUALITY sensors, use normal test logic
         int test_slave_id = sensor->slave_id;
         int test_register = sensor->register_address;
@@ -6714,14 +6800,14 @@ static esp_err_t test_sensor_handler(httpd_req_t *req)
         if (result == MODBUS_SUCCESS) {
             // Use the same comprehensive logic as test_rs485_handler
             // Get the raw register values
-            uint16_t registers[4]; // Limit to 4 registers to prevent overflow
+            uint16_t registers[16]; // Support up to 16 registers (Aquadax_Quality needs 12)
             int reg_count = modbus_get_response_length();
-            if (reg_count > 4 || reg_count <= 0) {
+            if (reg_count > 16 || reg_count <= 0) {
                 ESP_LOGW(TAG, "Invalid register count: %d, limiting to safe range", reg_count);
-                reg_count = (reg_count > 4) ? 4 : 1; // Safety limit
+                reg_count = (reg_count > 16) ? 16 : 1; // Safety limit
             }
-            
-            for (int i = 0; i < reg_count && i < 4; i++) {
+
+            for (int i = 0; i < reg_count && i < 16; i++) {
                 registers[i] = modbus_get_response_buffer(i);
             }
             
@@ -7936,17 +8022,17 @@ static esp_err_t test_rs485_handler(httpd_req_t *req)
     
     if (result == MODBUS_SUCCESS) {
         // Get the raw register values
-        uint16_t registers[4]; // Limit to 4 registers to prevent overflow
+        uint16_t registers[16]; // Support up to 16 registers (Aquadax_Quality needs 12)
         int reg_count = modbus_get_response_length();
-        if (reg_count > 4 || reg_count <= 0) {
+        if (reg_count > 16 || reg_count <= 0) {
             ESP_LOGW(TAG, "Invalid register count: %d, limiting to safe range", reg_count);
-            reg_count = (reg_count > 4) ? 4 : 1; // Safety limit
+            reg_count = (reg_count > 16) ? 16 : 1; // Safety limit
         }
-        
-        for (int i = 0; i < reg_count && i < 4; i++) {
+
+        for (int i = 0; i < reg_count && i < 16; i++) {
             registers[i] = modbus_get_response_buffer(i);
         }
-        
+
         // Create comprehensive ScadaCore format interpretation table (heap allocated for large content)
         // Increased buffer size to handle ZEST sensors with 4 registers and extensive format interpretations
         char *format_table = (char*)malloc(6000);  // Reduced from 10KB - CSS classes save space
@@ -8138,16 +8224,24 @@ static esp_err_t test_rs485_handler(httpd_req_t *req)
             // PANDA_LEVEL_FIXED: UINT16 raw level value
             primary_value = (double)registers[0] * scale_factor;
         } else if (reg_count >= 10 && strstr(data_type, "AQUADAX_QUALITY_FIXED")) {
-            // AQUADAX_QUALITY_FIXED: 5x FLOAT32 BIG_ENDIAN (ABCD)
-            // Registers [0-1]: COD, [2-3]: BOD, [4-5]: TSS, [6-7]: pH, [8-9]: Temperature
-            uint32_t float_bits = ((uint32_t)registers[0] << 16) | registers[1];
+            // AQUADAX_QUALITY_FIXED: 5x FLOAT32 (byte-swap + word-swap)
+            // Register layout: COD(0-1), BOD(2-3), TSS(4-5), pH(6-7), Unused(8-9), Temperature(10-11)
+            int aq_offsets[] = {0, 2, 4, 6, 10}; // COD, BOD, TSS, pH, Temp (skip unused 8-9)
+            uint16_t r0s = ((registers[aq_offsets[0]] & 0xFF) << 8) | ((registers[aq_offsets[0]] >> 8) & 0xFF);
+            uint16_t r1s = ((registers[aq_offsets[0]+1] & 0xFF) << 8) | ((registers[aq_offsets[0]+1] >> 8) & 0xFF);
+            uint32_t float_bits = ((uint32_t)r1s << 16) | r0s;
             float cod_value;
             memcpy(&cod_value, &float_bits, sizeof(float));
             primary_value = (double)cod_value * scale_factor;
             // Log all 5 parameters for test display
             const char *aq_names[] = {"COD", "BOD", "TSS", "pH", "Temp"};
-            for (int aq = 0; aq < 5 && (aq * 2 + 1) < reg_count; aq++) {
-                uint32_t fb = ((uint32_t)registers[aq * 2] << 16) | registers[aq * 2 + 1];
+            for (int aq = 0; aq < 5; aq++) {
+                int off = aq_offsets[aq];
+                if (off + 1 >= reg_count) break;
+                // Byte-swap each register, then word-swap
+                uint16_t lo_s = ((registers[off] & 0xFF) << 8) | ((registers[off] >> 8) & 0xFF);
+                uint16_t hi_s = ((registers[off+1] & 0xFF) << 8) | ((registers[off+1] >> 8) & 0xFF);
+                uint32_t fb = ((uint32_t)hi_s << 16) | lo_s;
                 float fv;
                 memcpy(&fv, &fb, sizeof(float));
                 ESP_LOGI(TAG, "Aquadax_Quality Test %s = %.3f", aq_names[aq], fv);
@@ -8172,10 +8266,58 @@ static esp_err_t test_rs485_handler(httpd_req_t *req)
             if (test_display_value > 100) test_display_value = 100.0;
             snprintf(test_value_desc, sizeof(test_value_desc), "Level %.2f%%", test_display_value);
         } else {
-            test_display_value = primary_value;  // scale_factor already applied during data type conversion
+            test_display_value = primary_value;
             snprintf(test_value_desc, sizeof(test_value_desc), "%s×%.3f", data_type, scale_factor);
         }
-        
+
+        // Special water quality table for Aquadax_Quality
+        if (strstr(data_type, "AQUADAX_QUALITY_FIXED") && reg_count >= 10) {
+            const char *aq_names[] = {"COD", "BOD", "TSS", "pH", "Temperature"};
+            const char *aq_units[] = {"mg/L", "mg/L", "mg/L", "pH", "°C"};
+            int aq_offsets[] = {0, 2, 4, 6, 10}; // skip reserved at 8-9
+            snprintf(temp_str, sizeof(temp_str),
+                "<h4 style='color:#28a745'>✓ Water Quality Sensor - 5 Parameters</h4>"
+                "<table style='width:100%%;border-collapse:collapse;margin:10px 0'>"
+                "<tr style='background:#28a745;color:white'>"
+                "<th style='padding:10px;text-align:left'>PARAMETER</th>"
+                "<th style='padding:10px;text-align:left'>RAW VALUE</th>"
+                "<th style='padding:10px;text-align:left'>SCALED VALUE</th>"
+                "<th style='padding:10px;text-align:left'>DATA TYPE</th></tr>");
+            strcat(format_table, temp_str);
+            for (int aq = 0; aq < 5; aq++) {
+                int off = aq_offsets[aq];
+                if (off + 1 >= reg_count) break;
+                // Byte-swap each register, then word-swap
+                uint16_t lo_s = ((registers[off] & 0xFF) << 8) | ((registers[off] >> 8) & 0xFF);
+                uint16_t hi_s = ((registers[off+1] & 0xFF) << 8) | ((registers[off+1] >> 8) & 0xFF);
+                uint32_t fb = ((uint32_t)hi_s << 16) | lo_s;
+                float fv;
+                memcpy(&fv, &fb, sizeof(float));
+                snprintf(temp_str, sizeof(temp_str),
+                    "<tr style='border-bottom:1px solid #e0e0e0'>"
+                    "<td style='padding:8px;font-weight:bold'>%s</td>"
+                    "<td style='padding:8px'>%.2f</td>"
+                    "<td style='padding:8px;color:#28a745;font-weight:bold'>%.2f %s</td>"
+                    "<td style='padding:8px;font-size:12px'>FLOAT32_CDAB×%.2f</td></tr>",
+                    aq_names[aq], (double)fv, (double)fv * scale_factor, aq_units[aq], scale_factor);
+                strcat(format_table, temp_str);
+            }
+            strcat(format_table, "</table>");
+            // Add raw hex
+            strcat(format_table, "<div><b>Raw Hex:</b> <span class='hex-display'>");
+            for (int i = 0; i < reg_count && i < 12; i++) {
+                snprintf(temp_str, sizeof(temp_str), "%04X ", registers[i]);
+                strcat(format_table, temp_str);
+            }
+            strcat(format_table, "</span></div>");
+            // Skip the normal ScadaCore table
+            strcat(format_table, "</div>");
+            httpd_resp_sendstr_chunk(req, format_table);
+            free(format_table);
+            httpd_resp_sendstr_chunk(req, NULL);
+            return ESP_OK;
+        }
+
         // Use same layout as saved sensor test (value-box and hex-display classes)
         snprintf(temp_str, sizeof(temp_str),
                  "<div class='value-box'><b>Configured Value:</b> %.6f (%s)</div>"
@@ -8183,7 +8325,7 @@ static esp_err_t test_rs485_handler(httpd_req_t *req)
         strcat(format_table, temp_str);
 
         // Add hex values
-        for (int i = 0; i < reg_count && i < 4; i++) {
+        for (int i = 0; i < reg_count && i < 16; i++) {
             snprintf(temp_str, sizeof(temp_str), "%04X ", registers[i]);
             strcat(format_table, temp_str);
         }

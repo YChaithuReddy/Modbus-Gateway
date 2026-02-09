@@ -273,7 +273,7 @@ esp_err_t sensor_test_live(const sensor_config_t *sensor, sensor_test_result_t *
     int quantity_to_read = sensor->quantity;
     if (strcmp(sensor->sensor_type, "Aquadax_Quality") == 0) {
         quantity_to_read = 12;
-        ESP_LOGI(TAG, "Aquadax_Quality sensor detected, reading 12 registers for 5x FLOAT32_ABCD (COD,BOD,TSS,pH,Temp)");
+        ESP_LOGI(TAG, "Aquadax_Quality sensor detected, reading 12 registers for 5x FLOAT32 (COD,BOD,TSS,pH,Temp)");
     } else if (strcmp(sensor->sensor_type, "Flow-Meter") == 0) {
         quantity_to_read = 4;
         ESP_LOGI(TAG, "Flow-Meter sensor detected, reading 4 registers for UINT32_BADC + FLOAT32_BADC interpretation");
@@ -561,18 +561,25 @@ esp_err_t sensor_test_live(const sensor_config_t *sensor, sensor_test_result_t *
         ESP_LOGI(TAG, "Hydrostatic_Level Calculation: Raw=%u, TankHeight=%.2f, Level%%=%.2f",
                  raw_level, sensor->max_water_level, result->scaled_value);
     }
-    // Special handling for Aquadax Quality sensors (12 registers: 5x FLOAT32 BIG_ENDIAN)
+    // Special handling for Aquadax Quality sensors (12 registers: 5x FLOAT32)
     else if (strcmp(sensor->sensor_type, "Aquadax_Quality") == 0 && reg_count >= 10) {
         // Aquadax Quality reads 12 registers starting at address 1280:
-        // Registers [0-1]:  COD (mg/L)       - FLOAT32 BIG_ENDIAN (ABCD)
-        // Registers [2-3]:  BOD (mg/L)       - FLOAT32 BIG_ENDIAN (ABCD)
-        // Registers [4-5]:  TSS (mg/L)       - FLOAT32 BIG_ENDIAN (ABCD)
-        // Registers [6-7]:  pH               - FLOAT32 BIG_ENDIAN (ABCD)
-        // Registers [8-9]:  Temperature (°C) - FLOAT32 BIG_ENDIAN (ABCD)
-        // Registers [10-11]: Reserved (ignored)
+        // Registers [0-1]:  COD (mg/L)
+        // Registers [2-3]:  BOD (mg/L)
+        // Registers [4-5]:  TSS (mg/L)
+        // Registers [6-7]:  pH
+        // Registers [8-9]:  UNUSED (probe not connected, returns 0)
+        // Registers [10-11]: Temperature (°C)
 
-        // Parse first parameter (COD) as primary display value for test
-        uint32_t float_bits = ((uint32_t)registers[0] << 16) | registers[1];
+        // Decode: byte-swap each register, then word-swap
+        // Verified against raw register data from serial monitor
+        int aq_offsets[] = {0, 2, 4, 6, 10}; // skip unused at 8-9
+        const char *param_names[] = {"COD", "BOD", "TSS", "pH", "Temp"};
+
+        // Parse COD as primary display value
+        uint16_t r0s = ((registers[0] & 0xFF) << 8) | ((registers[0] >> 8) & 0xFF);
+        uint16_t r1s = ((registers[1] & 0xFF) << 8) | ((registers[1] >> 8) & 0xFF);
+        uint32_t float_bits = ((uint32_t)r1s << 16) | r0s;
         float cod_value;
         memcpy(&cod_value, &float_bits, sizeof(float));
         result->scaled_value = (double)cod_value * sensor->scale_factor;
@@ -581,9 +588,13 @@ esp_err_t sensor_test_live(const sensor_config_t *sensor, sensor_test_result_t *
         ESP_LOGI(TAG, "Aquadax_Quality Test: COD=%.3f (primary display value)", result->scaled_value);
 
         // Log all 5 parameters for debugging
-        const char *param_names[] = {"COD", "BOD", "TSS", "pH", "Temp"};
-        for (int p = 0; p < 5 && (p * 2 + 1) < reg_count; p++) {
-            uint32_t fb = ((uint32_t)registers[p * 2] << 16) | registers[p * 2 + 1];
+        for (int p = 0; p < 5; p++) {
+            int off = aq_offsets[p];
+            if (off + 1 >= reg_count) break;
+            // Byte-swap each register, then word-swap
+            uint16_t lo_s = ((registers[off] & 0xFF) << 8) | ((registers[off] >> 8) & 0xFF);
+            uint16_t hi_s = ((registers[off+1] & 0xFF) << 8) | ((registers[off+1] >> 8) & 0xFF);
+            uint32_t fb = ((uint32_t)hi_s << 16) | lo_s;
             float fv;
             memcpy(&fv, &fb, sizeof(float));
             ESP_LOGI(TAG, "  %s = %.3f (raw: 0x%08lX)", param_names[p], fv, (unsigned long)fb);
@@ -915,12 +926,17 @@ esp_err_t sensor_read_aquadax_quality(const sensor_config_t *sensor, sensor_read
         registers[i] = modbus_get_response_buffer(i);
     }
 
-    // Parse 5 FLOAT32 BIG_ENDIAN (ABCD) values: (reg[n] << 16) | reg[n+1]
-    // Register map: COD(0-1), BOD(2-3), TSS(4-5), pH(6-7), Temperature(8-9)
+    // Parse 5 FLOAT32 values: byte-swap each register, then word-swap
+    // Register layout: COD(0-1), BOD(2-3), TSS(4-5), pH(6-7), Unused(8-9), Temp(10-11)
+    int aq_offsets[] = {0, 2, 4, 6, 10}; // skip unused sensor at registers 8-9
     float params[5];
     const char *param_names[] = {"COD", "BOD", "TSS", "pH", "Temp"};
     for (int p = 0; p < 5; p++) {
-        uint32_t float_bits = ((uint32_t)registers[p * 2] << 16) | registers[p * 2 + 1];
+        int off = aq_offsets[p];
+        // Byte-swap each register, then word-swap
+        uint16_t lo_swapped = ((registers[off] & 0xFF) << 8) | ((registers[off] >> 8) & 0xFF);
+        uint16_t hi_swapped = ((registers[off+1] & 0xFF) << 8) | ((registers[off+1] >> 8) & 0xFF);
+        uint32_t float_bits = ((uint32_t)hi_swapped << 16) | lo_swapped;
         memcpy(&params[p], &float_bits, sizeof(float));
         ESP_LOGI(TAG, "Aquadax_Quality %s: %.3f (raw: 0x%08lX)",
                  param_names[p], params[p], (unsigned long)float_bits);
