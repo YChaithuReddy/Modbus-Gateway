@@ -955,15 +955,22 @@ static void log_heartbeat_to_sd(void) {
         telemetry_failure_count,
         system_restart_count);
 
-    // Write to SD card heartbeat log file
-    FILE* f = fopen("/sdcard/heartbeat.log", "a");
-    if (f) {
-        fprintf(f, "%s\n", heartbeat_json);
-        fclose(f);
-        ESP_LOGI(TAG, "[HEARTBEAT] Logged to SD card: uptime=%llds, heap=%lu",
-                 (long long)(current_time - system_uptime_start), esp_get_free_heap_size());
+    // Write to SD card heartbeat log file (H-6: mutex-protected to prevent FAT corruption)
+    if (sd_card_acquire_mutex() == ESP_OK) {
+        FILE* f = fopen("/sdcard/heartbeat.log", "a");
+        if (f) {
+            fprintf(f, "%s\n", heartbeat_json);
+            fflush(f);
+            fclose(f);
+            sd_card_release_mutex();
+            ESP_LOGI(TAG, "[HEARTBEAT] Logged to SD card: uptime=%llds, heap=%lu",
+                     (long long)(current_time - system_uptime_start), esp_get_free_heap_size());
+        } else {
+            sd_card_release_mutex();
+            ESP_LOGW(TAG, "[HEARTBEAT] Failed to write to SD card");
+        }
     } else {
-        ESP_LOGW(TAG, "[HEARTBEAT] Failed to write to SD card");
+        ESP_LOGW(TAG, "[HEARTBEAT] SD card mutex busy - skipping heartbeat log");
     }
 }
 
@@ -1771,33 +1778,45 @@ static esp_err_t test_dns_resolution(const char* hostname) {
     return ESP_FAIL;
 }
 
-// Function to test basic internet connectivity
+// Function to test basic internet connectivity via TCP socket connect
+// Uses actual TCP connection to DNS servers on port 53 (lightweight, no TLS)
 static esp_err_t test_internet_connectivity(void) {
-    ESP_LOGI(TAG, "[NET] Testing internet connectivity...");
-    
-    // Test multiple DNS servers
-    const char* dns_servers[] = {
-        "8.8.8.8",           // Google DNS
-        "1.1.1.1",           // Cloudflare DNS
-        "208.67.222.222"     // OpenDNS
-    };
-    
-    bool any_dns_works = false;
-    for (int i = 0; i < 3; i++) {
-        if (test_dns_resolution(dns_servers[i]) == ESP_OK) {
-            any_dns_works = true;
-            break;
+    ESP_LOGI(TAG, "[NET] Testing internet connectivity (TCP connect)...");
+
+    // Test servers: Google DNS, Cloudflare DNS
+    const char* test_ips[] = { "8.8.8.8", "1.1.1.1" };
+    const int test_port = 53;  // DNS port - always open on public DNS servers
+
+    for (int i = 0; i < 2; i++) {
+        int sock = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
+        if (sock < 0) {
+            ESP_LOGW(TAG, "[NET] Socket creation failed");
+            continue;
         }
-        vTaskDelay(pdMS_TO_TICKS(1000)); // Wait between tests
+
+        // Set 5-second send/receive timeout
+        struct timeval tv = { .tv_sec = 5, .tv_usec = 0 };
+        setsockopt(sock, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
+        setsockopt(sock, SOL_SOCKET, SO_SNDTIMEO, &tv, sizeof(tv));
+
+        struct sockaddr_in dest_addr;
+        memset(&dest_addr, 0, sizeof(dest_addr));
+        dest_addr.sin_family = AF_INET;
+        dest_addr.sin_port = htons(test_port);
+        inet_aton(test_ips[i], &dest_addr.sin_addr);
+
+        int err = connect(sock, (struct sockaddr*)&dest_addr, sizeof(dest_addr));
+        close(sock);
+
+        if (err == 0) {
+            ESP_LOGI(TAG, "[OK] Internet connectivity confirmed via %s:%d", test_ips[i], test_port);
+            return ESP_OK;
+        }
+        ESP_LOGW(TAG, "[NET] TCP connect to %s:%d failed", test_ips[i], test_port);
     }
-    
-    if (!any_dns_works) {
-        ESP_LOGE(TAG, "[ERROR] No DNS servers are reachable - internet connectivity issue");
-        return ESP_FAIL;
-    }
-    
-    ESP_LOGI(TAG, "[OK] Basic internet connectivity confirmed");
-    return ESP_OK;
+
+    ESP_LOGE(TAG, "[ERROR] No internet connectivity - all TCP connect tests failed");
+    return ESP_FAIL;
 }
 
 // Function to troubleshoot Azure IoT Hub connectivity
@@ -2184,13 +2203,15 @@ static void create_telemetry_payload(char* payload, size_t payload_size) {
                     } else if (strcasecmp(matching_sensor->sensor_type, "ENERGY") == 0) {
                         value_key = "ene_con_hex";
                         type_value = "ENERGY";
-                    } else if (strcasecmp(matching_sensor->sensor_type, "QUALITY") == 0) {
+                    } else if (strcasecmp(matching_sensor->sensor_type, "QUALITY") == 0 ||
+                               strcasecmp(matching_sensor->sensor_type, "Aquadax_Quality") == 0) {
                         value_key = "value";
                         type_value = "QUALITY";
                     }
 
                     // Build sensor JSON object
-                    if (strcasecmp(matching_sensor->sensor_type, "QUALITY") == 0) {
+                    if (strcasecmp(matching_sensor->sensor_type, "QUALITY") == 0 ||
+                        strcasecmp(matching_sensor->sensor_type, "Aquadax_Quality") == 0) {
                         // QUALITY sensor with params_data object
                         char params_data[256] = "";
 
@@ -2316,7 +2337,8 @@ static void create_telemetry_payload(char* payload, size_t payload_size) {
                     esp_err_t json_result;
 
                     // Check if sensor is QUALITY type - use special JSON format
-                    if (strcasecmp(matching_sensor->sensor_type, "QUALITY") == 0) {
+                    if (strcasecmp(matching_sensor->sensor_type, "QUALITY") == 0 ||
+                        strcasecmp(matching_sensor->sensor_type, "Aquadax_Quality") == 0) {
                         json_result = generate_quality_sensor_json(
                             &readings[i],
                             temp_json,
@@ -3875,6 +3897,14 @@ static void mqtt_task(void *pvParameters)
         return;
     }
 
+    // Register MQTT task with hardware watchdog (H-5 hardening)
+    esp_err_t wdt_ret = esp_task_wdt_add(NULL);
+    if (wdt_ret == ESP_OK) {
+        ESP_LOGI(TAG, "[WDT] MQTT task added to watchdog monitoring");
+    } else {
+        ESP_LOGW(TAG, "[WDT] Failed to add MQTT task to watchdog: %s", esp_err_to_name(wdt_ret));
+    }
+
     // Initialize MQTT client (may fail if network not ready at startup)
     bool mqtt_initialized = (initialize_mqtt_client() == 0);
     if (!mqtt_initialized) {
@@ -3882,6 +3912,9 @@ static void mqtt_task(void *pvParameters)
     }
 
     while (1) {
+        // Feed watchdog at start of each loop iteration
+        esp_task_wdt_reset();
+
         // Check for shutdown request only (web server toggle doesn't affect MQTT)
         if (system_shutdown_requested) {
             ESP_LOGI(TAG, "[NET] MQTT task exiting due to shutdown request");
@@ -3896,7 +3929,11 @@ static void mqtt_task(void *pvParameters)
                 ESP_LOGI(TAG, "[MQTT] ✅ MQTT client initialized successfully after network reconnect");
             } else {
                 ESP_LOGW(TAG, "[MQTT] ⚠️ MQTT initialization still failing - will retry in 30 seconds");
-                vTaskDelay(pdMS_TO_TICKS(30000));  // Wait before retry
+                // Feed WDT during long wait to prevent false trigger
+                for (int i = 0; i < 3; i++) {
+                    vTaskDelay(pdMS_TO_TICKS(10000));
+                    esp_task_wdt_reset();
+                }
                 continue;
             }
         }
@@ -3927,7 +3964,8 @@ static void mqtt_task(void *pvParameters)
         vTaskDelay(pdMS_TO_TICKS(10000));
     }
     
-    // Task exiting normally
+    // Task exiting normally — remove from watchdog before deleting
+    esp_task_wdt_delete(NULL);
     ESP_LOGI(TAG, "[NET] MQTT task exiting normally");
     mqtt_task_handle = NULL;
     vTaskDelete(NULL);
@@ -3971,14 +4009,30 @@ static void telemetry_task(void *pvParameters)
         vTaskDelete(NULL);
         return;
     }
+
+    // Register telemetry task with hardware watchdog (H-5 hardening)
+    esp_err_t wdt_ret = esp_task_wdt_add(NULL);
+    if (wdt_ret == ESP_OK) {
+        ESP_LOGI(TAG, "[WDT] Telemetry task added to watchdog monitoring");
+    } else {
+        ESP_LOGW(TAG, "[WDT] Failed to add telemetry task to watchdog: %s", esp_err_to_name(wdt_ret));
+    }
+
     TickType_t last_send_time = 0;
     bool first_telemetry = true;  // Flag to send first telemetry immediately after startup
 
     // Wait a bit before first telemetry to let system stabilize
     ESP_LOGI(TAG, "[DATA] Waiting 10 seconds before first telemetry...");
-    vTaskDelay(pdMS_TO_TICKS(10000));
+    // Feed WDT during stabilization wait
+    for (int i = 0; i < 2; i++) {
+        vTaskDelay(pdMS_TO_TICKS(5000));
+        esp_task_wdt_reset();
+    }
 
     while (1) {
+        // Feed watchdog at start of each loop iteration
+        esp_task_wdt_reset();
+
         // Check for shutdown request only (web server toggle doesn't affect telemetry)
         if (system_shutdown_requested) {
             ESP_LOGI(TAG, "[DATA] Telemetry task exiting due to shutdown request");
@@ -3993,6 +4047,7 @@ static void telemetry_task(void *pvParameters)
                 maintenance_logged = true;
             }
             vTaskDelay(pdMS_TO_TICKS(5000));  // Check every 5 seconds
+            esp_task_wdt_reset();  // Feed WDT during maintenance mode
             if (!maintenance_mode) {
                 ESP_LOGI(TAG, "[DATA] Maintenance mode ended - resuming telemetry");
                 maintenance_logged = false;
@@ -4100,7 +4155,8 @@ static void telemetry_task(void *pvParameters)
         vTaskDelay(pdMS_TO_TICKS(5000)); // Increased to 5 seconds to prevent timing edge cases
     }
     
-    // Task exiting normally
+    // Task exiting normally — remove from watchdog before deleting
+    esp_task_wdt_delete(NULL);
     ESP_LOGI(TAG, "[DATA] Telemetry task exiting normally");
     telemetry_task_handle = NULL;
     vTaskDelete(NULL);
@@ -4460,6 +4516,22 @@ static bool send_telemetry(void) {
         ESP_LOGE(TAG, "   Topic: %s", telemetry_topic);
         ESP_LOGE(TAG, "   Payload size: %d bytes", strlen(telemetry_payload));
         ESP_LOGE(TAG, "   MQTT connected: %s", mqtt_connected ? "YES" : "NO");
+
+        // H-3 HARDENING: Cache payload to SD card instead of losing it
+        if (config->sd_config.enabled && config->sd_config.cache_on_failure) {
+            time_t now = time(NULL);
+            struct tm timeinfo;
+            gmtime_r(&now, &timeinfo);
+            char timestamp[32];
+            strftime(timestamp, sizeof(timestamp), "%Y-%m-%dT%H:%M:%SZ", &timeinfo);
+
+            esp_err_t cache_ret = sd_card_save_message(telemetry_topic, telemetry_payload, timestamp);
+            if (cache_ret == ESP_OK) {
+                ESP_LOGW(TAG, "[SD] Publish failed - telemetry cached to SD card for retry");
+            } else {
+                ESP_LOGE(TAG, "[SD] Publish failed AND SD cache failed - data lost!");
+            }
+        }
 
         // Try to reconnect MQTT if disconnected (but not during OTA)
         if (!mqtt_connected && mqtt_client != NULL && !ota_is_in_progress()) {

@@ -37,6 +37,7 @@ static const char* mount_point = "/sdcard";
 // Use 8.3 short filenames for maximum FAT compatibility
 static const char* pending_messages_file = "/sdcard/msgs.txt";  // Even shorter
 static const char* temp_messages_file = "/sdcard/tmp.txt";  // Even shorter
+static const char* backup_messages_file = "/sdcard/msgs.bak";  // Backup for safe replacement
 
 // Error tracking for recovery
 static uint32_t sd_error_count = 0;
@@ -59,6 +60,76 @@ static uint32_t ram_buffer_write_index = 0;
 // Forward declarations
 static esp_err_t sd_card_add_to_ram_buffer(const char* topic, const char* payload, const char* timestamp);
 static esp_err_t sd_card_remove_message_internal(uint32_t message_id);
+
+// Safe file replacement: rename original→backup, rename temp→original, remove backup
+// At every step, at least one valid copy exists. Power loss at any point is recoverable.
+static esp_err_t safe_replace_file(const char* original, const char* temp, const char* backup) {
+    // Step 1: Rename original to backup (preserves original if step 2 fails)
+    // If original doesn't exist (already cleaned), just rename temp directly
+    struct stat st;
+    if (stat(original, &st) == 0) {
+        // Remove stale backup if it exists from a previous interrupted operation
+        remove(backup);
+        if (rename(original, backup) != 0) {
+            ESP_LOGE(TAG, "safe_replace: failed to rename original to backup: %s", strerror(errno));
+            remove(temp);
+            return ESP_FAIL;
+        }
+    }
+
+    // Step 2: Rename temp to original (this is the commit point)
+    if (rename(temp, original) != 0) {
+        ESP_LOGE(TAG, "safe_replace: failed to rename temp to original: %s", strerror(errno));
+        // Try to restore from backup
+        if (stat(backup, &st) == 0) {
+            rename(backup, original);
+        }
+        return ESP_FAIL;
+    }
+
+    // Step 3: Remove backup (safe — original already has new data)
+    remove(backup);
+    return ESP_OK;
+}
+
+// Recover from interrupted file operations on boot
+// Checks for orphaned temp/backup files and restores the best available copy
+static void sd_card_recover_orphaned_files(void) {
+    struct stat st_msgs, st_tmp, st_bak;
+    bool has_msgs = (stat(pending_messages_file, &st_msgs) == 0);
+    bool has_tmp = (stat(temp_messages_file, &st_tmp) == 0);
+    bool has_bak = (stat(backup_messages_file, &st_bak) == 0);
+
+    if (has_msgs) {
+        // Normal case — clean up any leftover temp/backup files
+        if (has_tmp) {
+            remove(temp_messages_file);
+            ESP_LOGW(TAG, "Cleaned up orphaned temp file");
+        }
+        if (has_bak) {
+            remove(backup_messages_file);
+            ESP_LOGW(TAG, "Cleaned up orphaned backup file");
+        }
+        return;
+    }
+
+    // msgs.txt is missing — need to recover
+    if (has_tmp && has_bak) {
+        // Both exist: tmp is more recent (it was being written), prefer it
+        rename(temp_messages_file, pending_messages_file);
+        remove(backup_messages_file);
+        ESP_LOGW(TAG, "Recovered messages from temp file (both tmp and bak existed)");
+    } else if (has_bak) {
+        // Only backup exists: rename was interrupted after step 1
+        rename(backup_messages_file, pending_messages_file);
+        ESP_LOGW(TAG, "Recovered messages from backup file");
+    } else if (has_tmp) {
+        // Only temp exists: original was removed but rename didn't complete
+        rename(temp_messages_file, pending_messages_file);
+        ESP_LOGW(TAG, "Recovered messages from temp file");
+    }
+    // If none exist, there are simply no pending messages — that's fine
+}
 
 // Minimum free space required (in bytes) - 1MB
 #define MIN_FREE_SPACE_BYTES (1024 * 1024)
@@ -307,6 +378,9 @@ esp_err_t sd_card_init(void) {
     ESP_LOGI(TAG, "   Type: %s", card_type);
     ESP_LOGI(TAG, "   Speed: %s", (card->csd.tr_speed > 25000000) ? "High Speed" : "Default Speed");
     ESP_LOGI(TAG, "   Size: %lluMB", ((uint64_t) card->csd.capacity) * card->csd.sector_size / (1024 * 1024));
+
+    // Recover from any interrupted file operations (power loss during remove/rename)
+    sd_card_recover_orphaned_files();
 
     // Restore message ID counter
     sd_card_restore_message_counter();
@@ -746,9 +820,8 @@ esp_err_t sd_card_replay_messages(void (*publish_callback)(const pending_message
                 fflush(dst);
                 fclose(dst);
 
-                // Replace original with cleaned file
-                remove(pending_messages_file);
-                rename(temp_messages_file, pending_messages_file);
+                // Safe file replacement (power-loss safe)
+                safe_replace_file(pending_messages_file, temp_messages_file, backup_messages_file);
                 ESP_LOGI(TAG, "✅ Corrupted lines removed from SD card");
             } else {
                 if (src) fclose(src);
@@ -847,8 +920,7 @@ esp_err_t sd_card_replay_messages(void (*publish_callback)(const pending_message
                     fclose(src);
                     fflush(dst);
                     fclose(dst);
-                    remove(pending_messages_file);
-                    rename(temp_messages_file, pending_messages_file);
+                    safe_replace_file(pending_messages_file, temp_messages_file, backup_messages_file);
                 } else {
                     if (src) fclose(src);
                     if (dst) fclose(dst);
@@ -973,16 +1045,11 @@ static esp_err_t sd_card_remove_message_internal(uint32_t message_id) {
     fclose(temp_file);
 
     if (message_found) {
-        // Remove old file
-        if (remove(pending_messages_file) != 0) {
-            ESP_LOGE(TAG, "❌ Failed to remove old messages file: %s", strerror(errno));
-            remove(temp_messages_file);  // Clean up temp file
-            return ESP_FAIL;
-        }
-
-        // Rename temp file to original
-        if (rename(temp_messages_file, pending_messages_file) != 0) {
-            ESP_LOGE(TAG, "❌ Failed to rename temp file: %s", strerror(errno));
+        // Safe file replacement: rename original→backup, rename temp→original, remove backup
+        // At every step, at least one valid copy exists. Power loss is recoverable.
+        esp_err_t replace_ret = safe_replace_file(pending_messages_file, temp_messages_file, backup_messages_file);
+        if (replace_ret != ESP_OK) {
+            ESP_LOGE(TAG, "❌ Failed to safely replace messages file");
             return ESP_FAIL;
         }
 
@@ -1077,6 +1144,24 @@ esp_err_t sd_card_restore_message_counter(void) {
     ESP_LOGI(TAG, "📋 Found %lu existing messages on SD card", message_count);
 
     return ESP_OK;
+}
+
+// Acquire SD card mutex for external filesystem operations (e.g., heartbeat log)
+esp_err_t sd_card_acquire_mutex(void) {
+    if (sd_card_mutex == NULL) {
+        return ESP_ERR_INVALID_STATE;
+    }
+    if (xSemaphoreTake(sd_card_mutex, pdMS_TO_TICKS(SD_MUTEX_TIMEOUT_MS)) != pdTRUE) {
+        return ESP_ERR_TIMEOUT;
+    }
+    return ESP_OK;
+}
+
+// Release SD card mutex after external filesystem operations
+void sd_card_release_mutex(void) {
+    if (sd_card_mutex != NULL) {
+        xSemaphoreGive(sd_card_mutex);
+    }
 }
 
 // ============================================================================

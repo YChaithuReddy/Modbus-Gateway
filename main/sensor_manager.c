@@ -269,9 +269,12 @@ esp_err_t sensor_test_live(const sensor_config_t *sensor, sensor_test_result_t *
         reg_type = "HOLDING";
     }
     
-    // For Flow-Meter, ZEST, and Panda USM sensors, read 4 registers
+    // For special sensor types, override register quantity
     int quantity_to_read = sensor->quantity;
-    if (strcmp(sensor->sensor_type, "Flow-Meter") == 0) {
+    if (strcmp(sensor->sensor_type, "Aquadax_Quality") == 0) {
+        quantity_to_read = 12;
+        ESP_LOGI(TAG, "Aquadax_Quality sensor detected, reading 12 registers for 5x FLOAT32_ABCD (COD,BOD,TSS,pH,Temp)");
+    } else if (strcmp(sensor->sensor_type, "Flow-Meter") == 0) {
         quantity_to_read = 4;
         ESP_LOGI(TAG, "Flow-Meter sensor detected, reading 4 registers for UINT32_BADC + FLOAT32_BADC interpretation");
     } else if (strcmp(sensor->sensor_type, "ZEST") == 0) {
@@ -557,6 +560,34 @@ esp_err_t sensor_test_live(const sensor_config_t *sensor, sensor_test_result_t *
 
         ESP_LOGI(TAG, "Hydrostatic_Level Calculation: Raw=%u, TankHeight=%.2f, Level%%=%.2f",
                  raw_level, sensor->max_water_level, result->scaled_value);
+    }
+    // Special handling for Aquadax Quality sensors (12 registers: 5x FLOAT32 BIG_ENDIAN)
+    else if (strcmp(sensor->sensor_type, "Aquadax_Quality") == 0 && reg_count >= 10) {
+        // Aquadax Quality reads 12 registers starting at address 1280:
+        // Registers [0-1]:  COD (mg/L)       - FLOAT32 BIG_ENDIAN (ABCD)
+        // Registers [2-3]:  BOD (mg/L)       - FLOAT32 BIG_ENDIAN (ABCD)
+        // Registers [4-5]:  TSS (mg/L)       - FLOAT32 BIG_ENDIAN (ABCD)
+        // Registers [6-7]:  pH               - FLOAT32 BIG_ENDIAN (ABCD)
+        // Registers [8-9]:  Temperature (°C) - FLOAT32 BIG_ENDIAN (ABCD)
+        // Registers [10-11]: Reserved (ignored)
+
+        // Parse first parameter (COD) as primary display value for test
+        uint32_t float_bits = ((uint32_t)registers[0] << 16) | registers[1];
+        float cod_value;
+        memcpy(&cod_value, &float_bits, sizeof(float));
+        result->scaled_value = (double)cod_value * sensor->scale_factor;
+        result->raw_value = float_bits;
+
+        ESP_LOGI(TAG, "Aquadax_Quality Test: COD=%.3f (primary display value)", result->scaled_value);
+
+        // Log all 5 parameters for debugging
+        const char *param_names[] = {"COD", "BOD", "TSS", "pH", "Temp"};
+        for (int p = 0; p < 5 && (p * 2 + 1) < reg_count; p++) {
+            uint32_t fb = ((uint32_t)registers[p * 2] << 16) | registers[p * 2 + 1];
+            float fv;
+            memcpy(&fv, &fb, sizeof(float));
+            ESP_LOGI(TAG, "  %s = %.3f (raw: 0x%08lX)", param_names[p], fv, (unsigned long)fb);
+        }
     } else {
         // Convert the data using standard conversion
         esp_err_t conv_result = convert_modbus_data(registers, reg_count,
@@ -597,6 +628,11 @@ esp_err_t sensor_read_single(const sensor_config_t *sensor, sensor_reading_t *re
     // For water quality sensors, use specialized multi-parameter reading
     if (strcmp(sensor->sensor_type, "QUALITY") == 0) {
         return sensor_read_quality(sensor, reading);
+    }
+
+    // For Aquadax Quality sensors, use single bulk read for all 5 parameters
+    if (strcmp(sensor->sensor_type, "Aquadax_Quality") == 0) {
+        return sensor_read_aquadax_quality(sensor, reading);
     }
 
     // Clear reading
@@ -807,6 +843,114 @@ esp_err_t sensor_read_quality(const sensor_config_t *sensor, sensor_reading_t *r
     }
 
     return any_success ? ESP_OK : ESP_FAIL;
+}
+
+// Read Aquadax Quality sensor - single bulk read of 12 registers for 5 FLOAT32 parameters
+esp_err_t sensor_read_aquadax_quality(const sensor_config_t *sensor, sensor_reading_t *reading)
+{
+    if (!sensor || !reading) {
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    if (strcmp(sensor->sensor_type, "Aquadax_Quality") != 0) {
+        ESP_LOGE(TAG, "Sensor %s is not an Aquadax_Quality sensor", sensor->name);
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    // Clear reading
+    memset(reading, 0, sizeof(sensor_reading_t));
+
+    // Copy basic info
+    strncpy(reading->unit_id, sensor->unit_id, sizeof(reading->unit_id) - 1);
+    strncpy(reading->sensor_name, sensor->name, sizeof(reading->sensor_name) - 1);
+
+    // Get timestamp
+    time_t now;
+    struct tm timeinfo;
+    time(&now);
+    gmtime_r(&now, &timeinfo);
+    strftime(reading->timestamp, sizeof(reading->timestamp), "%Y-%m-%dT%H:%M:%SZ", &timeinfo);
+
+    // Set baud rate
+    int baud_rate = sensor->baud_rate > 0 ? sensor->baud_rate : 9600;
+    modbus_set_baud_rate(baud_rate);
+
+    // Get retry settings
+    system_config_t *sys_config = get_system_config();
+    int retry_count = sys_config ? sys_config->modbus_retry_count : 1;
+    int retry_delay_ms = sys_config ? sys_config->modbus_retry_delay : 50;
+
+    // Read 12 holding registers in a single bulk read
+    modbus_result_t modbus_result;
+    int attempt = 0;
+    do {
+        if (attempt > 0) {
+            ESP_LOGW(TAG, "Retry %d/%d for Aquadax_Quality sensor '%s'",
+                     attempt, retry_count, sensor->name);
+            vTaskDelay(pdMS_TO_TICKS(retry_delay_ms));
+        }
+        modbus_result = modbus_read_holding_registers(sensor->slave_id,
+                                                       sensor->register_address, 12);
+        attempt++;
+    } while (modbus_result != MODBUS_SUCCESS && attempt <= retry_count);
+
+    if (modbus_result != MODBUS_SUCCESS) {
+        reading->valid = false;
+        strncpy(reading->data_source, "error", sizeof(reading->data_source) - 1);
+        ESP_LOGE(TAG, "Aquadax_Quality: Modbus read failed after %d attempts", attempt);
+        return ESP_FAIL;
+    }
+
+    // Get register values
+    int reg_count = modbus_get_response_length();
+    if (reg_count < 10) {
+        reading->valid = false;
+        strncpy(reading->data_source, "error", sizeof(reading->data_source) - 1);
+        ESP_LOGE(TAG, "Aquadax_Quality: Insufficient registers (got %d, need 10)", reg_count);
+        return ESP_FAIL;
+    }
+
+    uint16_t registers[12];
+    for (int i = 0; i < reg_count && i < 12; i++) {
+        registers[i] = modbus_get_response_buffer(i);
+    }
+
+    // Parse 5 FLOAT32 BIG_ENDIAN (ABCD) values: (reg[n] << 16) | reg[n+1]
+    // Register map: COD(0-1), BOD(2-3), TSS(4-5), pH(6-7), Temperature(8-9)
+    float params[5];
+    const char *param_names[] = {"COD", "BOD", "TSS", "pH", "Temp"};
+    for (int p = 0; p < 5; p++) {
+        uint32_t float_bits = ((uint32_t)registers[p * 2] << 16) | registers[p * 2 + 1];
+        memcpy(&params[p], &float_bits, sizeof(float));
+        ESP_LOGI(TAG, "Aquadax_Quality %s: %.3f (raw: 0x%08lX)",
+                 param_names[p], params[p], (unsigned long)float_bits);
+    }
+
+    // Map to quality_params_t
+    reading->quality_params.cod_value = (double)params[0];
+    reading->quality_params.cod_valid = true;
+    reading->quality_params.bod_value = (double)params[1];
+    reading->quality_params.bod_valid = true;
+    reading->quality_params.tss_value = (double)params[2];
+    reading->quality_params.tss_valid = true;
+    reading->quality_params.ph_value = (double)params[3];
+    reading->quality_params.ph_valid = true;
+    reading->quality_params.temp_value = (double)params[4];
+    reading->quality_params.temp_valid = true;
+
+    // Primary value = COD (first parameter)
+    reading->value = reading->quality_params.cod_value;
+    reading->valid = true;
+    strncpy(reading->data_source, "modbus_rs485_multi", sizeof(reading->data_source) - 1);
+    reading->data_source[sizeof(reading->data_source) - 1] = '\0';
+
+    ESP_LOGI(TAG, "Aquadax_Quality %s: COD=%.2f, BOD=%.2f, TSS=%.2f, pH=%.2f, Temp=%.2f",
+             reading->unit_id,
+             reading->quality_params.cod_value, reading->quality_params.bod_value,
+             reading->quality_params.tss_value, reading->quality_params.ph_value,
+             reading->quality_params.temp_value);
+
+    return ESP_OK;
 }
 
 esp_err_t sensor_read_all_configured(sensor_reading_t *readings, int max_readings, int *actual_count)

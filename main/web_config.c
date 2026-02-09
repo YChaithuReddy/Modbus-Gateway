@@ -2595,7 +2595,8 @@ static esp_err_t config_page_handler(httpd_req_t *req)
     // Count sensors by type
     for (int i = 0; i < g_system_config.sensor_count; i++) {
         if (g_system_config.sensors[i].enabled) {
-            if (strcmp(g_system_config.sensors[i].sensor_type, "QUALITY") == 0) {
+            if (strcmp(g_system_config.sensors[i].sensor_type, "QUALITY") == 0 ||
+                strcmp(g_system_config.sensors[i].sensor_type, "Aquadax_Quality") == 0) {
                 water_quality_sensor_count++;
             } else {
                 regular_sensor_count++;
@@ -2626,7 +2627,7 @@ static esp_err_t config_page_handler(httpd_req_t *req)
     ESP_LOGI(TAG, "Displaying regular sensors in web interface");
     bool has_regular_sensors = false;
     for (int i = 0; i < g_system_config.sensor_count; i++) {
-        if (g_system_config.sensors[i].enabled && strcmp(g_system_config.sensors[i].sensor_type, "QUALITY") != 0) {
+        if (g_system_config.sensors[i].enabled && strcmp(g_system_config.sensors[i].sensor_type, "QUALITY") != 0 && strcmp(g_system_config.sensors[i].sensor_type, "Aquadax_Quality") != 0) {
             has_regular_sensors = true;
             ESP_LOGI(TAG, "Display Regular Sensor %d: name='%s', sensor_type='%s' (len=%d)", i, g_system_config.sensors[i].name, g_system_config.sensors[i].sensor_type, strlen(g_system_config.sensors[i].sensor_type));
             
@@ -2777,21 +2778,35 @@ static esp_err_t config_page_handler(httpd_req_t *req)
     ESP_LOGI(TAG, "Displaying water quality sensors in web interface");
     bool has_quality_sensors = false;
     for (int i = 0; i < g_system_config.sensor_count; i++) {
-        if (g_system_config.sensors[i].enabled && strcmp(g_system_config.sensors[i].sensor_type, "QUALITY") == 0) {
+        if (g_system_config.sensors[i].enabled &&
+            (strcmp(g_system_config.sensors[i].sensor_type, "QUALITY") == 0 ||
+             strcmp(g_system_config.sensors[i].sensor_type, "Aquadax_Quality") == 0)) {
             has_quality_sensors = true;
-            ESP_LOGI(TAG, "Water Quality Sensor %d: %s", i, g_system_config.sensors[i].name);
-            
-            snprintf(chunk, sizeof(chunk),
-                "<div class='sensor-card' id='sensor-card-%d'>" 
-                "<h3>%s (Sensor %d) - <span style='color:#17a2b8;font-weight:bold;'>Water Quality</span></h3>"
-                "<p><strong>Unit ID:</strong> %s | <strong>Sub-Sensors:</strong> %d configured</p>"
-                "<p style='color:#666;font-size:12px;margin:5px 0'>[TEST] Water Quality Modbus Sensor - Real-time water parameter monitoring</p>",
-                i, g_system_config.sensors[i].name, i + 1,
-                g_system_config.sensors[i].unit_id, g_system_config.sensors[i].sub_sensor_count);
+            bool is_aquadax = (strcmp(g_system_config.sensors[i].sensor_type, "Aquadax_Quality") == 0);
+            ESP_LOGI(TAG, "Water Quality Sensor %d: %s (type: %s)", i, g_system_config.sensors[i].name, g_system_config.sensors[i].sensor_type);
+
+            if (is_aquadax) {
+                snprintf(chunk, sizeof(chunk),
+                    "<div class='sensor-card' id='sensor-card-%d'>"
+                    "<h3>%s (Sensor %d) - <span style='color:#17a2b8;font-weight:bold;'>Aquadax Quality</span></h3>"
+                    "<p><strong>Unit ID:</strong> %s | <strong>Slave ID:</strong> %d | <strong>Register:</strong> %d | <strong>Qty:</strong> %d</p>"
+                    "<p style='color:#28a745;font-size:12px;margin:5px 0'><strong>Parameters:</strong> COD, BOD, TSS, pH, Temperature (5x FLOAT32 bulk read)</p>",
+                    i, g_system_config.sensors[i].name, i + 1,
+                    g_system_config.sensors[i].unit_id, g_system_config.sensors[i].slave_id,
+                    g_system_config.sensors[i].register_address, g_system_config.sensors[i].quantity);
+            } else {
+                snprintf(chunk, sizeof(chunk),
+                    "<div class='sensor-card' id='sensor-card-%d'>"
+                    "<h3>%s (Sensor %d) - <span style='color:#17a2b8;font-weight:bold;'>Water Quality</span></h3>"
+                    "<p><strong>Unit ID:</strong> %s | <strong>Sub-Sensors:</strong> %d configured</p>"
+                    "<p style='color:#666;font-size:12px;margin:5px 0'>[TEST] Water Quality Modbus Sensor - Real-time water parameter monitoring</p>",
+                    i, g_system_config.sensors[i].name, i + 1,
+                    g_system_config.sensors[i].unit_id, g_system_config.sensors[i].sub_sensor_count);
+            }
             httpd_resp_sendstr_chunk(req, chunk);
-            
-            // Show configured sub-sensor parameters
-            if (g_system_config.sensors[i].sub_sensor_count > 0) {
+
+            // Show configured sub-sensor parameters (only for QUALITY type, not Aquadax)
+            if (!is_aquadax && g_system_config.sensors[i].sub_sensor_count > 0) {
                 httpd_resp_sendstr_chunk(req, "<div style='background:#f0f8ff;padding:10px;margin:5px 0;border-radius:4px;border:1px solid #17a2b8'>");
                 httpd_resp_sendstr_chunk(req, "<strong style='color:#17a2b8'>[PARAM] Configured Parameters:</strong> ");
                 bool first_param = true;
@@ -2836,6 +2851,7 @@ static esp_err_t config_page_handler(httpd_req_t *req)
     httpd_resp_sendstr_chunk(req, 
         "<div style='background:#f8f9fa;padding:15px;margin:15px 0;border-radius:8px;border:1px solid #dee2e6'>"
         "<button type='button' onclick='addWaterQualitySensor()' style='background:linear-gradient(135deg,#17a2b8,#20c997);color:white;padding:14px 35px;margin:10px;border:none;border-radius:8px;font-size:16px;font-weight:600;cursor:pointer;box-shadow:0 4px 12px rgba(23,162,184,0.3);transition:all 0.3s ease' onmouseover='this.style.transform=\"translateY(-2px)\";this.style.boxShadow=\"0 6px 16px rgba(23,162,184,0.4)\"' onmouseout='this.style.transform=\"translateY(0)\";this.style.boxShadow=\"0 4px 12px rgba(23,162,184,0.3)\"'>💧 Add Water Quality Sensor</button>"
+        "<button type='button' onclick='addAquadaxQualitySensor()' style='background:linear-gradient(135deg,#0d6efd,#6610f2);color:white;padding:14px 35px;margin:10px;border:none;border-radius:8px;font-size:16px;font-weight:600;cursor:pointer;box-shadow:0 4px 12px rgba(13,110,253,0.3);transition:all 0.3s ease' onmouseover='this.style.transform=\"translateY(-2px)\";this.style.boxShadow=\"0 6px 16px rgba(13,110,253,0.4)\"' onmouseout='this.style.transform=\"translateY(0)\";this.style.boxShadow=\"0 4px 12px rgba(13,110,253,0.3)\"'>💧 Add Aquadax Quality Sensor</button>"
         "<p style='color:#666;font-size:12px;margin:10px 0 5px 0'>Create individual water quality sensors with unique Unit IDs and custom Modbus configurations</p>"
         "</div>");
     
@@ -3120,6 +3136,55 @@ static esp_err_t config_page_handler(httpd_req_t *req)
         "  console.log('SUCCESS: New water quality sensor added. Updated count:', sensorCount);"
         "  alert('SUCCESS: New water quality sensor form added!\\n\\nSTEPS:\\n1. Fill in Name and Unit ID (fill in the fields as needed)\\n2. Configure Modbus parameters\\n3. Set scale factor for proper value conversion\\n4. Click Save Water Quality Sensor\\n\\nThis will be saved as a water quality sensor!');"
         "}"
+        "function addAquadaxQualitySensor() {"
+        "  console.log('ADD AQUADAX QUALITY SENSOR CLICKED - Current count:', sensorCount);"
+        "  var div = document.getElementById('water-quality-sensors-list');"
+        "  if (!div) { alert('ERROR: Water quality sensors container not found!'); return; }"
+        "  var h = '<div class=\"sensor-card\" id=\"sensor-card-' + sensorCount + '\" style=\"border:2px solid #0d6efd;border-radius:8px;padding:25px;margin:20px 0;background:#ffffff;box-shadow:0 2px 4px rgba(0,0,0,0.1)\">';"
+        "  h += '<h4 style=\"color:#0d6efd;margin-top:0;margin-bottom:20px;font-size:18px\">New Aquadax Quality Sensor ' + (sensorCount+1) + '</h4>';"
+        "  h += '<input type=\"hidden\" name=\"sensor_' + sensorCount + '_sensor_type\" value=\"Aquadax_Quality\">';"
+        "  h += '<input type=\"hidden\" name=\"sensor_' + sensorCount + '_data_type\" value=\"AQUADAX_QUALITY_FIXED\">';"
+        "  h += '<input type=\"hidden\" name=\"sensor_' + sensorCount + '_byte_order\" value=\"BIG_ENDIAN\">';"
+        "  h += '<input type=\"hidden\" name=\"sensor_' + sensorCount + '_register_type\" value=\"HOLDING\">';"
+        "  h += '<input type=\"hidden\" name=\"sensor_' + sensorCount + '_quantity\" value=\"12\">';"
+        "  h += '<input type=\"hidden\" name=\"sensor_' + sensorCount + '_scale_factor\" value=\"1.0\">';"
+        "  h += '<input type=\"hidden\" name=\"sensor_' + sensorCount + '_sensor_height\" value=\"0\">';"
+        "  h += '<input type=\"hidden\" name=\"sensor_' + sensorCount + '_max_water_level\" value=\"0\">';"
+        "  h += '<p style=\"color:#0d6efd;font-weight:600;margin:15px 0;padding:10px;background:#e7f1ff;border-radius:6px;font-size:14px\">Aquadax Quality Sensor - Reads COD, BOD, TSS, pH, Temperature (5x FLOAT32 bulk read)</p>';"
+        "  h += '<div id=\"sensor-form-' + sensorCount + '\" style=\"display:block\">';"
+        "  h += '<div style=\"display:grid;grid-template-columns:180px 1fr;gap:20px;align-items:start;margin-bottom:20px\">';"
+        "  h += '<label style=\"font-weight:600;padding-top:10px\">Sensor Name:</label>';"
+        "  h += '<div><input type=\"text\" name=\"sensor_' + sensorCount + '_name\" placeholder=\"e.g., Aquadax WQ Sensor 1\" style=\"width:100%;padding:10px;border:1px solid #ccc;border-radius:6px;font-size:15px\">';"
+        "  h += '<small style=\"color:#888;display:block;margin-top:5px;font-size:13px\">Display name for this sensor</small></div>';"
+        "  h += '<label style=\"font-weight:600;padding-top:10px\">Unit ID:</label>';"
+        "  h += '<div><input type=\"text\" name=\"sensor_' + sensorCount + '_unit_id\" placeholder=\"e.g., AQ001\" style=\"width:100%;padding:10px;border:1px solid #ccc;border-radius:6px;font-size:15px\">';"
+        "  h += '<small style=\"color:#888;display:block;margin-top:5px;font-size:13px\">Unique identifier sent in telemetry</small></div>';"
+        "  h += '<label style=\"font-weight:600;padding-top:10px\">Slave ID:</label>';"
+        "  h += '<div><input type=\"number\" name=\"sensor_' + sensorCount + '_slave_id\" value=\"1\" min=\"1\" max=\"247\" style=\"width:100%;padding:10px;border:1px solid #ccc;border-radius:6px;font-size:15px\">';"
+        "  h += '<small style=\"color:#888;display:block;margin-top:5px;font-size:13px\">Modbus slave address (1-247)</small></div>';"
+        "  h += '<label style=\"font-weight:600;padding-top:10px\">Register Address:</label>';"
+        "  h += '<div><input type=\"number\" name=\"sensor_' + sensorCount + '_register_address\" value=\"1280\" style=\"width:100%;padding:10px;border:1px solid #ccc;border-radius:6px;font-size:15px\">';"
+        "  h += '<small style=\"color:#888;display:block;margin-top:5px;font-size:13px\">Default: 1280 (0x0500) - Start address for 12 registers</small></div>';"
+        "  h += '<label style=\"font-weight:600;padding-top:10px\">Baud Rate:</label>';"
+        "  h += '<div><select name=\"sensor_' + sensorCount + '_baud_rate\" style=\"width:100%;padding:10px;border:1px solid #e0e0e0;border-radius:6px;font-size:15px\">';"
+        "  h += '<option value=\"9600\">9600</option><option value=\"19200\">19200</option><option value=\"38400\">38400</option><option value=\"115200\">115200</option>';"
+        "  h += '</select>';"
+        "  h += '<small style=\"color:#888;display:block;margin-top:5px;font-size:13px\">Serial communication speed</small></div></div>';"
+        "  h += '<div style=\"background:#f0f8ff;padding:12px;margin:10px 0;border-radius:6px;border:1px solid #17a2b8\">';"
+        "  h += '<strong style=\"color:#17a2b8\">Fixed Parameters:</strong> Qty=12, FLOAT32 BIG_ENDIAN (ABCD), Scale=1.0<br>';"
+        "  h += '<strong style=\"color:#28a745\">Output:</strong> {\"params_data\":{\"COD\":val,\"BOD\":val,\"TSS\":val,\"pH\":val,\"Temp\":val},\"type\":\"QUALITY\"}';"
+        "  h += '</div>';"
+        "  h += '<div style=\"margin-top:25px;padding-top:20px;border-top:1px solid #e0e0e0;text-align:center\">';"
+        "  h += '<button type=\"button\" onclick=\"testNewSensorRS485(' + sensorCount + ')\" style=\"background:linear-gradient(135deg,#17a2b8,#138496);color:white;padding:12px 28px;border:none;border-radius:6px;font-weight:600;cursor:pointer;margin-right:10px;font-size:15px\">🔍 Test RS485</button>';"
+        "  h += '<button type=\"button\" onclick=\"saveSingleSensor(' + sensorCount + ')\" style=\"background:linear-gradient(135deg,#28a745,#218838);color:white;padding:12px 28px;border:none;border-radius:6px;font-weight:600;cursor:pointer;margin-right:10px;font-size:15px\">💾 Save Sensor</button>';"
+        "  h += '<button type=\"button\" onclick=\"removeSensorForm(' + sensorCount + ')\" style=\"background:linear-gradient(135deg,#dc3545,#c82333);color:white;padding:12px 28px;border:none;border-radius:6px;font-weight:600;cursor:pointer;font-size:15px\">❌ Cancel</button>';"
+        "  h += '<div id=\"test-result-new-' + sensorCount + '\" style=\"margin-top:15px;display:none\"></div>';"
+        "  h += '</div></div>';"
+        "  div.innerHTML += h;"
+        "  sensorCount++;"
+        "  console.log('SUCCESS: Aquadax Quality sensor added. Updated count:', sensorCount);"
+        "  alert('SUCCESS: Aquadax Quality sensor form added!\\n\\nSTEPS:\\n1. Fill in Name and Unit ID\\n2. Set Slave ID and Register Address (default 1280)\\n3. Click Save Sensor\\n\\nReads COD, BOD, TSS, pH, Temperature in one bulk Modbus read.');"
+        "}"
         "var qualityParameterTypes = ["
         "  {key: 'pH', name: 'pH', units: 'pH', description: 'Acidity/Alkalinity measurement'},"
         "  {key: 'Temp', name: 'Temp', units: 'degC', description: 'Water temperature sensor'},"
@@ -3271,7 +3336,7 @@ static esp_err_t config_page_handler(httpd_req_t *req)
         "formHtml += '</select>';"
         "formHtml += '<small style=\"color:#888;display:block;margin-top:5px;font-size:13px\">Modbus register type</small></div>';"
         "formHtml += '</div>';"
-        "if (sensorType !== 'ZEST' && sensorType !== 'Clampon' && sensorType !== 'Dailian' && sensorType !== 'Dailian_EMF' && sensorType !== 'Panda_EMF' && sensorType !== 'Panda_Level' && sensorType !== 'Piezometer' && sensorType !== 'Panda_USM') {"
+        "if (sensorType !== 'ZEST' && sensorType !== 'Clampon' && sensorType !== 'Dailian' && sensorType !== 'Dailian_EMF' && sensorType !== 'Panda_EMF' && sensorType !== 'Panda_Level' && sensorType !== 'Piezometer' && sensorType !== 'Panda_USM' && sensorType !== 'Aquadax_Quality') {"
         "formHtml += '<div style=\"display:grid;grid-template-columns:180px 1fr;gap:20px;align-items:start;margin-top:20px\">';"
         "formHtml += '<label style=\"font-weight:600;padding-top:10px\">Data Type:</label>';"
         "formHtml += '<div><select name=\"sensor_' + sensorId + '_data_type\" style=\"width:100%;padding:10px;border:1px solid #e0e0e0;border-radius:6px;font-size:15px\" onchange=\"showDataTypeInfo(this, ' + sensorId + ')\">';"
@@ -3354,6 +3419,10 @@ static esp_err_t config_page_handler(httpd_req_t *req)
         "formHtml += '<input type=\"hidden\" name=\"sensor_' + sensorId + '_data_type\" value=\"UINT16_BE\">';"
         "formHtml += '<p style=\"color:#28a745;font-size:12px;margin:10px 0\"><strong>Data Format:</strong> Fixed - UINT16_BE (16-bit unsigned)</p>';"
         "formHtml += '<p style=\"color:#007bff;font-size:11px;margin:5px 0\"><em>Hydrostatic Level defaults: Register 4 (0x0004), Quantity 1 - Level percentage = (Raw Value / Tank Height) × 100</em></p>';"
+        "} else if (sensorType === 'Aquadax_Quality') {"
+        "formHtml += '<input type=\"hidden\" name=\"sensor_' + sensorId + '_data_type\" value=\"AQUADAX_QUALITY_FIXED\">';"
+        "formHtml += '<p style=\"color:#28a745;font-size:12px;margin:10px 0\"><strong>Data Format:</strong> Fixed - 5x FLOAT32 BIG_ENDIAN (ABCD)</p>';"
+        "formHtml += '<p style=\"color:#007bff;font-size:11px;margin:5px 0\"><em>Aquadax Quality defaults: Address 1280 (0x0500), Qty 12 - Reads COD, BOD, TSS, pH, Temperature as Float32</em></p>';"
         "} else if (sensorType === 'Piezometer') {"
         "formHtml += '<input type=\"hidden\" name=\"sensor_' + sensorId + '_data_type\" value=\"UINT16_HI\">';"
         "formHtml += '<p style=\"color:#28a745;font-size:12px;margin:10px 0\"><strong>Data Format:</strong> Fixed - UINT16_HI (16-bit unsigned integer)</p>';"
@@ -3548,6 +3617,11 @@ static esp_err_t config_page_handler(httpd_req_t *req)
         "const regAddrInput = document.querySelector('input[name=\"sensor_' + sensorId + '_register_address\"]');"
         "if (quantityInput) quantityInput.value = '4';"
         "if (regAddrInput) regAddrInput.value = '4121';"
+        "} else if (sensorType === 'Aquadax_Quality') {"
+        "const quantityInput = document.querySelector('input[name=\"sensor_' + sensorId + '_quantity\"]');"
+        "const regAddrInput = document.querySelector('input[name=\"sensor_' + sensorId + '_register_address\"]');"
+        "if (quantityInput) quantityInput.value = '12';"
+        "if (regAddrInput) regAddrInput.value = '1280';"
         "}"
         "}");
     
@@ -8063,6 +8137,21 @@ static esp_err_t test_rs485_handler(httpd_req_t *req)
         } else if (reg_count >= 1 && strstr(data_type, "PANDA_LEVEL_FIXED")) {
             // PANDA_LEVEL_FIXED: UINT16 raw level value
             primary_value = (double)registers[0] * scale_factor;
+        } else if (reg_count >= 10 && strstr(data_type, "AQUADAX_QUALITY_FIXED")) {
+            // AQUADAX_QUALITY_FIXED: 5x FLOAT32 BIG_ENDIAN (ABCD)
+            // Registers [0-1]: COD, [2-3]: BOD, [4-5]: TSS, [6-7]: pH, [8-9]: Temperature
+            uint32_t float_bits = ((uint32_t)registers[0] << 16) | registers[1];
+            float cod_value;
+            memcpy(&cod_value, &float_bits, sizeof(float));
+            primary_value = (double)cod_value * scale_factor;
+            // Log all 5 parameters for test display
+            const char *aq_names[] = {"COD", "BOD", "TSS", "pH", "Temp"};
+            for (int aq = 0; aq < 5 && (aq * 2 + 1) < reg_count; aq++) {
+                uint32_t fb = ((uint32_t)registers[aq * 2] << 16) | registers[aq * 2 + 1];
+                float fv;
+                memcpy(&fv, &fb, sizeof(float));
+                ESP_LOGI(TAG, "Aquadax_Quality Test %s = %.3f", aq_names[aq], fv);
+            }
         } else if (reg_count >= 1) {
             primary_value = (double)registers[0] * scale_factor;
         }

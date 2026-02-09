@@ -47,6 +47,11 @@ esp_err_t sd_card_clear_all_messages(void);
 uint32_t sd_card_get_next_message_id(void);
 esp_err_t sd_card_restore_message_counter(void);
 
+// Mutex access for external SD card file operations (e.g., heartbeat log)
+// Callers MUST release the mutex on ALL code paths after acquiring
+esp_err_t sd_card_acquire_mutex(void);
+void sd_card_release_mutex(void);
+
 // Recovery and fallback functions
 esp_err_t sd_card_attempt_recovery(void);      // Try to recover failed SD card
 bool sd_card_needs_recovery(void);              // Check if SD card needs recovery attempt
