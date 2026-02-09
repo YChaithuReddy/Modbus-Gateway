@@ -1835,8 +1835,22 @@ static esp_err_t config_page_handler(httpd_req_t *req)
     html_escape(escaped_ssid, g_system_config.wifi_ssid, sizeof(escaped_ssid));
     html_escape(escaped_password, g_system_config.wifi_password, sizeof(escaped_password));
 
-    // Send HTML header
-    httpd_resp_sendstr_chunk(req, html_header);
+    // Send HTML header in small pieces to avoid TCP send buffer overflow
+    // html_header is ~125KB - sending as one chunk overwhelms the 5760-byte TCP buffer
+    {
+        const char *ptr = html_header;
+        size_t remaining = strlen(html_header);
+        while (remaining > 0) {
+            size_t send_len = remaining > 4096 ? 4096 : remaining;
+            if (httpd_resp_send_chunk(req, ptr, send_len) != ESP_OK) {
+                ESP_LOGE(TAG, "Failed to send header (remaining: %d bytes)", remaining);
+                httpd_resp_sendstr_chunk(req, NULL);
+                return ESP_OK;
+            }
+            ptr += send_len;
+            remaining -= send_len;
+        }
+    }
 
     // Send main form HTML in chunks
     char chunk[5120];  // Buffer for HTML chunks with dynamic content
@@ -9371,8 +9385,8 @@ static esp_err_t start_webserver(void)
     config.max_open_sockets = 5;      // Slightly increased for better concurrent handling
     config.stack_size = 12288;        // 12KB stack for 5KB chunk buffer + overhead
     config.task_priority = 6;         // Higher priority for faster response (was 5)
-    config.recv_wait_timeout = 5;     // Faster timeout for quicker response (was 15)
-    config.send_wait_timeout = 5;     // Faster timeout for quicker response (was 15)
+    config.recv_wait_timeout = 10;    // 10 seconds receive timeout
+    config.send_wait_timeout = 30;    // 30 seconds - needed for large page (~125KB header)
     config.lru_purge_enable = true;   // Enable LRU purging of connections
     config.backlog_conn = 5;          // Allow more pending connections
     config.enable_so_linger = false;  // Disable socket lingering to prevent TIME_WAIT issues
