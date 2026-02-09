@@ -2,9 +2,6 @@
 // Fluxgen ESP32 Modbus IoT Gateway - Version 1.0.0 (Production Ready - Complete Implementation)
 // Professional industrial IoT gateway with real-time RS485 Modbus communication
 
-// Feature flags - set to 0 to disable and reduce memory usage
-#define ENABLE_CALCULATION_UI 0  // Calculation engine UI disabled (set to 1 to enable)
-
 #include "web_config.h"
 #include "modbus.h"
 #include "sensor_manager.h"
@@ -777,9 +774,6 @@ static const char* html_header =
 "<button class='menu-item' onclick='showAzureSection()'>"
 "<svg class='menu-icon' viewBox='0 0 24 24' fill='none' stroke='currentColor' stroke-width='2'><path d='M18 10h-1.26A8 8 0 109 20h9a5 5 0 000-10z'/></svg>AZURE IOT HUB"
 "</button>"
-"<button class='menu-item' onclick='showSection(\"telemetry\")'>"
-"<svg class='menu-icon' viewBox='0 0 24 24' fill='none' stroke='currentColor' stroke-width='2'><path d='M22 12h-4l-3 9L9 3l-3 9H2'/></svg>TELEMETRY MONITOR"
-"</button>"
 "<button class='menu-item' onclick='showSection(\"sensors\")'>"
 "<svg class='menu-icon' viewBox='0 0 24 24' fill='none' stroke='currentColor' stroke-width='2'><rect x='4' y='4' width='16' height='16' rx='2'/><path d='M9 9h6v6H9z'/><path d='M9 2v2M15 2v2M9 20v2M15 20v2M2 9h2M2 15h2M20 9h2M20 15h2'/></svg>MODBUS SENSORS"
 "</button>"
@@ -1286,8 +1280,6 @@ static esp_err_t save_wifi_config_handler(httpd_req_t *req);
 static esp_err_t save_sim_config_handler(httpd_req_t *req);
 static esp_err_t save_sd_config_handler(httpd_req_t *req);
 static esp_err_t save_rtc_config_handler(httpd_req_t *req);
-static esp_err_t save_telegram_config_handler(httpd_req_t *req);
-static esp_err_t api_telegram_test_handler(httpd_req_t *req);
 static esp_err_t api_modbus_poll_handler(httpd_req_t *req);
 static esp_err_t api_sim_test_handler(httpd_req_t *req);
 static esp_err_t api_sim_test_status_handler(httpd_req_t *req);
@@ -1299,7 +1291,6 @@ static esp_err_t api_rtc_sync_handler(httpd_req_t *req);
 static esp_err_t api_rtc_set_handler(httpd_req_t *req);
 static esp_err_t api_modbus_status_handler(httpd_req_t *req);
 static esp_err_t api_azure_status_handler(httpd_req_t *req);
-// static esp_err_t api_telemetry_history_handler(httpd_req_t *req);  // DISABLED to save 12KB heap
 static esp_err_t modbus_scan_handler(httpd_req_t *req);
 static esp_err_t modbus_read_live_handler(httpd_req_t *req);
 
@@ -2347,85 +2338,6 @@ static esp_err_t config_page_handler(httpd_req_t *req)
         g_system_config.rtc_config.i2c_num == 1 ? "selected" : "");
     httpd_resp_sendstr_chunk(req, chunk);
 
-    // Telegram Bot Configuration Section - HIDDEN (feature not ready)
-    // To re-enable, remove the #if 0 / #endif wrapper
-#if 0
-    snprintf(chunk, sizeof(chunk),
-        "<div class='sensor-card' style='padding:25px;margin-top:30px'>"
-        "<form id='telegram_config_form' onsubmit='return saveTelegramConfig()'>"
-        "<h2 class='section-title'><i>🤖</i>Telegram Bot Configuration</h2>"
-        "<div style='background:#e3f2fd;border:1px solid #90caf9;padding:15px;margin:15px 0;border-radius:6px'>"
-        "<p style='margin:0;color:#1565c0'><strong>ℹ️ Remote Monitoring & Control:</strong> Control your ESP32 gateway via Telegram messenger. Get alerts, check status, and send commands remotely!</p>"
-        "</div>"
-        "<div class='sensor-card' style='padding:25px'>"
-        "<h3 style='text-align:center;margin-top:0;margin-bottom:20px;color:#007bff;font-size:20px'>Bot Settings</h3>"
-        "<p style='color:#666;margin-bottom:25px;text-align:center;font-size:14px'>Configure Telegram integration for remote access</p>"
-        "<div style='display:flex;align-items:center;justify-content:center;padding:15px;background:#f0f8ff;border-radius:8px;margin-bottom:15px'>"
-        "<label for='telegram_enabled' style='display:flex;align-items:center;justify-content:center;font-weight:600;font-size:16px;cursor:pointer;margin:0'>"
-        "<input type='checkbox' id='telegram_enabled' name='telegram_enabled' value='1' %s onchange='toggleTelegramOptions()' style='margin-right:10px;width:18px;height:18px;cursor:pointer'>"
-        "Enable Telegram Bot</label>"
-        "</div>"
-        "<div id='telegram_options' style='display:%s;margin-top:15px'>"
-        "<div style='display:grid;grid-template-columns:150px 1fr;gap:20px;align-items:start;margin-bottom:20px'>"
-        "<label style='font-weight:600;padding-top:10px'>Bot Token:</label>"
-        "<div>"
-        "<input type='text' id='telegram_bot_token' name='telegram_bot_token' value='%s' placeholder='123456:ABC-DEF...' style='width:100%%;padding:10px;border:1px solid #e0e0e0;border-radius:6px;font-size:15px'>"
-        "<small style='color:#888;display:block;margin-top:5px;font-size:13px'>Get from @BotFather on Telegram</small>"
-        "</div>"
-        "<label style='font-weight:600;padding-top:10px'>Chat ID:</label>"
-        "<div>"
-        "<input type='text' id='telegram_chat_id' name='telegram_chat_id' value='%s' placeholder='123456789' style='width:100%%;padding:10px;border:1px solid #e0e0e0;border-radius:6px;font-size:15px'>"
-        "<small style='color:#888;display:block;margin-top:5px;font-size:13px'>Your Telegram user ID or group chat ID</small>"
-        "</div>"
-        "<label style='font-weight:600;padding-top:10px'>Poll Interval:</label>"
-        "<div>"
-        "<input type='number' id='telegram_poll_interval' name='telegram_poll_interval' value='%d' min='5' max='60' style='width:100%%;padding:10px;border:1px solid #e0e0e0;border-radius:6px;font-size:15px'>"
-        "<small style='color:#888;display:block;margin-top:5px;font-size:13px'>How often to check for commands (5-60 seconds)</small>"
-        "</div>"
-        "</div>"
-        "<div style='display:flex;align-items:center;justify-content:center;padding:15px;background:#e8f4f8;border-radius:8px;margin-top:10px'>"
-        "<label for='telegram_alerts' style='display:flex;align-items:center;justify-content:center;font-size:15px;cursor:pointer;margin:0'>"
-        "<input type='checkbox' id='telegram_alerts' name='telegram_alerts' value='1' %s style='margin-right:10px;width:18px;height:18px;cursor:pointer'>"
-        "Send Automatic Alerts</label>"
-        "</div>"
-        "<div style='display:flex;align-items:center;justify-content:center;padding:15px;background:#e8f4f8;border-radius:8px;margin-top:10px'>"
-        "<label for='telegram_startup' style='display:flex;align-items:center;justify-content:center;font-size:15px;cursor:pointer;margin:0'>"
-        "<input type='checkbox' id='telegram_startup' name='telegram_startup' value='1' %s style='margin-right:10px;width:18px;height:18px;cursor:pointer'>"
-        "Send Startup Notification</label>"
-        "</div>"
-        "</div>"
-        "<div style='background:#fff3cd;border:1px solid #ffc107;padding:15px;margin:15px 0;border-radius:6px'>"
-        "<p style='margin:0;color:#856404;font-size:14px'><strong>📱 Setup Instructions:</strong></p>"
-        "<ol style='margin:10px 0 0 20px;color:#856404;font-size:13px'>"
-        "<li>Open Telegram and search for <code>@BotFather</code></li>"
-        "<li>Send <code>/newbot</code> and follow instructions to create your bot</li>"
-        "<li>Copy the Bot Token and paste above</li>"
-        "<li>Search for <code>@userinfobot</code> on Telegram and send <code>/start</code></li>"
-        "<li>Copy your Chat ID and paste above</li>"
-        "<li>Click Save and your bot will start!</li>"
-        "</ol>"
-        "</div>"
-        "<div style='display:flex;gap:10px;margin-top:20px;flex-wrap:wrap;justify-content:center'>"
-        "<button type='button' onclick='testTelegramBot()' style='background:#17a2b8;color:white;padding:12px 20px;border:none;border-radius:6px;font-weight:bold;min-width:150px;cursor:pointer'>🧪 Test Bot</button>"
-        "</div>"
-        "<div id='telegram_test_result' style='margin-top:15px;padding:10px;border-radius:6px;display:none'></div>"
-        "</div>"
-        "<div style='margin-top:25px;padding:20px;background:#f8f9fa;border-radius:8px;text-align:center'>"
-        "<button type='submit' style='background:#28a745;color:white;padding:12px 30px;border:none;border-radius:6px;font-weight:bold;font-size:16px;cursor:pointer'>Save Telegram Configuration</button>"
-        "<div id='telegram_save_result' style='margin-top:15px;padding:10px;border-radius:6px;display:none'></div>"
-        "</div>"
-        "</form>"
-        "</div>",
-        g_system_config.telegram_config.enabled ? "checked" : "",
-        g_system_config.telegram_config.enabled ? "block" : "none",
-        g_system_config.telegram_config.bot_token,
-        g_system_config.telegram_config.chat_id,
-        g_system_config.telegram_config.poll_interval,
-        g_system_config.telegram_config.alerts_enabled ? "checked" : "",
-        g_system_config.telegram_config.startup_notification ? "checked" : "");
-    httpd_resp_sendstr_chunk(req, chunk);
-#endif  // End of hidden Telegram section
-
     // Configuration Trigger Section
     snprintf(chunk, sizeof(chunk),
         "<div class='sensor-card' style='padding:25px'>"
@@ -2577,16 +2489,6 @@ static esp_err_t config_page_handler(httpd_req_t *req)
         g_system_config.modbus_retry_count == 3 ? "selected" : "",
         g_system_config.modbus_retry_delay);
     httpd_resp_sendstr_chunk(req, chunk);
-
-    // Telemetry Monitor section - DISABLED to save 12KB heap
-    httpd_resp_sendstr_chunk(req,
-        "<div id='telemetry' class='section'>"
-        "<h2 class='section-title'><i>📊</i>Azure Telemetry Monitor</h2>"
-        "<div class='sensor-card' style='padding:20px;text-align:center'>"
-        "<p style='color:#6c757d;font-size:16px'>Feature disabled to optimize memory usage.</p>"
-        "<p style='color:#888;font-size:13px'>Telemetry data is still being sent to Azure IoT Hub.</p>"
-        "</div>"
-        "</div>");
 
     // Sensors section with sub-menus
     int regular_sensor_count = 0;
@@ -3559,33 +3461,6 @@ static esp_err_t config_page_handler(httpd_req_t *req)
         "formHtml += '<p style=\"color:#28a745;font-size:13px;margin:15px 0;padding:10px;background:#f0fff4;border:1px solid #28a745;border-radius:4px\"><strong>Fixed format - UINT16_HI (16-bit) - no data type selection needed</strong></p>';"
         "}"
 
-#if ENABLE_CALCULATION_UI
-        // ========== CALCULATION ENGINE UI (Dropdown Design) ==========
-        "formHtml += '<div style=\"margin-top:20px;padding:15px;background:#f8f9fa;border:1px solid #dee2e6;border-radius:8px\">';"
-
-        // Header row with label and dropdown
-        "formHtml += '<div style=\"display:flex;align-items:center;gap:15px;flex-wrap:wrap\">';"
-        "formHtml += '<label style=\"font-weight:600;color:#333;font-size:14px;white-space:nowrap\">⚙️ Calculation Type:</label>';"
-
-        // Dropdown select
-        "formHtml += '<select name=\"sensor_' + sensorId + '_calc_type\" onchange=\"showCalcFields(this,' + sensorId + ')\" style=\"flex:1;min-width:200px;padding:10px 12px;border:1px solid #ced4da;border-radius:6px;font-size:14px;background:white;cursor:pointer\">';"
-        "formHtml += '<option value=\"0\" selected>None (Use raw value)</option>';"
-        "formHtml += '<option value=\"10\">Flow Int+Dec - Integer + Decimal</option>';"
-        "formHtml += '<option value=\"1\">Vortex Flow - HIGH×100 + LOW</option>';"
-        "formHtml += '<option value=\"3\">Level % - Tank fill 0-100%</option>';"
-        "formHtml += '<option value=\"2\">Scale + Offset - (Raw × Scale) + Offset</option>';"
-        "formHtml += '<option value=\"4\">Tank Volume - Level to liters/m³</option>';"
-        "formHtml += '<option value=\"8\">4-20mA Range - Map signal to output</option>';"
-        "formHtml += '</select>';"
-        "formHtml += '</div>';"
-
-        // Dynamic fields container
-        "formHtml += '<div id=\"calc-fields-' + sensorId + '\" style=\"margin-top:15px\"></div>';"
-
-        "formHtml += '</div>';"
-        // ========== END CALCULATION ENGINE UI ==========
-#endif
-
         "formHtml += '<br>';"
         "formDiv.innerHTML = formHtml;"
         "formDiv.style.display = 'block';"
@@ -3763,152 +3638,6 @@ static esp_err_t config_page_handler(httpd_req_t *req)
         "}"
         "}"
 
-#if ENABLE_CALCULATION_UI
-        // ========== CALCULATION ENGINE JAVASCRIPT FUNCTIONS ==========
-        "function showCalcFields(select, sensorId) {"
-        "const container = document.getElementById('calc-fields-' + sensorId);"
-        "const calcType = parseInt(select.value);"
-        "let fieldsHtml = '';"
-        "const inputStyle = 'width:100%;padding:8px 10px;border:1px solid #ced4da;border-radius:4px;font-size:14px';"
-        "const labelStyle = 'font-size:13px;color:#495057;display:block;margin-bottom:4px;font-weight:500';"
-        "const boxStyle = 'background:white;padding:12px;border-radius:6px;border:1px solid #dee2e6';"
-        "const titleStyle = 'margin:0 0 10px 0;font-weight:600;color:#495057;font-size:13px';"
-
-        // CALC_COMBINE_REGISTERS (1) - Vortex Flowmeter
-        "if (calcType === 1) {"
-        "fieldsHtml = '<div style=\"' + boxStyle + '\">';"
-        "fieldsHtml += '<p style=\"' + titleStyle + '\"><span>🌀</span> Combine Two Registers: Total = (HIGH × Multiplier) + LOW</p>';"
-        "fieldsHtml += '<p style=\"font-size:12px;color:#666;margin-bottom:10px\">For Vortex flowmeter: Cumulative = (Reg[8-9] × 100) + Reg[10-11]</p>';"
-        "fieldsHtml += '<div style=\"display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px\">';"
-        "fieldsHtml += '<div><label style=\"' + labelStyle + '\">HIGH Register Offset:</label>';"
-        "fieldsHtml += '<input type=\"number\" name=\"sensor_' + sensorId + '_calc_high_reg\" value=\"8\" style=\"' + inputStyle + '\">';"
-        "fieldsHtml += '<small style=\"color:#888;font-size:11px\">Offset from start register</small></div>';"
-        "fieldsHtml += '<div><label style=\"' + labelStyle + '\">LOW Register Offset:</label>';"
-        "fieldsHtml += '<input type=\"number\" name=\"sensor_' + sensorId + '_calc_low_reg\" value=\"10\" style=\"' + inputStyle + '\">';"
-        "fieldsHtml += '<small style=\"color:#888;font-size:11px\">Offset from start register</small></div>';"
-        "fieldsHtml += '<div><label style=\"' + labelStyle + '\">Multiplier:</label>';"
-        "fieldsHtml += '<input type=\"number\" name=\"sensor_' + sensorId + '_calc_multiplier\" value=\"100\" step=\"any\" style=\"' + inputStyle + '\">';"
-        "fieldsHtml += '<small style=\"color:#888;font-size:11px\">HIGH value multiplier</small></div>';"
-        "fieldsHtml += '</div></div>';"
-        "}"
-
-        // CALC_SCALE_OFFSET (2)
-        "else if (calcType === 2) {"
-        "fieldsHtml = '<div style=\"' + boxStyle + '\">';"
-        "fieldsHtml += '<p style=\"' + titleStyle + '\"><span>✖️</span> Scale and Offset: Result = (Raw × Scale) + Offset</p>';"
-        "fieldsHtml += '<div style=\"display:grid;grid-template-columns:1fr 1fr;gap:10px\">';"
-        "fieldsHtml += '<div><label style=\"' + labelStyle + '\">Scale (Multiplier):</label>';"
-        "fieldsHtml += '<input type=\"number\" name=\"sensor_' + sensorId + '_calc_scale\" value=\"1.0\" step=\"any\" style=\"' + inputStyle + '\"></div>';"
-        "fieldsHtml += '<div><label style=\"' + labelStyle + '\">Offset (Add):</label>';"
-        "fieldsHtml += '<input type=\"number\" name=\"sensor_' + sensorId + '_calc_offset\" value=\"0\" step=\"any\" style=\"' + inputStyle + '\"></div>';"
-        "fieldsHtml += '</div></div>';"
-        "}"
-
-        // CALC_LEVEL_PERCENTAGE (3)
-        "else if (calcType === 3) {"
-        "fieldsHtml = '<div style=\"' + boxStyle + '\">';"
-        "fieldsHtml += '<p style=\"' + titleStyle + '\"><span>📊</span> Level to Percentage (0-100%)</p>';"
-        "fieldsHtml += '<div style=\"display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px\">';"
-        "fieldsHtml += '<div><label style=\"' + labelStyle + '\">Empty Tank Value:</label>';"
-        "fieldsHtml += '<input type=\"number\" name=\"sensor_' + sensorId + '_calc_empty_val\" value=\"0\" step=\"any\" style=\"' + inputStyle + '\">';"
-        "fieldsHtml += '<small style=\"color:#888;font-size:11px\">Sensor reading when empty</small></div>';"
-        "fieldsHtml += '<div><label style=\"' + labelStyle + '\">Full Tank Value:</label>';"
-        "fieldsHtml += '<input type=\"number\" name=\"sensor_' + sensorId + '_calc_full_val\" value=\"100\" step=\"any\" style=\"' + inputStyle + '\">';"
-        "fieldsHtml += '<small style=\"color:#888;font-size:11px\">Sensor reading when full</small></div>';"
-        "fieldsHtml += '<div><label style=\"' + labelStyle + '\">Invert Level:</label>';"
-        "fieldsHtml += '<select name=\"sensor_' + sensorId + '_calc_invert\" style=\"' + inputStyle + '\">';"
-        "fieldsHtml += '<option value=\"0\">No (higher = fuller)</option>';"
-        "fieldsHtml += '<option value=\"1\">Yes (higher = emptier)</option></select>';"
-        "fieldsHtml += '<small style=\"color:#888;font-size:11px\">For ultrasonic distance</small></div>';"
-        "fieldsHtml += '</div></div>';"
-        "}"
-
-        // CALC_CYLINDER_VOLUME (4)
-        "else if (calcType === 4) {"
-        "fieldsHtml = '<div style=\"' + boxStyle + '\">';"
-        "fieldsHtml += '<p style=\"' + titleStyle + '\"><span>🛢️</span> Cylinder Tank Volume: V = π × r² × h</p>';"
-        "fieldsHtml += '<div style=\"display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px\">';"
-        "fieldsHtml += '<div><label style=\"' + labelStyle + '\">Tank Diameter (m):</label>';"
-        "fieldsHtml += '<input type=\"number\" name=\"sensor_' + sensorId + '_calc_tank_dia\" value=\"1.0\" step=\"any\" style=\"' + inputStyle + '\"></div>';"
-        "fieldsHtml += '<div><label style=\"' + labelStyle + '\">Tank Height (m):</label>';"
-        "fieldsHtml += '<input type=\"number\" name=\"sensor_' + sensorId + '_calc_tank_hgt\" value=\"2.0\" step=\"any\" style=\"' + inputStyle + '\"></div>';"
-        "fieldsHtml += '<div><label style=\"' + labelStyle + '\">Volume Unit:</label>';"
-        "fieldsHtml += '<select name=\"sensor_' + sensorId + '_calc_vol_unit\" style=\"' + inputStyle + '\">';"
-        "fieldsHtml += '<option value=\"0\">Liters</option>';"
-        "fieldsHtml += '<option value=\"1\">Cubic Meters (m³)</option>';"
-        "fieldsHtml += '<option value=\"2\">US Gallons</option></select></div>';"
-        "fieldsHtml += '</div></div>';"
-        "}"
-
-        // CALC_RECTANGLE_VOLUME (5)
-        "else if (calcType === 5) {"
-        "fieldsHtml = '<div style=\"' + boxStyle + '\">';"
-        "fieldsHtml += '<p style=\"' + titleStyle + '\"><span>📦</span> Rectangle Tank Volume: V = L × W × h</p>';"
-        "fieldsHtml += '<div style=\"display:grid;grid-template-columns:1fr 1fr 1fr 1fr;gap:10px\">';"
-        "fieldsHtml += '<div><label style=\"' + labelStyle + '\">Length (m):</label>';"
-        "fieldsHtml += '<input type=\"number\" name=\"sensor_' + sensorId + '_calc_tank_len\" value=\"2.0\" step=\"any\" style=\"' + inputStyle + '\"></div>';"
-        "fieldsHtml += '<div><label style=\"' + labelStyle + '\">Width (m):</label>';"
-        "fieldsHtml += '<input type=\"number\" name=\"sensor_' + sensorId + '_calc_tank_wid\" value=\"1.0\" step=\"any\" style=\"' + inputStyle + '\"></div>';"
-        "fieldsHtml += '<div><label style=\"' + labelStyle + '\">Height (m):</label>';"
-        "fieldsHtml += '<input type=\"number\" name=\"sensor_' + sensorId + '_calc_tank_hgt\" value=\"1.5\" step=\"any\" style=\"' + inputStyle + '\"></div>';"
-        "fieldsHtml += '<div><label style=\"' + labelStyle + '\">Volume Unit:</label>';"
-        "fieldsHtml += '<select name=\"sensor_' + sensorId + '_calc_vol_unit\" style=\"' + inputStyle + '\">';"
-        "fieldsHtml += '<option value=\"0\">Liters</option>';"
-        "fieldsHtml += '<option value=\"1\">Cubic Meters (m³)</option>';"
-        "fieldsHtml += '<option value=\"2\">US Gallons</option></select></div>';"
-        "fieldsHtml += '</div></div>';"
-        "}"
-
-        // CALC_FLOW_RATE_PULSE (7)
-        "else if (calcType === 7) {"
-        "fieldsHtml = '<div style=\"' + boxStyle + '\">';"
-        "fieldsHtml += '<p style=\"' + titleStyle + '\"><span>💧</span> Flow Rate from Pulses: Flow = Pulses ÷ Pulses_per_unit</p>';"
-        "fieldsHtml += '<div><label style=\"' + labelStyle + '\">Pulses per Unit (e.g., pulses per liter):</label>';"
-        "fieldsHtml += '<input type=\"number\" name=\"sensor_' + sensorId + '_calc_pulses\" value=\"100\" step=\"any\" style=\"' + inputStyle + '\">';"
-        "fieldsHtml += '<small style=\"color:#888;font-size:11px\">Example: 100 pulses = 1 liter</small></div>';"
-        "fieldsHtml += '</div>';"
-        "}"
-
-        // CALC_LINEAR_INTERPOLATION (8)
-        "else if (calcType === 8) {"
-        "fieldsHtml = '<div style=\"' + boxStyle + '\">';"
-        "fieldsHtml += '<p style=\"' + titleStyle + '\"><span>📈</span> Linear Interpolation: Map input range to output range</p>';"
-        "fieldsHtml += '<p style=\"font-size:12px;color:#666;margin-bottom:10px\">Example: 4-20mA sensor → 0-100% output</p>';"
-        "fieldsHtml += '<div style=\"display:grid;grid-template-columns:1fr 1fr 1fr 1fr;gap:10px\">';"
-        "fieldsHtml += '<div><label style=\"' + labelStyle + '\">Input Min:</label>';"
-        "fieldsHtml += '<input type=\"number\" name=\"sensor_' + sensorId + '_calc_in_min\" value=\"4\" step=\"any\" style=\"' + inputStyle + '\"></div>';"
-        "fieldsHtml += '<div><label style=\"' + labelStyle + '\">Input Max:</label>';"
-        "fieldsHtml += '<input type=\"number\" name=\"sensor_' + sensorId + '_calc_in_max\" value=\"20\" step=\"any\" style=\"' + inputStyle + '\"></div>';"
-        "fieldsHtml += '<div><label style=\"' + labelStyle + '\">Output Min:</label>';"
-        "fieldsHtml += '<input type=\"number\" name=\"sensor_' + sensorId + '_calc_out_min\" value=\"0\" step=\"any\" style=\"' + inputStyle + '\"></div>';"
-        "fieldsHtml += '<div><label style=\"' + labelStyle + '\">Output Max:</label>';"
-        "fieldsHtml += '<input type=\"number\" name=\"sensor_' + sensorId + '_calc_out_max\" value=\"100\" step=\"any\" style=\"' + inputStyle + '\"></div>';"
-        "fieldsHtml += '</div></div>';"
-        "}"
-
-        // CALC_FLOW_INT_DECIMAL (10) - Integer + Decimal combined
-        "else if (calcType === 10) {"
-        "fieldsHtml = '<div style=\"' + boxStyle + '\">';"
-        "fieldsHtml += '<p style=\"' + titleStyle + '\"><span>🔢</span> Flow Meter: Integer + Decimal</p>';"
-        "fieldsHtml += '<p style=\"font-size:12px;color:#666;margin-bottom:10px\">Total = Integer part + (Decimal part × Scale)<br>Example: 12345 + (678 × 0.001) = 12345.678 m³</p>';"
-        "fieldsHtml += '<div style=\"display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px\">';"
-        "fieldsHtml += '<div><label style=\"' + labelStyle + '\">Integer Register Offset:</label>';"
-        "fieldsHtml += '<input type=\"number\" name=\"sensor_' + sensorId + '_calc_high_reg\" value=\"0\" style=\"' + inputStyle + '\">';"
-        "fieldsHtml += '<small style=\"color:#888;font-size:11px\">Register for whole number</small></div>';"
-        "fieldsHtml += '<div><label style=\"' + labelStyle + '\">Decimal Register Offset:</label>';"
-        "fieldsHtml += '<input type=\"number\" name=\"sensor_' + sensorId + '_calc_low_reg\" value=\"2\" style=\"' + inputStyle + '\">';"
-        "fieldsHtml += '<small style=\"color:#888;font-size:11px\">Register for decimal part</small></div>';"
-        "fieldsHtml += '<div><label style=\"' + labelStyle + '\">Decimal Scale:</label>';"
-        "fieldsHtml += '<input type=\"number\" name=\"sensor_' + sensorId + '_calc_scale\" value=\"0.001\" step=\"any\" style=\"' + inputStyle + '\">';"
-        "fieldsHtml += '<small style=\"color:#888;font-size:11px\">0.001 for 3 decimals</small></div>';"
-        "fieldsHtml += '</div></div>';"
-        "}"
-
-        "container.innerHTML = fieldsHtml;"
-        "}"
-        // ========== END CALCULATION ENGINE JAVASCRIPT ==========
-#endif
-
         "function saveSingleSensor(sensorId) {"
         "console.log('Saving sensor:', sensorId);"
         "const nameField = document.querySelector('input[name=\"sensor_' + sensorId + '_name\"]');"
@@ -3984,60 +3713,6 @@ static esp_err_t config_page_handler(httpd_req_t *req)
         "const enabled=document.getElementById('rtc_enabled').checked;"
         "document.getElementById('rtc_options').style.display=enabled?'block':'none';"
         "document.getElementById('rtc_hw_options').style.display=enabled?'block':'none';"
-        "}"
-        "function toggleTelegramOptions(){"
-        "const enabled=document.getElementById('telegram_enabled').checked;"
-        "document.getElementById('telegram_options').style.display=enabled?'block':'none';"
-        "}"
-        "function saveTelegramConfig(){"
-        "const formData=new FormData(document.getElementById('telegram_config_form'));"
-        "const result=document.getElementById('telegram_save_result');"
-        "result.innerHTML='Saving...';"
-        "result.style.display='block';"
-        "result.style.backgroundColor='#fff3cd';"
-        "result.style.color='#856404';"
-        "fetch('/save_telegram_config',{method:'POST',body:formData})"
-        ".then(r=>r.json())"
-        ".then(data=>{"
-        "result.innerHTML=data.message;"
-        "result.style.backgroundColor='#d4edda';"
-        "result.style.color='#155724';"
-        "setTimeout(()=>{result.style.display='none';},3000);"
-        "}).catch(err=>{"
-        "result.innerHTML='Error: '+err.message;"
-        "result.style.backgroundColor='#f8d7da';"
-        "result.style.color='#721c24';"
-        "});"
-        "return false;"
-        "}"
-        "function testTelegramBot(){"
-        "const result=document.getElementById('telegram_test_result');"
-        "const botToken=document.getElementById('telegram_bot_token').value;"
-        "const chatId=document.getElementById('telegram_chat_id').value;"
-        "const params=new URLSearchParams();"
-        "params.append('bot_token',botToken);"
-        "params.append('chat_id',chatId);"
-        "result.innerHTML='🧪 Testing Telegram bot...';"
-        "result.style.display='block';"
-        "result.style.backgroundColor='#fff3cd';"
-        "result.style.color='#856404';"
-        "fetch('/api/telegram_test',{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},body:params.toString()})"
-        ".then(r=>r.json())"
-        ".then(data=>{"
-        "if(data.status==='success'){"
-        "result.innerHTML='✅ '+data.message;"
-        "result.style.backgroundColor='#d4edda';"
-        "result.style.color='#155724';"
-        "}else{"
-        "result.innerHTML='❌ '+data.message;"
-        "result.style.backgroundColor='#f8d7da';"
-        "result.style.color='#721c24';"
-        "}"
-        "}).catch(err=>{"
-        "result.innerHTML='❌ Error: '+err.message;"
-        "result.style.backgroundColor='#f8d7da';"
-        "result.style.color='#721c24';"
-        "});"
         "}"
         "let simTestPollInterval=null;"
         "function testSIMConnection(){"
@@ -10104,24 +9779,6 @@ static esp_err_t start_webserver(void)
         };
         httpd_register_uri_handler(g_server, &save_rtc_config_uri);
 
-        // Telegram config endpoint
-        httpd_uri_t save_telegram_config_uri = {
-            .uri = "/save_telegram_config",
-            .method = HTTP_POST,
-            .handler = save_telegram_config_handler,
-            .user_ctx = NULL
-        };
-        httpd_register_uri_handler(g_server, &save_telegram_config_uri);
-
-        // Telegram test API endpoint
-        httpd_uri_t api_telegram_test_uri = {
-            .uri = "/api/telegram_test",
-            .method = HTTP_POST,
-            .handler = api_telegram_test_handler,
-            .user_ctx = NULL
-        };
-        httpd_register_uri_handler(g_server, &api_telegram_test_uri);
-
         // Live Modbus poll API endpoint
         httpd_uri_t api_modbus_poll_uri = {
             .uri = "/api/modbus_poll",
@@ -10220,15 +9877,6 @@ static esp_err_t start_webserver(void)
             .user_ctx = NULL
         };
         httpd_register_uri_handler(g_server, &api_azure_status_uri);
-
-        // Azure telemetry history API endpoint - DISABLED to save 12KB heap
-        // httpd_uri_t api_telemetry_history_uri = {
-        //     .uri = "/api/telemetry/history",
-        //     .method = HTTP_GET,
-        //     .handler = api_telemetry_history_handler,
-        //     .user_ctx = NULL
-        // };
-        // httpd_register_uri_handler(g_server, &api_telemetry_history_uri);
 
         // Modbus Explorer: Device Scanner endpoint
         httpd_uri_t modbus_scan_uri = {
@@ -10681,189 +10329,6 @@ static esp_err_t save_rtc_config_handler(httpd_req_t *req) {
 
     httpd_resp_set_type(req, "application/json");
     httpd_resp_sendstr(req, "{\"status\":\"success\",\"message\":\"RTC configuration saved\"}");
-    return ESP_OK;
-}
-
-// Handler: /save_telegram_config - Save Telegram Bot configuration
-static esp_err_t save_telegram_config_handler(httpd_req_t *req) {
-    char buf[1024];
-    int ret = httpd_req_recv(req, buf, sizeof(buf) - 1);
-    if (ret <= 0) {
-        if (ret == HTTPD_SOCK_ERR_TIMEOUT) {
-            httpd_resp_send_408(req);
-        }
-        return ESP_FAIL;
-    }
-    buf[ret] = '\0';
-
-    ESP_LOGI(TAG, "Saving Telegram configuration");
-
-    // Parse Telegram configuration parameters
-    g_system_config.telegram_config.enabled = (strstr(buf, "telegram_enabled=1") != NULL);
-    g_system_config.telegram_config.alerts_enabled = (strstr(buf, "telegram_alerts=1") != NULL);
-    g_system_config.telegram_config.startup_notification = (strstr(buf, "telegram_startup=1") != NULL);
-
-    char *param;
-
-    // Parse bot token
-    if ((param = strstr(buf, "telegram_bot_token=")) != NULL) {
-        param += strlen("telegram_bot_token=");
-        char *end = strchr(param, '&');
-        int len = end ? (end - param) : strlen(param);
-        if (len > 0 && len < sizeof(g_system_config.telegram_config.bot_token)) {
-            strncpy(g_system_config.telegram_config.bot_token, param, len);
-            g_system_config.telegram_config.bot_token[len] = '\0';
-
-            // URL decode the token
-            char decoded[64];
-            url_decode(decoded, g_system_config.telegram_config.bot_token);
-            strncpy(g_system_config.telegram_config.bot_token, decoded, sizeof(g_system_config.telegram_config.bot_token) - 1);
-        }
-    }
-
-    // Parse chat ID
-    if ((param = strstr(buf, "telegram_chat_id=")) != NULL) {
-        param += strlen("telegram_chat_id=");
-        char *end = strchr(param, '&');
-        int len = end ? (end - param) : strlen(param);
-        if (len > 0 && len < sizeof(g_system_config.telegram_config.chat_id)) {
-            strncpy(g_system_config.telegram_config.chat_id, param, len);
-            g_system_config.telegram_config.chat_id[len] = '\0';
-        }
-    }
-
-    // Parse poll interval
-    if ((param = strstr(buf, "telegram_poll_interval=")) != NULL) {
-        sscanf(param, "telegram_poll_interval=%d", &g_system_config.telegram_config.poll_interval);
-    }
-
-    ESP_LOGI(TAG, "Telegram enabled: %s", g_system_config.telegram_config.enabled ? "YES" : "NO");
-    ESP_LOGI(TAG, "Chat ID: %s", g_system_config.telegram_config.chat_id);
-
-    config_save_to_nvs(&g_system_config);
-
-    httpd_resp_set_type(req, "application/json");
-    httpd_resp_sendstr(req, "{\"status\":\"success\",\"message\":\"Telegram configuration saved successfully!\"}");
-    return ESP_OK;
-}
-
-// Handler: /api/telegram_test - Test Telegram bot connection
-static esp_err_t api_telegram_test_handler(httpd_req_t *req) {
-    httpd_resp_set_type(req, "application/json");
-
-    // Read POST data (URL-encoded format)
-    char buf[1024];
-    int ret = httpd_req_recv(req, buf, sizeof(buf) - 1);
-    if (ret <= 0) {
-        httpd_resp_sendstr(req, "{\"status\":\"error\",\"message\":\"Failed to read request data\"}");
-        return ESP_OK;
-    }
-    buf[ret] = '\0';
-
-    ESP_LOGI(TAG, "Telegram test request received, data length: %d", ret);
-
-    // Parse URL-encoded parameters: bot_token=xxx&chat_id=yyy
-    char bot_token[128] = {0};
-    char chat_id[64] = {0};
-    char *param;
-
-    // Parse bot_token
-    if ((param = strstr(buf, "bot_token=")) != NULL) {
-        param += strlen("bot_token=");
-        char *end = strchr(param, '&');
-        int len = end ? (end - param) : strlen(param);
-        if (len > 0 && len < sizeof(bot_token)) {
-            strncpy(bot_token, param, len);
-            bot_token[len] = '\0';
-            // URL decode (handles %3A for : and other special chars)
-            char decoded[128];
-            url_decode(decoded, bot_token);
-            strncpy(bot_token, decoded, sizeof(bot_token) - 1);
-        }
-    }
-
-    // Parse chat_id
-    if ((param = strstr(buf, "chat_id=")) != NULL) {
-        param += strlen("chat_id=");
-        char *end = strchr(param, '&');
-        int len = end ? (end - param) : strlen(param);
-        if (len > 0 && len < sizeof(chat_id)) {
-            strncpy(chat_id, param, len);
-            chat_id[len] = '\0';
-            // URL decode
-            char decoded[64];
-            url_decode(decoded, chat_id);
-            strncpy(chat_id, decoded, sizeof(chat_id) - 1);
-        }
-    }
-
-    ESP_LOGI(TAG, "Parsed bot_token length: %d, chat_id: %s", strlen(bot_token), chat_id);
-
-    if (strlen(bot_token) == 0) {
-        httpd_resp_sendstr(req, "{\"status\":\"error\",\"message\":\"Bot token is empty. Please enter a bot token first.\"}");
-        return ESP_OK;
-    }
-
-    if (strlen(chat_id) == 0) {
-        httpd_resp_sendstr(req, "{\"status\":\"error\",\"message\":\"Chat ID is empty. Please enter your chat ID first.\"}");
-        return ESP_OK;
-    }
-
-    // Send test message via Telegram API
-    ESP_LOGI(TAG, "Testing Telegram bot, chat_id: %s", chat_id);
-
-    // Build URL with just the method
-    char url[256];
-    snprintf(url, sizeof(url), "https://api.telegram.org/bot%s/sendMessage", bot_token);
-
-    // Build POST data
-    char post_data[256];
-    snprintf(post_data, sizeof(post_data),
-        "chat_id=%s&text=Test%%20message%%20from%%20ESP32%%20Gateway", chat_id);
-
-    ESP_LOGI(TAG, "POST to: %s", url);
-
-    esp_http_client_config_t config = {
-        .url = url,
-        .method = HTTP_METHOD_POST,
-        .timeout_ms = 10000,
-    };
-
-    esp_http_client_handle_t client = esp_http_client_init(&config);
-    if (client == NULL) {
-        ESP_LOGE(TAG, "Failed to initialize HTTP client");
-        httpd_resp_sendstr(req, "{\"status\":\"error\",\"message\":\"❌ Failed to initialize HTTP client\"}");
-        return ESP_OK;
-    }
-
-    // Set headers and POST data
-    esp_http_client_set_header(client, "Content-Type", "application/x-www-form-urlencoded");
-    esp_http_client_set_post_field(client, post_data, strlen(post_data));
-
-    // Perform request
-    esp_err_t err = esp_http_client_perform(client);
-
-    if (err == ESP_OK) {
-        int status = esp_http_client_get_status_code(client);
-        ESP_LOGI(TAG, "HTTP Status: %d", status);
-
-        if (status == 200) {
-            httpd_resp_sendstr(req, "{\"status\":\"success\",\"message\":\"✅ Test message sent successfully! Check your Telegram.\"}");
-        } else if (status == 401) {
-            httpd_resp_sendstr(req, "{\"status\":\"error\",\"message\":\"❌ Invalid bot token. Check your token from @BotFather.\"}");
-        } else if (status == 400) {
-            httpd_resp_sendstr(req, "{\"status\":\"error\",\"message\":\"❌ Invalid chat ID. Make sure it's correct.\"}");
-        } else {
-            char resp[128];
-            snprintf(resp, sizeof(resp), "{\"status\":\"error\",\"message\":\"❌ HTTP Error %d\"}", status);
-            httpd_resp_sendstr(req, resp);
-        }
-    } else {
-        ESP_LOGE(TAG, "HTTP request failed: %s", esp_err_to_name(err));
-        httpd_resp_sendstr(req, "{\"status\":\"error\",\"message\":\"❌ Network error - Check internet connection\"}");
-    }
-
-    esp_http_client_cleanup(client);
     return ESP_OK;
 }
 
@@ -11400,31 +10865,6 @@ static esp_err_t api_azure_status_handler(httpd_req_t *req) {
     return ESP_OK;
 }
 
-// Azure telemetry history handler - DISABLED to save 12KB heap
-// static esp_err_t api_telemetry_history_handler(httpd_req_t *req) {
-//     httpd_resp_set_type(req, "application/json");
-//
-//     // Allocate buffer for telemetry history JSON (25 messages * ~450 bytes each)
-//     char *history_buffer = (char *)malloc(12000);
-//     if (history_buffer == NULL) {
-//         const char* error_response = "{\"error\":\"Out of memory\"}";
-//         httpd_resp_sendstr(req, error_response);
-//         return ESP_OK;
-//     }
-//
-//     // Get telemetry history from main.c
-//     int written = get_telemetry_history_json(history_buffer, 12000);
-//
-//     if (written > 0) {
-//         httpd_resp_sendstr(req, history_buffer);
-//     } else {
-//         const char* empty_response = "[]";
-//         httpd_resp_sendstr(req, empty_response);
-//     }
-//
-//     free(history_buffer);
-//     return ESP_OK;
-// }
 
 // Modbus Explorer: Device Scanner Handler
 static esp_err_t modbus_scan_handler(httpd_req_t *req) {
