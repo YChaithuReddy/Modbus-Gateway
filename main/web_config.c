@@ -2786,14 +2786,41 @@ static esp_err_t config_page_handler(httpd_req_t *req)
             ESP_LOGI(TAG, "Water Quality Sensor %d: %s (type: %s)", i, g_system_config.sensors[i].name, g_system_config.sensors[i].sensor_type);
 
             if (is_aquadax) {
+                // Aquadax card - header
                 snprintf(chunk, sizeof(chunk),
                     "<div class='sensor-card' id='sensor-card-%d'>"
-                    "<h3>%s (Sensor %d) - <span style='color:#17a2b8;font-weight:bold;'>Aquadax Quality</span></h3>"
-                    "<p><strong>Unit ID:</strong> %s | <strong>Slave ID:</strong> %d | <strong>Register:</strong> %d | <strong>Qty:</strong> %d</p>"
-                    "<p style='color:#28a745;font-size:12px;margin:5px 0'><strong>Parameters:</strong> COD, BOD, TSS, pH, Temperature (5x FLOAT32 CDAB bulk read)</p>",
-                    i, g_system_config.sensors[i].name, i + 1,
+                    "<div style='display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;padding-bottom:10px;border-bottom:2px solid #17a2b8'>"
+                    "<h3 style='margin:0;font-size:18px'>%s <span style='color:#888;font-weight:normal'>(Sensor %d)</span></h3>"
+                    "<span style='background:linear-gradient(135deg,#17a2b8,#20c997);color:white;padding:4px 14px;border-radius:20px;font-size:12px;font-weight:600;letter-spacing:0.5px'>AQUADAX QUALITY</span>"
+                    "</div>",
+                    i, g_system_config.sensors[i].name, i + 1);
+                httpd_resp_sendstr_chunk(req, chunk);
+                // Aquadax card - info grid
+                snprintf(chunk, sizeof(chunk),
+                    "<div style='display:grid;grid-template-columns:1fr 1fr;gap:8px 20px;margin-bottom:12px;padding:12px;background:#f8f9fa;border-radius:8px;font-size:13px'>"
+                    "<div><strong style='color:#555'>Unit ID:</strong> <span style='color:#0d6efd'>%s</span></div>"
+                    "<div><strong style='color:#555'>Slave ID:</strong> %d</div>"
+                    "<div><strong style='color:#555'>Register:</strong> %d (0x%04X)</div>"
+                    "<div><strong style='color:#555'>Baud Rate:</strong> %d bps</div>"
+                    "<div><strong style='color:#555'>Quantity:</strong> 12 registers</div>"
+                    "<div><strong style='color:#555'>Data Format:</strong> FLOAT32 CDAB</div>"
+                    "</div>",
                     g_system_config.sensors[i].unit_id, g_system_config.sensors[i].slave_id,
-                    g_system_config.sensors[i].register_address, g_system_config.sensors[i].quantity);
+                    g_system_config.sensors[i].register_address, g_system_config.sensors[i].register_address,
+                    g_system_config.sensors[i].baud_rate > 0 ? g_system_config.sensors[i].baud_rate : 9600);
+                httpd_resp_sendstr_chunk(req, chunk);
+                // Aquadax card - parameter badges
+                httpd_resp_sendstr_chunk(req,
+                    "<div style='display:flex;flex-wrap:wrap;gap:6px;margin-bottom:10px'>"
+                    "<span style='background:#d4edda;color:#155724;padding:4px 10px;border-radius:12px;font-size:12px;font-weight:600;border:1px solid #c3e6cb'>COD (mg/L)</span>"
+                    "<span style='background:#d4edda;color:#155724;padding:4px 10px;border-radius:12px;font-size:12px;font-weight:600;border:1px solid #c3e6cb'>BOD (mg/L)</span>"
+                    "<span style='background:#d4edda;color:#155724;padding:4px 10px;border-radius:12px;font-size:12px;font-weight:600;border:1px solid #c3e6cb'>TSS (mg/L)</span>"
+                    "<span style='background:#d4edda;color:#155724;padding:4px 10px;border-radius:12px;font-size:12px;font-weight:600;border:1px solid #c3e6cb'>pH</span>"
+                    "<span style='background:#cce5ff;color:#004085;padding:4px 10px;border-radius:12px;font-size:12px;font-weight:600;border:1px solid #b8daff'>Temp (\xC2\xB0""C)</span>"
+                    "<span style='background:#f8d7da;color:#721c24;padding:4px 10px;border-radius:12px;font-size:11px;border:1px solid #f5c6cb'>Reg 8-9: Unused</span>"
+                    "</div>");
+                // chunk is used later for buttons, so set it empty
+                chunk[0] = '\0';
             } else {
                 snprintf(chunk, sizeof(chunk),
                     "<div class='sensor-card' id='sensor-card-%d'>"
