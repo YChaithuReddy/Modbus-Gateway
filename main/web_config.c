@@ -1843,7 +1843,7 @@ static esp_err_t config_page_handler(httpd_req_t *req)
         while (remaining > 0) {
             size_t send_len = remaining > 4096 ? 4096 : remaining;
             if (httpd_resp_send_chunk(req, ptr, send_len) != ESP_OK) {
-                ESP_LOGE(TAG, "Failed to send header (remaining: %d bytes)", remaining);
+                ESP_LOGE(TAG, "Failed to send header (remaining: %d bytes)", (int)remaining);
                 httpd_resp_sendstr_chunk(req, NULL);
                 return ESP_OK;
             }
@@ -6017,7 +6017,21 @@ static esp_err_t save_config_handler(httpd_req_t *req)
     // Send success response using chunked response
     httpd_resp_set_type(req, "text/html; charset=UTF-8");
 
-    httpd_resp_sendstr_chunk(req, html_header);
+    // Send HTML header in small chunks (same pattern as config_page_handler)
+    {
+        const char *ptr = html_header;
+        size_t remaining = strlen(html_header);
+        while (remaining > 0) {
+            size_t send_len = remaining > 4096 ? 4096 : remaining;
+            if (httpd_resp_send_chunk(req, ptr, send_len) != ESP_OK) {
+                ESP_LOGE(TAG, "Failed to send header in save response (remaining: %d bytes)", (int)remaining);
+                httpd_resp_sendstr_chunk(req, NULL);
+                return ESP_OK;
+            }
+            ptr += send_len;
+            remaining -= send_len;
+        }
+    }
 
     // Main container with proper styling
     httpd_resp_sendstr_chunk(req, "<div class='main-container' style='max-width:700px;margin:var(--space-2xl) auto;padding:var(--space-xl)'>");
