@@ -437,7 +437,7 @@ static const char* html_header =
 "var menuItems=document.querySelectorAll('.menu-item');"
 "sections.forEach(function(s){s.classList.remove('active');});"
 "menuItems.forEach(function(m){m.classList.remove('active');});"
-"document.getElementById(sectionId).classList.add('active');"
+"var el=document.getElementById(sectionId);if(el)el.classList.add('active');"
 "var activeBtn=document.querySelector('[onclick*=\"'+sectionId+'\"]'); if(activeBtn) activeBtn.classList.add('active');"
 "}"
 "function showAzureSection(){"
@@ -2506,6 +2506,7 @@ static esp_err_t config_page_handler(httpd_req_t *req)
     ESP_LOGI(TAG, "Displaying regular sensors in web interface");
     bool has_regular_sensors = false;
     for (int i = 0; i < g_system_config.sensor_count; i++) {
+        if (!connection_alive) goto page_done;
         if (g_system_config.sensors[i].enabled && strcmp(g_system_config.sensors[i].sensor_type, "QUALITY") != 0 && strcmp(g_system_config.sensors[i].sensor_type, "Aquadax_Quality") != 0) {
             has_regular_sensors = true;
             ESP_LOGI(TAG, "Display Regular Sensor %d: name='%s', sensor_type='%s' (len=%d)", i, g_system_config.sensors[i].name, g_system_config.sensors[i].sensor_type, strlen(g_system_config.sensors[i].sensor_type));
@@ -2650,13 +2651,15 @@ static esp_err_t config_page_handler(httpd_req_t *req)
     SEND_OR_ABORT(req, "</div>");
 
     // Water Quality Sensors Section
-    httpd_resp_sendstr_chunk(req,
+    if (!connection_alive) goto page_done;
+    SEND_OR_ABORT(req,
         "<div id='water-quality-sensors-list' class='sensor-submenu' style='display:none'>"
         "<h3 style='color:#17a2b8;margin:15px 0 10px 0'>Water Quality Sensors</h3>");
     
     ESP_LOGI(TAG, "Displaying water quality sensors in web interface");
     bool has_quality_sensors = false;
     for (int i = 0; i < g_system_config.sensor_count; i++) {
+        if (!connection_alive) goto page_done;
         if (g_system_config.sensors[i].enabled &&
             (strcmp(g_system_config.sensors[i].sensor_type, "QUALITY") == 0 ||
              strcmp(g_system_config.sensors[i].sensor_type, "Aquadax_Quality") == 0)) {
@@ -2665,17 +2668,13 @@ static esp_err_t config_page_handler(httpd_req_t *req)
             ESP_LOGI(TAG, "Water Quality Sensor %d: %s (type: %s)", i, g_system_config.sensors[i].name, g_system_config.sensors[i].sensor_type);
 
             if (is_aquadax) {
-                // Aquadax card - header
+                // Aquadax card - entire card in single send to reduce TCP round trips
                 snprintf(chunk, sizeof(chunk),
                     "<div class='sensor-card' id='sensor-card-%d'>"
                     "<div style='display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;padding-bottom:10px;border-bottom:2px solid #17a2b8'>"
                     "<h3 style='margin:0;font-size:18px'>%s <span style='color:#888;font-weight:normal'>(Sensor %d)</span></h3>"
-                    "<span style='background:linear-gradient(135deg,#17a2b8,#20c997);color:white;padding:4px 14px;border-radius:20px;font-size:12px;font-weight:600;letter-spacing:0.5px'>AQUADAX QUALITY</span>"
-                    "</div>",
-                    i, g_system_config.sensors[i].name, i + 1);
-                httpd_resp_sendstr_chunk(req, chunk);
-                // Aquadax card - info grid
-                snprintf(chunk, sizeof(chunk),
+                    "<span style='background:linear-gradient(135deg,#17a2b8,#20c997);color:white;padding:4px 14px;border-radius:20px;font-size:12px;font-weight:600'>AQUADAX QUALITY</span>"
+                    "</div>"
                     "<div style='display:grid;grid-template-columns:1fr 1fr;gap:8px 20px;margin-bottom:12px;padding:12px;background:#f8f9fa;border-radius:8px;font-size:13px'>"
                     "<div><strong style='color:#555'>Unit ID:</strong> <span style='color:#0d6efd'>%s</span></div>"
                     "<div><strong style='color:#555'>Slave ID:</strong> %d</div>"
@@ -2683,23 +2682,26 @@ static esp_err_t config_page_handler(httpd_req_t *req)
                     "<div><strong style='color:#555'>Baud Rate:</strong> %d bps</div>"
                     "<div><strong style='color:#555'>Quantity:</strong> 12 registers</div>"
                     "<div><strong style='color:#555'>Data Format:</strong> FLOAT32 CDAB</div>"
+                    "</div>"
+                    "<div style='display:flex;flex-wrap:wrap;gap:6px;margin-bottom:10px'>"
+                    "<span style='background:#d4edda;color:#155724;padding:4px 10px;border-radius:12px;font-size:12px;font-weight:600;border:1px solid #c3e6cb'>COD</span>"
+                    "<span style='background:#d4edda;color:#155724;padding:4px 10px;border-radius:12px;font-size:12px;font-weight:600;border:1px solid #c3e6cb'>BOD</span>"
+                    "<span style='background:#d4edda;color:#155724;padding:4px 10px;border-radius:12px;font-size:12px;font-weight:600;border:1px solid #c3e6cb'>TSS</span>"
+                    "<span style='background:#d4edda;color:#155724;padding:4px 10px;border-radius:12px;font-size:12px;font-weight:600;border:1px solid #c3e6cb'>pH</span>"
+                    "<span style='background:#cce5ff;color:#004085;padding:4px 10px;border-radius:12px;font-size:12px;font-weight:600;border:1px solid #b8daff'>Temp</span>"
+                    "</div>"
+                    "<button type='button' onclick='editSensor(%d)' style='background:#17a2b8;color:white;margin:2px;padding:6px 12px'>Edit</button> "
+                    "<button type='button' onclick='testSensor(%d)' style='background:#007bff;color:white;margin:2px;padding:6px 12px'>Test RS485</button> "
+                    "<button type='button' onclick='deleteSensor(%d)' style='background:#dc3545;color:white;margin:2px;padding:6px 12px'>Delete</button>"
+                    "<div id='test-result-%d' class='test-result' style='display:none'></div>"
                     "</div>",
+                    i, g_system_config.sensors[i].name, i + 1,
                     g_system_config.sensors[i].unit_id, g_system_config.sensors[i].slave_id,
                     g_system_config.sensors[i].register_address, g_system_config.sensors[i].register_address,
-                    g_system_config.sensors[i].baud_rate > 0 ? g_system_config.sensors[i].baud_rate : 9600);
-                httpd_resp_sendstr_chunk(req, chunk);
-                // Aquadax card - parameter badges
-                httpd_resp_sendstr_chunk(req,
-                    "<div style='display:flex;flex-wrap:wrap;gap:6px;margin-bottom:10px'>"
-                    "<span style='background:#d4edda;color:#155724;padding:4px 10px;border-radius:12px;font-size:12px;font-weight:600;border:1px solid #c3e6cb'>COD (mg/L)</span>"
-                    "<span style='background:#d4edda;color:#155724;padding:4px 10px;border-radius:12px;font-size:12px;font-weight:600;border:1px solid #c3e6cb'>BOD (mg/L)</span>"
-                    "<span style='background:#d4edda;color:#155724;padding:4px 10px;border-radius:12px;font-size:12px;font-weight:600;border:1px solid #c3e6cb'>TSS (mg/L)</span>"
-                    "<span style='background:#d4edda;color:#155724;padding:4px 10px;border-radius:12px;font-size:12px;font-weight:600;border:1px solid #c3e6cb'>pH</span>"
-                    "<span style='background:#cce5ff;color:#004085;padding:4px 10px;border-radius:12px;font-size:12px;font-weight:600;border:1px solid #b8daff'>Temp (\xC2\xB0""C)</span>"
-                    "<span style='background:#f8d7da;color:#721c24;padding:4px 10px;border-radius:12px;font-size:11px;border:1px solid #f5c6cb'>Reg 8-9: Unused</span>"
-                    "</div>");
-                // chunk is used later for buttons, so set it empty
-                chunk[0] = '\0';
+                    g_system_config.sensors[i].baud_rate > 0 ? g_system_config.sensors[i].baud_rate : 9600,
+                    i, i, i, i);
+                SEND_OR_ABORT(req, chunk);
+                continue;  // Skip shared button code below
             } else {
                 snprintf(chunk, sizeof(chunk),
                     "<div class='sensor-card' id='sensor-card-%d'>"
@@ -2764,7 +2766,8 @@ static esp_err_t config_page_handler(httpd_req_t *req)
     httpd_resp_sendstr_chunk(req, "</div>");
     
     // Modbus Explorer Section
-    httpd_resp_sendstr_chunk(req,
+    if (!connection_alive) goto page_done;
+    SEND_OR_ABORT(req,
         "<div id='modbus-explorer-list' class='sensor-submenu' style='display:none'>"
         "<h3 style='color:#6c757d;margin:15px 0 10px 0'>Modbus Explorer</h3>"
         ""
@@ -2873,9 +2876,10 @@ static esp_err_t config_page_handler(httpd_req_t *req)
     }
 
     // Close the sensors section
-    httpd_resp_sendstr_chunk(req, "</div>");
-    
-    // JavaScript - split into smaller chunks  
+    SEND_OR_ABORT(req, "</div>");
+
+    // JavaScript - split into smaller chunks
+    if (!connection_alive) goto page_done;  
     snprintf(chunk, sizeof(chunk),
         "<script>"
         "console.log('Script loading - Initial sensor count: %d');"
@@ -5479,7 +5483,8 @@ static esp_err_t config_page_handler(httpd_req_t *req)
     
 
     // Write Operations section
-    httpd_resp_sendstr_chunk(req,
+    if (!connection_alive) goto page_done;
+    SEND_OR_ABORT(req,
         "<div id='write_ops' class='section'>"
         "<h2 class='section-title'><i>✏️</i>Write Operations</h2>"
         ""
@@ -5540,7 +5545,8 @@ static esp_err_t config_page_handler(httpd_req_t *req)
     );
 
     // OTA Update section
-    httpd_resp_sendstr_chunk(req,
+    if (!connection_alive) goto page_done;
+    SEND_OR_ABORT(req,
         "<div id='ota' class='section'>"
         "<h2 class='section-title'><i>⬆️</i>OTA Firmware Update</h2>"
         ""
