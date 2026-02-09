@@ -1830,6 +1830,18 @@ static esp_err_t config_page_handler(httpd_req_t *req)
     httpd_resp_set_hdr(req, "Pragma", "no-cache");
     httpd_resp_set_hdr(req, "Expires", "0");
 
+    // Track connection state - abort page generation on first send error
+    // Prevents flood of error 128 (ENOTCONN) after client disconnects
+    bool connection_alive = true;
+    #define SEND_OR_ABORT(req, str) do { \
+        if (!connection_alive) goto page_done; \
+        if (httpd_resp_sendstr_chunk(req, str) != ESP_OK) { \
+            ESP_LOGW(TAG, "Client disconnected, aborting page"); \
+            connection_alive = false; \
+            goto page_done; \
+        } \
+    } while(0)
+
     // Generate escaped values for HTML safety
     char escaped_ssid[64], escaped_password[128];
     html_escape(escaped_ssid, g_system_config.wifi_ssid, sizeof(escaped_ssid));
@@ -1940,7 +1952,7 @@ static esp_err_t config_page_handler(httpd_req_t *req)
         g_system_config.sensor_count);
     httpd_resp_sendstr_chunk(req, chunk);
 
-    httpd_resp_sendstr_chunk(req, "</div>");
+    SEND_OR_ABORT(req, "</div>");
 
     // Network Mode Selection Section (main WiFi config section)
     snprintf(chunk, sizeof(chunk),
@@ -2325,8 +2337,8 @@ static esp_err_t config_page_handler(httpd_req_t *req)
         "<p style='color:#721c24;font-size:13px;margin:10px 0 0 0'>Exit configuration mode and restart to normal operation mode.</p>"
         "</div>"
         "</div>");  // Close main WiFi section (id='wifi') containing Network Mode, WiFi, SIM, SD, RTC, Config Trigger, and Modem Control
-    httpd_resp_sendstr_chunk(req, chunk);
-    
+    SEND_OR_ABORT(req, chunk);
+
     // Separate Azure IoT Hub Configuration Section - Part 1
     snprintf(chunk, sizeof(chunk),
         "<div id='azure' class='section'>"
@@ -2414,7 +2426,7 @@ static esp_err_t config_page_handler(httpd_req_t *req)
         g_system_config.modbus_retry_count == 2 ? "selected" : "",
         g_system_config.modbus_retry_count == 3 ? "selected" : "",
         g_system_config.modbus_retry_delay);
-    httpd_resp_sendstr_chunk(req, chunk);
+    SEND_OR_ABORT(req, chunk);
 
     // Sensors section with sub-menus
     int regular_sensor_count = 0;
@@ -2596,8 +2608,8 @@ static esp_err_t config_page_handler(httpd_req_t *req)
         "<p style='color:#666;font-size:12px;margin:10px 0 5px 0'>Add Level, Flow-Meter, Energy, or other regular Modbus sensors</p>"
         "</div>");
     
-    httpd_resp_sendstr_chunk(req, "</div>");
-    
+    SEND_OR_ABORT(req, "</div>");
+
     // Water Quality Sensors Section
     httpd_resp_sendstr_chunk(req,
         "<div id='water-quality-sensors-list' class='sensor-submenu' style='display:none'>"
@@ -5684,10 +5696,12 @@ static esp_err_t config_page_handler(httpd_req_t *req)
         g_system_config.network_mode == 1 ? "block" : "none");
     httpd_resp_sendstr_chunk(req, chunk);
     
+page_done:
     // Send HTML footer and end chunked transfer
     httpd_resp_sendstr_chunk(req, html_footer);
     httpd_resp_sendstr_chunk(req, NULL);
-    
+
+    #undef SEND_OR_ABORT
     return ESP_OK;
 }
 
@@ -9396,12 +9410,12 @@ static esp_err_t start_webserver(void)
     httpd_config_t config = HTTPD_DEFAULT_CONFIG();
     config.server_port = 80;
     config.max_uri_handlers = 50; // Increased to accommodate all 45+ handlers (SIM/SD/RTC/Modbus endpoints)
-    config.max_open_sockets = 5;      // Slightly increased for better concurrent handling
+    config.max_open_sockets = 7;      // Must handle concurrent: page stream + /logo + /favicon + API calls
     config.stack_size = 12288;        // 12KB stack for 5KB chunk buffer + overhead
     config.task_priority = 6;         // Higher priority for faster response (was 5)
     config.recv_wait_timeout = 10;    // 10 seconds receive timeout
     config.send_wait_timeout = 30;    // 30 seconds - needed for large page (~125KB header)
-    config.lru_purge_enable = true;   // Enable LRU purging of connections
+    config.lru_purge_enable = false;  // CRITICAL: must be false - LRU purge kills page streaming socket when browser requests /logo or /favicon concurrently
     config.backlog_conn = 5;          // Allow more pending connections
     config.enable_so_linger = false;  // Disable socket lingering to prevent TIME_WAIT issues
     config.keep_alive_enable = true;  // Enable keep-alive for faster subsequent requests
