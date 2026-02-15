@@ -2475,7 +2475,8 @@ static esp_err_t config_page_handler(httpd_req_t *req)
     for (int i = 0; i < g_system_config.sensor_count; i++) {
         if (g_system_config.sensors[i].enabled) {
             if (strcmp(g_system_config.sensors[i].sensor_type, "QUALITY") == 0 ||
-                strcmp(g_system_config.sensors[i].sensor_type, "Aquadax_Quality") == 0) {
+                strcmp(g_system_config.sensors[i].sensor_type, "Aquadax_Quality") == 0 ||
+                strcmp(g_system_config.sensors[i].sensor_type, "Opruss_Ace") == 0) {
                 water_quality_sensor_count++;
             } else {
                 regular_sensor_count++;
@@ -2507,7 +2508,7 @@ static esp_err_t config_page_handler(httpd_req_t *req)
     bool has_regular_sensors = false;
     for (int i = 0; i < g_system_config.sensor_count; i++) {
         if (!connection_alive) goto page_done;
-        if (g_system_config.sensors[i].enabled && strcmp(g_system_config.sensors[i].sensor_type, "QUALITY") != 0 && strcmp(g_system_config.sensors[i].sensor_type, "Aquadax_Quality") != 0) {
+        if (g_system_config.sensors[i].enabled && strcmp(g_system_config.sensors[i].sensor_type, "QUALITY") != 0 && strcmp(g_system_config.sensors[i].sensor_type, "Aquadax_Quality") != 0 && strcmp(g_system_config.sensors[i].sensor_type, "Opruss_Ace") != 0) {
             has_regular_sensors = true;
             ESP_LOGI(TAG, "Display Regular Sensor %d: name='%s', sensor_type='%s' (len=%d)", i, g_system_config.sensors[i].name, g_system_config.sensors[i].sensor_type, strlen(g_system_config.sensors[i].sensor_type));
             
@@ -2662,9 +2663,11 @@ static esp_err_t config_page_handler(httpd_req_t *req)
         if (!connection_alive) goto page_done;
         if (g_system_config.sensors[i].enabled &&
             (strcmp(g_system_config.sensors[i].sensor_type, "QUALITY") == 0 ||
-             strcmp(g_system_config.sensors[i].sensor_type, "Aquadax_Quality") == 0)) {
+             strcmp(g_system_config.sensors[i].sensor_type, "Aquadax_Quality") == 0 ||
+             strcmp(g_system_config.sensors[i].sensor_type, "Opruss_Ace") == 0)) {
             has_quality_sensors = true;
             bool is_aquadax = (strcmp(g_system_config.sensors[i].sensor_type, "Aquadax_Quality") == 0);
+            bool is_opruss_ace = (strcmp(g_system_config.sensors[i].sensor_type, "Opruss_Ace") == 0);
             ESP_LOGI(TAG, "Water Quality Sensor %d: %s (type: %s)", i, g_system_config.sensors[i].name, g_system_config.sensors[i].sensor_type);
 
             if (is_aquadax) {
@@ -2689,6 +2692,39 @@ static esp_err_t config_page_handler(httpd_req_t *req)
                     "<span style='background:#d4edda;color:#155724;padding:4px 10px;border-radius:12px;font-size:12px;font-weight:600;border:1px solid #c3e6cb'>TSS</span>"
                     "<span style='background:#d4edda;color:#155724;padding:4px 10px;border-radius:12px;font-size:12px;font-weight:600;border:1px solid #c3e6cb'>pH</span>"
                     "<span style='background:#cce5ff;color:#004085;padding:4px 10px;border-radius:12px;font-size:12px;font-weight:600;border:1px solid #b8daff'>Temp</span>"
+                    "</div>"
+                    "<button type='button' onclick='editSensor(%d)' style='background:#17a2b8;color:white;margin:2px;padding:6px 12px'>Edit</button> "
+                    "<button type='button' onclick='testSensor(%d)' style='background:#007bff;color:white;margin:2px;padding:6px 12px'>Test RS485</button> "
+                    "<button type='button' onclick='deleteSensor(%d)' style='background:#dc3545;color:white;margin:2px;padding:6px 12px'>Delete</button>"
+                    "<div id='test-result-%d' class='test-result' style='display:none'></div>"
+                    "</div>",
+                    i, g_system_config.sensors[i].name, i + 1,
+                    g_system_config.sensors[i].unit_id, g_system_config.sensors[i].slave_id,
+                    g_system_config.sensors[i].register_address, g_system_config.sensors[i].register_address,
+                    g_system_config.sensors[i].baud_rate > 0 ? g_system_config.sensors[i].baud_rate : 9600,
+                    i, i, i, i);
+                SEND_OR_ABORT(req, chunk);
+                continue;  // Skip shared button code below
+            } else if (is_opruss_ace) {
+                // Opruss Ace card - entire card in single send to reduce TCP round trips
+                snprintf(chunk, sizeof(chunk),
+                    "<div class='sensor-card' id='sensor-card-%d'>"
+                    "<div style='display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;padding-bottom:10px;border-bottom:2px solid #e67e22'>"
+                    "<h3 style='margin:0;font-size:18px'>%s <span style='color:#888;font-weight:normal'>(Sensor %d)</span></h3>"
+                    "<span style='background:linear-gradient(135deg,#e67e22,#f39c12);color:white;padding:4px 14px;border-radius:20px;font-size:12px;font-weight:600'>OPRUSS ACE</span>"
+                    "</div>"
+                    "<div style='display:grid;grid-template-columns:1fr 1fr;gap:8px 20px;margin-bottom:12px;padding:12px;background:#f8f9fa;border-radius:8px;font-size:13px'>"
+                    "<div><strong style='color:#555'>Unit ID:</strong> <span style='color:#0d6efd'>%s</span></div>"
+                    "<div><strong style='color:#555'>Slave ID:</strong> %d</div>"
+                    "<div><strong style='color:#555'>Register:</strong> %d (0x%04X)</div>"
+                    "<div><strong style='color:#555'>Baud Rate:</strong> %d bps</div>"
+                    "<div><strong style='color:#555'>Quantity:</strong> 21 registers</div>"
+                    "<div><strong style='color:#555'>Data Format:</strong> UINT16 x0.01</div>"
+                    "</div>"
+                    "<div style='display:flex;flex-wrap:wrap;gap:6px;margin-bottom:10px'>"
+                    "<span style='background:#d4edda;color:#155724;padding:4px 10px;border-radius:12px;font-size:12px;font-weight:600;border:1px solid #c3e6cb'>COD</span>"
+                    "<span style='background:#d4edda;color:#155724;padding:4px 10px;border-radius:12px;font-size:12px;font-weight:600;border:1px solid #c3e6cb'>BOD</span>"
+                    "<span style='background:#d4edda;color:#155724;padding:4px 10px;border-radius:12px;font-size:12px;font-weight:600;border:1px solid #c3e6cb'>TSS</span>"
                     "</div>"
                     "<button type='button' onclick='editSensor(%d)' style='background:#17a2b8;color:white;margin:2px;padding:6px 12px'>Edit</button> "
                     "<button type='button' onclick='testSensor(%d)' style='background:#007bff;color:white;margin:2px;padding:6px 12px'>Test RS485</button> "
@@ -2760,6 +2796,7 @@ static esp_err_t config_page_handler(httpd_req_t *req)
         "<div style='background:#f8f9fa;padding:15px;margin:15px 0;border-radius:8px;border:1px solid #dee2e6'>"
         "<button type='button' onclick='addWaterQualitySensor()' style='background:linear-gradient(135deg,#17a2b8,#20c997);color:white;padding:14px 35px;margin:10px;border:none;border-radius:8px;font-size:16px;font-weight:600;cursor:pointer;box-shadow:0 4px 12px rgba(23,162,184,0.3);transition:all 0.3s ease' onmouseover='this.style.transform=\"translateY(-2px)\";this.style.boxShadow=\"0 6px 16px rgba(23,162,184,0.4)\"' onmouseout='this.style.transform=\"translateY(0)\";this.style.boxShadow=\"0 4px 12px rgba(23,162,184,0.3)\"'>💧 Add Water Quality Sensor</button>"
         "<button type='button' onclick='addAquadaxQualitySensor()' style='background:linear-gradient(135deg,#0d6efd,#6610f2);color:white;padding:14px 35px;margin:10px;border:none;border-radius:8px;font-size:16px;font-weight:600;cursor:pointer;box-shadow:0 4px 12px rgba(13,110,253,0.3);transition:all 0.3s ease' onmouseover='this.style.transform=\"translateY(-2px)\";this.style.boxShadow=\"0 6px 16px rgba(13,110,253,0.4)\"' onmouseout='this.style.transform=\"translateY(0)\";this.style.boxShadow=\"0 4px 12px rgba(13,110,253,0.3)\"'>💧 Add Aquadax Quality Sensor</button>"
+        "<button type='button' onclick='addOprussAceSensor()' style='background:linear-gradient(135deg,#e67e22,#f39c12);color:white;padding:14px 35px;margin:10px;border:none;border-radius:8px;font-size:16px;font-weight:600;cursor:pointer;box-shadow:0 4px 12px rgba(230,126,34,0.3);transition:all 0.3s ease' onmouseover='this.style.transform=\"translateY(-2px)\";this.style.boxShadow=\"0 6px 16px rgba(230,126,34,0.4)\"' onmouseout='this.style.transform=\"translateY(0)\";this.style.boxShadow=\"0 4px 12px rgba(230,126,34,0.3)\"'>💧 Add Opruss Ace Sensor</button>"
         "<p style='color:#666;font-size:12px;margin:10px 0 5px 0'>Create individual water quality sensors with unique Unit IDs and custom Modbus configurations</p>"
         "</div>");
     
@@ -3095,6 +3132,55 @@ static esp_err_t config_page_handler(httpd_req_t *req)
         "  console.log('SUCCESS: Aquadax Quality sensor added. Updated count:', sensorCount);"
         "  alert('SUCCESS: Aquadax Quality sensor form added!\\n\\nSTEPS:\\n1. Fill in Name and Unit ID\\n2. Set Slave ID and Register Address (default 1280)\\n3. Click Save Sensor\\n\\nReads COD, BOD, TSS, pH, Temperature in one bulk Modbus read.');"
         "}"
+        "function addOprussAceSensor() {"
+        "  console.log('ADD OPRUSS ACE SENSOR CLICKED - Current count:', sensorCount);"
+        "  var div = document.getElementById('water-quality-sensors-list');"
+        "  if (!div) { alert('ERROR: Water quality sensors container not found!'); return; }"
+        "  var h = '<div class=\"sensor-card\" id=\"sensor-card-' + sensorCount + '\" style=\"border:2px solid #e67e22;border-radius:8px;padding:25px;margin:20px 0;background:#ffffff;box-shadow:0 2px 4px rgba(0,0,0,0.1)\">';"
+        "  h += '<h4 style=\"color:#e67e22;margin-top:0;margin-bottom:20px;font-size:18px\">New Opruss Ace Sensor ' + (sensorCount+1) + '</h4>';"
+        "  h += '<input type=\"hidden\" name=\"sensor_' + sensorCount + '_sensor_type\" value=\"Opruss_Ace\">';"
+        "  h += '<input type=\"hidden\" name=\"sensor_' + sensorCount + '_data_type\" value=\"OPRUSS_ACE_FIXED\">';"
+        "  h += '<input type=\"hidden\" name=\"sensor_' + sensorCount + '_byte_order\" value=\"BIG_ENDIAN\">';"
+        "  h += '<input type=\"hidden\" name=\"sensor_' + sensorCount + '_register_type\" value=\"HOLDING\">';"
+        "  h += '<input type=\"hidden\" name=\"sensor_' + sensorCount + '_quantity\" value=\"21\">';"
+        "  h += '<input type=\"hidden\" name=\"sensor_' + sensorCount + '_scale_factor\" value=\"0.01\">';"
+        "  h += '<input type=\"hidden\" name=\"sensor_' + sensorCount + '_sensor_height\" value=\"0\">';"
+        "  h += '<input type=\"hidden\" name=\"sensor_' + sensorCount + '_max_water_level\" value=\"0\">';"
+        "  h += '<p style=\"color:#e67e22;font-weight:600;margin:15px 0;padding:10px;background:#fef5e7;border-radius:6px;font-size:14px\">Opruss Ace Sensor - Reads COD, BOD, TSS (3x UINT16 with 0.01 scale)</p>';"
+        "  h += '<div id=\"sensor-form-' + sensorCount + '\" style=\"display:block\">';"
+        "  h += '<div style=\"display:grid;grid-template-columns:180px 1fr;gap:20px;align-items:start;margin-bottom:20px\">';"
+        "  h += '<label style=\"font-weight:600;padding-top:10px\">Sensor Name:</label>';"
+        "  h += '<div><input type=\"text\" name=\"sensor_' + sensorCount + '_name\" placeholder=\"e.g., Opruss Ace WQ 1\" style=\"width:100%;padding:10px;border:1px solid #ccc;border-radius:6px;font-size:15px\">';"
+        "  h += '<small style=\"color:#888;display:block;margin-top:5px;font-size:13px\">Display name for this sensor</small></div>';"
+        "  h += '<label style=\"font-weight:600;padding-top:10px\">Unit ID:</label>';"
+        "  h += '<div><input type=\"text\" name=\"sensor_' + sensorCount + '_unit_id\" placeholder=\"e.g., OPA001\" style=\"width:100%;padding:10px;border:1px solid #ccc;border-radius:6px;font-size:15px\">';"
+        "  h += '<small style=\"color:#888;display:block;margin-top:5px;font-size:13px\">Unique identifier sent in telemetry</small></div>';"
+        "  h += '<label style=\"font-weight:600;padding-top:10px\">Slave ID:</label>';"
+        "  h += '<div><input type=\"number\" name=\"sensor_' + sensorCount + '_slave_id\" value=\"1\" min=\"1\" max=\"247\" style=\"width:100%;padding:10px;border:1px solid #ccc;border-radius:6px;font-size:15px\">';"
+        "  h += '<small style=\"color:#888;display:block;margin-top:5px;font-size:13px\">Modbus slave address (1-247)</small></div>';"
+        "  h += '<label style=\"font-weight:600;padding-top:10px\">Register Address:</label>';"
+        "  h += '<div><input type=\"number\" name=\"sensor_' + sensorCount + '_register_address\" value=\"0\" style=\"width:100%;padding:10px;border:1px solid #ccc;border-radius:6px;font-size:15px\">';"
+        "  h += '<small style=\"color:#888;display:block;margin-top:5px;font-size:13px\">Default: 0 - Start address for 21 registers (COD@0, BOD@6, TSS@20)</small></div>';"
+        "  h += '<label style=\"font-weight:600;padding-top:10px\">Baud Rate:</label>';"
+        "  h += '<div><select name=\"sensor_' + sensorCount + '_baud_rate\" style=\"width:100%;padding:10px;border:1px solid #e0e0e0;border-radius:6px;font-size:15px\">';"
+        "  h += '<option value=\"9600\">9600</option><option value=\"19200\">19200</option><option value=\"38400\">38400</option><option value=\"115200\">115200</option>';"
+        "  h += '</select>';"
+        "  h += '<small style=\"color:#888;display:block;margin-top:5px;font-size:13px\">Serial communication speed</small></div></div>';"
+        "  h += '<div style=\"background:#fef5e7;padding:12px;margin:10px 0;border-radius:6px;border:1px solid #e67e22\">';"
+        "  h += '<strong style=\"color:#e67e22\">Fixed Parameters:</strong> Qty=21, UINT16 BIG_ENDIAN, Scale=0.01<br>';"
+        "  h += '<strong style=\"color:#28a745\">Output:</strong> {\"params_data\":{\"COD\":val,\"BOD\":val,\"TSS\":val},\"type\":\"QUALITY\"}';"
+        "  h += '</div>';"
+        "  h += '<div style=\"margin-top:25px;padding-top:20px;border-top:1px solid #e0e0e0;text-align:center\">';"
+        "  h += '<button type=\"button\" onclick=\"testNewSensorRS485(' + sensorCount + ')\" style=\"background:linear-gradient(135deg,#e67e22,#d35400);color:white;padding:12px 28px;border:none;border-radius:6px;font-weight:600;cursor:pointer;margin-right:10px;font-size:15px\">Test RS485</button>';"
+        "  h += '<button type=\"button\" onclick=\"saveSingleSensor(' + sensorCount + ')\" style=\"background:linear-gradient(135deg,#28a745,#218838);color:white;padding:12px 28px;border:none;border-radius:6px;font-weight:600;cursor:pointer;margin-right:10px;font-size:15px\">Save Sensor</button>';"
+        "  h += '<button type=\"button\" onclick=\"removeSensorForm(' + sensorCount + ')\" style=\"background:linear-gradient(135deg,#dc3545,#c82333);color:white;padding:12px 28px;border:none;border-radius:6px;font-weight:600;cursor:pointer;font-size:15px\">Cancel</button>';"
+        "  h += '<div id=\"test-result-new-' + sensorCount + '\" style=\"margin-top:15px;display:none\"></div>';"
+        "  h += '</div></div>';"
+        "  div.innerHTML += h;"
+        "  sensorCount++;"
+        "  console.log('SUCCESS: Opruss Ace sensor added. Updated count:', sensorCount);"
+        "  alert('SUCCESS: Opruss Ace sensor form added!\\n\\nSTEPS:\\n1. Fill in Name and Unit ID\\n2. Set Slave ID and Register Address (default 0)\\n3. Click Save Sensor\\n\\nReads COD (reg 0), BOD (reg 6), TSS (reg 20) as UINT16 x 0.01.');"
+        "}"
         "var qualityParameterTypes = ["
         "  {key: 'pH', name: 'pH', units: 'pH', description: 'Acidity/Alkalinity measurement'},"
         "  {key: 'Temp', name: 'Temp', units: 'degC', description: 'Water temperature sensor'},"
@@ -3246,7 +3332,7 @@ static esp_err_t config_page_handler(httpd_req_t *req)
         "formHtml += '</select>';"
         "formHtml += '<small style=\"color:#888;display:block;margin-top:5px;font-size:13px\">Modbus register type</small></div>';"
         "formHtml += '</div>';"
-        "if (sensorType !== 'ZEST' && sensorType !== 'Clampon' && sensorType !== 'Dailian' && sensorType !== 'Dailian_EMF' && sensorType !== 'Panda_EMF' && sensorType !== 'Panda_Level' && sensorType !== 'Piezometer' && sensorType !== 'Panda_USM' && sensorType !== 'Aquadax_Quality') {"
+        "if (sensorType !== 'ZEST' && sensorType !== 'Clampon' && sensorType !== 'Dailian' && sensorType !== 'Dailian_EMF' && sensorType !== 'Panda_EMF' && sensorType !== 'Panda_Level' && sensorType !== 'Piezometer' && sensorType !== 'Panda_USM' && sensorType !== 'Aquadax_Quality' && sensorType !== 'Opruss_Ace') {"
         "formHtml += '<div style=\"display:grid;grid-template-columns:180px 1fr;gap:20px;align-items:start;margin-top:20px\">';"
         "formHtml += '<label style=\"font-weight:600;padding-top:10px\">Data Type:</label>';"
         "formHtml += '<div><select name=\"sensor_' + sensorId + '_data_type\" style=\"width:100%;padding:10px;border:1px solid #e0e0e0;border-radius:6px;font-size:15px\" onchange=\"showDataTypeInfo(this, ' + sensorId + ')\">';"
@@ -3333,6 +3419,10 @@ static esp_err_t config_page_handler(httpd_req_t *req)
         "formHtml += '<input type=\"hidden\" name=\"sensor_' + sensorId + '_data_type\" value=\"AQUADAX_QUALITY_FIXED\">';"
         "formHtml += '<p style=\"color:#28a745;font-size:12px;margin:10px 0\"><strong>Data Format:</strong> Fixed - 5x FLOAT32 CDAB (word-swap)</p>';"
         "formHtml += '<p style=\"color:#007bff;font-size:11px;margin:5px 0\"><em>Aquadax Quality defaults: Address 1280 (0x0500), Qty 12 - Reads COD, BOD, TSS, pH, Temperature as Float32</em></p>';"
+        "} else if (sensorType === 'Opruss_Ace') {"
+        "formHtml += '<input type=\"hidden\" name=\"sensor_' + sensorId + '_data_type\" value=\"OPRUSS_ACE_FIXED\">';"
+        "formHtml += '<p style=\"color:#28a745;font-size:12px;margin:10px 0\"><strong>Data Format:</strong> Fixed - 3x UINT16 with 0.01 scale</p>';"
+        "formHtml += '<p style=\"color:#007bff;font-size:11px;margin:5px 0\"><em>Opruss Ace defaults: Address 0, Qty 21 - Reads COD (reg 0), BOD (reg 6), TSS (reg 20) as UINT16 x 0.01</em></p>';"
         "} else if (sensorType === 'Piezometer') {"
         "formHtml += '<input type=\"hidden\" name=\"sensor_' + sensorId + '_data_type\" value=\"UINT16_HI\">';"
         "formHtml += '<p style=\"color:#28a745;font-size:12px;margin:10px 0\"><strong>Data Format:</strong> Fixed - UINT16_HI (16-bit unsigned integer)</p>';"
@@ -3505,6 +3595,13 @@ static esp_err_t config_page_handler(httpd_req_t *req)
         "const regAddrInput = document.querySelector('input[name=\"sensor_' + sensorId + '_register_address\"]');"
         "if (quantityInput) quantityInput.value = '12';"
         "if (regAddrInput) regAddrInput.value = '1280';"
+        "} else if (sensorType === 'Opruss_Ace') {"
+        "const quantityInput = document.querySelector('input[name=\"sensor_' + sensorId + '_quantity\"]');"
+        "const regAddrInput = document.querySelector('input[name=\"sensor_' + sensorId + '_register_address\"]');"
+        "const scaleInput = document.querySelector('input[name=\"sensor_' + sensorId + '_scale_factor\"]');"
+        "if (quantityInput) quantityInput.value = '21';"
+        "if (regAddrInput) regAddrInput.value = '0';"
+        "if (scaleInput) scaleInput.value = '0.01';"
         "}"
         "}");
     
@@ -6358,8 +6455,8 @@ static esp_err_t test_sensor_handler(httpd_req_t *req)
             }
 
             int reg_count = modbus_get_response_length();
-            uint16_t registers[16] = {0};
-            for (int i = 0; i < reg_count && i < 16; i++) {
+            uint16_t registers[24] = {0};
+            for (int i = 0; i < reg_count && i < 24; i++) {
                 registers[i] = modbus_get_response_buffer(i);
             }
 
@@ -6444,25 +6541,25 @@ static esp_err_t test_sensor_handler(httpd_req_t *req)
         if (result == MODBUS_SUCCESS) {
             // Use the same comprehensive logic as test_rs485_handler
             // Get the raw register values
-            uint16_t registers[16]; // Support up to 16 registers (Aquadax_Quality needs 12)
+            uint16_t registers[24]; // Support up to 24 registers (Opruss_Ace needs 21)
             int reg_count = modbus_get_response_length();
-            if (reg_count > 16 || reg_count <= 0) {
+            if (reg_count > 24 || reg_count <= 0) {
                 ESP_LOGW(TAG, "Invalid register count: %d, limiting to safe range", reg_count);
-                reg_count = (reg_count > 16) ? 16 : 1; // Safety limit
+                reg_count = (reg_count > 24) ? 24 : 1; // Safety limit
             }
 
-            for (int i = 0; i < reg_count && i < 16; i++) {
+            for (int i = 0; i < reg_count && i < 24; i++) {
                 registers[i] = modbus_get_response_buffer(i);
             }
-            
+
             // Create comprehensive ScadaCore format interpretation table
             // Use heap allocation for large content to prevent stack overflow
-            
+
             // Build the comprehensive data format table
             snprintf(format_table, 6000,
                      "<div class='test-result'>"
                      "<h4>✓ RS485 Success - %d Registers Read</h4>", reg_count);
-            
+
             // Add primary configured value first
             double primary_value = 0.0;
             if (reg_count >= 4 && strstr(test_data_type, "FLOAT64")) {
@@ -7529,6 +7626,46 @@ static esp_err_t start_operation_handler(httpd_req_t *req)
 }
 
 // Reboot system handler
+static esp_err_t reset_sensors_handler(httpd_req_t *req)
+{
+    ESP_LOGI(TAG, "[RESET] User requested sensor calculation reset");
+
+    // Add CORS headers to allow cross-origin requests
+    httpd_resp_set_hdr(req, "Access-Control-Allow-Origin", "*");
+    httpd_resp_set_hdr(req, "Access-Control-Allow-Methods", "POST, GET, OPTIONS");
+    httpd_resp_set_hdr(req, "Access-Control-Allow-Headers", "Content-Type");
+
+    // Handle OPTIONS preflight request
+    if (req->method == HTTP_OPTIONS) {
+        httpd_resp_send(req, NULL, 0);
+        return ESP_OK;
+    }
+
+    // Call the reset function
+    esp_err_t result = config_reset_sensor_calculations();
+
+    httpd_resp_set_type(req, "application/json");
+
+    if (result == ESP_OK) {
+        const char* response = "{\"status\":\"success\",\"message\":\"✅ Sensor calculations reset successfully!\\n\\n"
+                              "Changes applied:\\n"
+                              "• Removed invalid CALC_SCALE_OFFSET calculations\\n"
+                              "• Restored Panda_Level sensor parameters\\n\\n"
+                              "🔄 Please reboot the device to apply changes.\"}";
+        httpd_resp_send(req, response, strlen(response));
+        ESP_LOGI(TAG, "[RESET] Reset successful - user should reboot");
+    } else {
+        char error_msg[256];
+        snprintf(error_msg, sizeof(error_msg),
+                "{\"status\":\"error\",\"message\":\"❌ Failed to reset sensors: %s\"}",
+                esp_err_to_name(result));
+        httpd_resp_send(req, error_msg, strlen(error_msg));
+        ESP_LOGE(TAG, "[RESET] Reset failed: %s", esp_err_to_name(result));
+    }
+
+    return ESP_OK;
+}
+
 static esp_err_t reboot_handler(httpd_req_t *req)
 {
     ESP_LOGI(TAG, "[REBOOT] User clicked 'Reboot to Normal Mode' button");
@@ -7536,6 +7673,17 @@ static esp_err_t reboot_handler(httpd_req_t *req)
 
     // Mark configuration as complete before reboot
     g_system_config.config_complete = true;
+
+    // Add CORS headers to allow cross-origin requests
+    httpd_resp_set_hdr(req, "Access-Control-Allow-Origin", "*");
+    httpd_resp_set_hdr(req, "Access-Control-Allow-Methods", "POST, GET, OPTIONS");
+    httpd_resp_set_hdr(req, "Access-Control-Allow-Headers", "Content-Type");
+
+    // Handle OPTIONS preflight request
+    if (req->method == HTTP_OPTIONS) {
+        httpd_resp_send(req, NULL, 0);
+        return ESP_OK;
+    }
 
     ESP_LOGI(TAG, "[REBOOT] Saving configuration to NVS...");
     esp_err_t save_result = config_save_to_nvs(&g_system_config);
@@ -7666,14 +7814,14 @@ static esp_err_t test_rs485_handler(httpd_req_t *req)
     
     if (result == MODBUS_SUCCESS) {
         // Get the raw register values
-        uint16_t registers[16]; // Support up to 16 registers (Aquadax_Quality needs 12)
+        uint16_t registers[24]; // Support up to 24 registers (Opruss_Ace needs 21)
         int reg_count = modbus_get_response_length();
-        if (reg_count > 16 || reg_count <= 0) {
+        if (reg_count > 24 || reg_count <= 0) {
             ESP_LOGW(TAG, "Invalid register count: %d, limiting to safe range", reg_count);
-            reg_count = (reg_count > 16) ? 16 : 1; // Safety limit
+            reg_count = (reg_count > 24) ? 24 : 1; // Safety limit
         }
 
-        for (int i = 0; i < reg_count && i < 16; i++) {
+        for (int i = 0; i < reg_count && i < 24; i++) {
             registers[i] = modbus_get_response_buffer(i);
         }
 
@@ -7890,6 +8038,22 @@ static esp_err_t test_rs485_handler(httpd_req_t *req)
                 memcpy(&fv, &fb, sizeof(float));
                 ESP_LOGI(TAG, "Aquadax_Quality Test %s = %.3f", aq_names[aq], fv);
             }
+        } else if (reg_count >= 20 && strstr(data_type, "OPRUSS_ACE_FIXED")) {
+            // OPRUSS_ACE_FIXED: 3x UINT16 with 0.01 scale
+            // Register layout: COD(0), BOD(5), TSS(20)
+            int op_offsets[] = {0, 5, 20}; // COD, BOD, TSS
+            uint16_t cod_raw = registers[op_offsets[0]];
+            primary_value = (double)cod_raw * scale_factor;
+            // Log all 3 parameters for test display
+            const char *op_names[] = {"COD", "BOD", "TSS"};
+            for (int op = 0; op < 3; op++) {
+                int off = op_offsets[op];
+                if (off >= reg_count) break;
+                uint16_t raw = registers[off];
+                double scaled = (double)raw * scale_factor;
+                ESP_LOGI(TAG, "Opruss_Ace Test %s = %.2f (raw: %u × %.2f)",
+                         op_names[op], scaled, raw, scale_factor);
+            }
         } else if (reg_count >= 1) {
             primary_value = (double)registers[0] * scale_factor;
         }
@@ -7950,6 +8114,50 @@ static esp_err_t test_rs485_handler(httpd_req_t *req)
             // Add raw hex
             strcat(format_table, "<div><b>Raw Hex:</b> <span class='hex-display'>");
             for (int i = 0; i < reg_count && i < 12; i++) {
+                snprintf(temp_str, sizeof(temp_str), "%04X ", registers[i]);
+                strcat(format_table, temp_str);
+            }
+            strcat(format_table, "</span></div>");
+            // Skip the normal ScadaCore table
+            strcat(format_table, "</div>");
+            httpd_resp_sendstr_chunk(req, format_table);
+            free(format_table);
+            httpd_resp_sendstr_chunk(req, NULL);
+            return ESP_OK;
+        }
+
+        // Special water quality table for Opruss_Ace
+        if (strstr(data_type, "OPRUSS_ACE_FIXED") && reg_count >= 20) {
+            const char *op_names[] = {"COD", "BOD", "TSS"};
+            const char *op_units[] = {"mg/L", "mg/L", "mg/L"};
+            int op_offsets[] = {0, 5, 20}; // COD, BOD, TSS
+            snprintf(temp_str, sizeof(temp_str),
+                "<h4 style='color:#e67e22'>✓ Water Quality Sensor - 3 Parameters</h4>"
+                "<table style='width:100%%;border-collapse:collapse;margin:10px 0'>"
+                "<tr style='background:#e67e22;color:white'>"
+                "<th style='padding:10px;text-align:left'>PARAMETER</th>"
+                "<th style='padding:10px;text-align:left'>RAW VALUE</th>"
+                "<th style='padding:10px;text-align:left'>SCALED VALUE</th>"
+                "<th style='padding:10px;text-align:left'>DATA TYPE</th></tr>");
+            strcat(format_table, temp_str);
+            for (int op = 0; op < 3; op++) {
+                int off = op_offsets[op];
+                if (off >= reg_count) break;
+                uint16_t raw = registers[off];
+                double scaled = (double)raw * scale_factor;
+                snprintf(temp_str, sizeof(temp_str),
+                    "<tr style='border-bottom:1px solid #e0e0e0'>"
+                    "<td style='padding:8px;font-weight:bold'>%s</td>"
+                    "<td style='padding:8px'>%u</td>"
+                    "<td style='padding:8px;color:#e67e22;font-weight:bold'>%.2f %s</td>"
+                    "<td style='padding:8px;font-size:12px'>UINT16×%.2f</td></tr>",
+                    op_names[op], raw, scaled, op_units[op], scale_factor);
+                strcat(format_table, temp_str);
+            }
+            strcat(format_table, "</table>");
+            // Add raw hex
+            strcat(format_table, "<div><b>Raw Hex:</b> <span class='hex-display'>");
+            for (int i = 0; i < reg_count && i < 21; i++) {
                 snprintf(temp_str, sizeof(temp_str), "%04X ", registers[i]);
                 strcat(format_table, temp_str);
             }
@@ -8387,9 +8595,9 @@ static esp_err_t test_water_quality_sensor_handler(httpd_req_t *req)
     
     if (result == MODBUS_SUCCESS) {
         // Get the raw register values
-        uint16_t registers[10];
+        uint16_t registers[24];  // Increased for Opruss Ace (21 registers)
         int reg_count = modbus_get_response_length();
-        if (reg_count > 10) reg_count = 10; // Safety limit
+        if (reg_count > 24) reg_count = 24; // Safety limit
         
         for (int i = 0; i < reg_count; i++) {
             registers[i] = modbus_get_response_buffer(i);
@@ -9634,7 +9842,30 @@ static esp_err_t start_webserver(void)
         };
         httpd_register_uri_handler(g_server, &favicon_uri);
 
-        // Reboot system endpoint
+        // Reset sensor calculations endpoint (POST)
+        httpd_uri_t reset_sensors_uri = {
+            .uri = "/reset_sensors",
+            .method = HTTP_POST,
+            .handler = reset_sensors_handler,
+            .user_ctx = NULL
+        };
+        esp_err_t reset_sensors_reg = httpd_register_uri_handler(g_server, &reset_sensors_uri);
+        if (reset_sensors_reg == ESP_OK) {
+            ESP_LOGI(TAG, "SUCCESS: /reset_sensors endpoint registered successfully");
+        } else {
+            ESP_LOGE(TAG, "ERROR: Failed to register /reset_sensors endpoint: %s", esp_err_to_name(reset_sensors_reg));
+        }
+
+        // Reset sensor calculations endpoint (OPTIONS for CORS preflight)
+        httpd_uri_t reset_sensors_options_uri = {
+            .uri = "/reset_sensors",
+            .method = HTTP_OPTIONS,
+            .handler = reset_sensors_handler,
+            .user_ctx = NULL
+        };
+        httpd_register_uri_handler(g_server, &reset_sensors_options_uri);
+
+        // Reboot system endpoint (POST)
         httpd_uri_t reboot_uri = {
             .uri = "/reboot",
             .method = HTTP_POST,
@@ -9647,6 +9878,15 @@ static esp_err_t start_webserver(void)
         } else {
             ESP_LOGE(TAG, "ERROR: Failed to register /reboot endpoint: %s", esp_err_to_name(reboot_reg));
         }
+
+        // Reboot endpoint (OPTIONS for CORS preflight)
+        httpd_uri_t reboot_options_uri = {
+            .uri = "/reboot",
+            .method = HTTP_OPTIONS,
+            .handler = reboot_handler,
+            .user_ctx = NULL
+        };
+        httpd_register_uri_handler(g_server, &reboot_options_uri);
 
         // Watchdog control endpoint
         httpd_uri_t watchdog_control_uri = {
@@ -10931,8 +11171,8 @@ static esp_err_t modbus_read_live_handler(httpd_req_t *req) {
     char temp[256];
 
     // Get register values
-    uint16_t registers[10];
-    for (int i = 0; i < quantity; i++) {
+    uint16_t registers[24];  // Increased for Opruss Ace (21 registers)
+    for (int i = 0; i < quantity && i < 24; i++) {  // Safety limit
         registers[i] = modbus_get_response_buffer(i);
     }
 
@@ -11311,6 +11551,66 @@ esp_err_t config_save_to_nvs(const system_config_t *config)
 
     nvs_close(nvs_handle);
     return err;
+}
+
+// Reset corrupted sensor calculations to working defaults
+esp_err_t config_reset_sensor_calculations(void)
+{
+    ESP_LOGI(TAG, "==========================================");
+    ESP_LOGI(TAG, "🔧 RESETTING SENSOR CALCULATIONS");
+    ESP_LOGI(TAG, "==========================================");
+
+    // Reset calculation type to CALC_NONE for all sensors
+    for (int i = 0; i < g_system_config.sensor_count; i++) {
+        sensor_config_t *sensor = &g_system_config.sensors[i];
+
+        ESP_LOGI(TAG, "Sensor %d: %s (Type: %s, Slave: %d)",
+                 i + 1, sensor->name, sensor->sensor_type, sensor->slave_id);
+
+        // Reset calculation to NONE
+        if (sensor->calculation.calc_type != CALC_NONE) {
+            ESP_LOGI(TAG, "  ⚠️  Removing calculation type %d", sensor->calculation.calc_type);
+            sensor->calculation.calc_type = CALC_NONE;
+            sensor->calculation.scale = 1.0f;
+            sensor->calculation.offset = 0.0f;
+        }
+
+        // Restore Panda_Level sensor parameters based on slave_id
+        if (strcmp(sensor->sensor_type, "Panda_Level") == 0) {
+            if (sensor->slave_id == 1) {
+                // Sensor 1: FG24769L - E Floor-6
+                sensor->sensor_height = 950.0f;
+                sensor->max_water_level = 1000.0f;
+                ESP_LOGI(TAG, "  ✅ Restored: SensorHeight=950.0, TankHeight=1000.0");
+            } else if (sensor->slave_id == 2) {
+                // Sensor 2: FG24770L - E Floor-7
+                sensor->sensor_height = 820.0f;
+                sensor->max_water_level = 900.0f;
+                ESP_LOGI(TAG, "  ✅ Restored: SensorHeight=820.0, TankHeight=900.0");
+            } else {
+                ESP_LOGW(TAG, "  ⚠️  Unknown Panda_Level sensor (Slave %d) - skipping", sensor->slave_id);
+            }
+        }
+    }
+
+    // Save updated configuration
+    ESP_LOGI(TAG, "💾 Saving reset configuration to NVS...");
+    esp_err_t result = config_save_to_nvs(&g_system_config);
+
+    if (result == ESP_OK) {
+        ESP_LOGI(TAG, "==========================================");
+        ESP_LOGI(TAG, "✅ SENSOR CONFIGURATIONS RESET SUCCESSFULLY!");
+        ESP_LOGI(TAG, "==========================================");
+        ESP_LOGI(TAG, "Changes applied:");
+        ESP_LOGI(TAG, "  - Removed CALC_SCALE_OFFSET calculations");
+        ESP_LOGI(TAG, "  - Restored Panda_Level sensor parameters");
+        ESP_LOGI(TAG, "");
+        ESP_LOGI(TAG, "🔄 Please reboot the device to apply changes.");
+    } else {
+        ESP_LOGE(TAG, "❌ Failed to save configuration: %s", esp_err_to_name(result));
+    }
+
+    return result;
 }
 
 esp_err_t config_reset_to_defaults(void)

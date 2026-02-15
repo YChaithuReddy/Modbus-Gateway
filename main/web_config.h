@@ -237,6 +237,7 @@ esp_err_t web_config_start_server_only(void);
 // Configuration management
 esp_err_t config_load_from_nvs(system_config_t *config);
 esp_err_t config_save_to_nvs(const system_config_t *config);
+esp_err_t config_reset_sensor_calculations(void);
 esp_err_t config_reset_to_defaults(void);
 
 // Sensor testing

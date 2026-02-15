@@ -2204,14 +2204,16 @@ static void create_telemetry_payload(char* payload, size_t payload_size) {
                         value_key = "ene_con_hex";
                         type_value = "ENERGY";
                     } else if (strcasecmp(matching_sensor->sensor_type, "QUALITY") == 0 ||
-                               strcasecmp(matching_sensor->sensor_type, "Aquadax_Quality") == 0) {
+                               strcasecmp(matching_sensor->sensor_type, "Aquadax_Quality") == 0 ||
+                               strcasecmp(matching_sensor->sensor_type, "Opruss_Ace") == 0) {
                         value_key = "value";
                         type_value = "QUALITY";
                     }
 
                     // Build sensor JSON object
                     if (strcasecmp(matching_sensor->sensor_type, "QUALITY") == 0 ||
-                        strcasecmp(matching_sensor->sensor_type, "Aquadax_Quality") == 0) {
+                        strcasecmp(matching_sensor->sensor_type, "Aquadax_Quality") == 0 ||
+                        strcasecmp(matching_sensor->sensor_type, "Opruss_Ace") == 0) {
                         // QUALITY sensor with params_data object
                         char params_data[256] = "";
 
@@ -2338,7 +2340,8 @@ static void create_telemetry_payload(char* payload, size_t payload_size) {
 
                     // Check if sensor is QUALITY type - use special JSON format
                     if (strcasecmp(matching_sensor->sensor_type, "QUALITY") == 0 ||
-                        strcasecmp(matching_sensor->sensor_type, "Aquadax_Quality") == 0) {
+                        strcasecmp(matching_sensor->sensor_type, "Aquadax_Quality") == 0 ||
+                        strcasecmp(matching_sensor->sensor_type, "Opruss_Ace") == 0) {
                         json_result = generate_quality_sensor_json(
                             &readings[i],
                             temp_json,

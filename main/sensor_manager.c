@@ -646,6 +646,11 @@ esp_err_t sensor_read_single(const sensor_config_t *sensor, sensor_reading_t *re
         return sensor_read_aquadax_quality(sensor, reading);
     }
 
+    // For Opruss Ace sensors, use single bulk read for 3 UINT16 parameters
+    if (strcmp(sensor->sensor_type, "Opruss_Ace") == 0) {
+        return sensor_read_opruss_ace(sensor, reading);
+    }
+
     // Clear reading
     memset(reading, 0, sizeof(sensor_reading_t));
     
@@ -969,6 +974,111 @@ esp_err_t sensor_read_aquadax_quality(const sensor_config_t *sensor, sensor_read
     return ESP_OK;
 }
 
+// Read Opruss Ace water quality sensor - single bulk read of 21 registers for 3 UINT16 parameters
+esp_err_t sensor_read_opruss_ace(const sensor_config_t *sensor, sensor_reading_t *reading)
+{
+    if (!sensor || !reading) {
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    if (strcmp(sensor->sensor_type, "Opruss_Ace") != 0) {
+        ESP_LOGE(TAG, "Sensor %s is not an Opruss_Ace sensor", sensor->name);
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    // Clear reading
+    memset(reading, 0, sizeof(sensor_reading_t));
+
+    // Copy basic info
+    strncpy(reading->unit_id, sensor->unit_id, sizeof(reading->unit_id) - 1);
+    strncpy(reading->sensor_name, sensor->name, sizeof(reading->sensor_name) - 1);
+
+    // Get timestamp
+    time_t now;
+    struct tm timeinfo;
+    time(&now);
+    gmtime_r(&now, &timeinfo);
+    strftime(reading->timestamp, sizeof(reading->timestamp), "%Y-%m-%dT%H:%M:%SZ", &timeinfo);
+
+    // Set baud rate
+    int baud_rate = sensor->baud_rate > 0 ? sensor->baud_rate : 9600;
+    modbus_set_baud_rate(baud_rate);
+
+    // Get retry settings
+    system_config_t *sys_config = get_system_config();
+    int retry_count = sys_config ? sys_config->modbus_retry_count : 1;
+    int retry_delay_ms = sys_config ? sys_config->modbus_retry_delay : 50;
+
+    // Read 21 holding registers in a single bulk read (offsets 0-20)
+    modbus_result_t modbus_result;
+    int attempt = 0;
+    do {
+        if (attempt > 0) {
+            ESP_LOGW(TAG, "Retry %d/%d for Opruss_Ace sensor '%s'",
+                     attempt, retry_count, sensor->name);
+            vTaskDelay(pdMS_TO_TICKS(retry_delay_ms));
+        }
+        modbus_result = modbus_read_holding_registers(sensor->slave_id,
+                                                       sensor->register_address, 21);
+        attempt++;
+    } while (modbus_result != MODBUS_SUCCESS && attempt <= retry_count);
+
+    if (modbus_result != MODBUS_SUCCESS) {
+        reading->valid = false;
+        strncpy(reading->data_source, "error", sizeof(reading->data_source) - 1);
+        ESP_LOGE(TAG, "Opruss_Ace: Modbus read failed after %d attempts", attempt);
+        return ESP_FAIL;
+    }
+
+    // Get register values
+    int reg_count = modbus_get_response_length();
+    if (reg_count < 21) {
+        reading->valid = false;
+        strncpy(reading->data_source, "error", sizeof(reading->data_source) - 1);
+        ESP_LOGE(TAG, "Opruss_Ace: Insufficient registers (got %d, need 21)", reg_count);
+        return ESP_FAIL;
+    }
+
+    uint16_t registers[24];
+    for (int i = 0; i < reg_count && i < 24; i++) {
+        registers[i] = modbus_get_response_buffer(i);
+    }
+
+    // Parse 3 UINT16 values with 0.01 scale factor
+    // Register layout: COD at offset 0, BOD at offset 5, TSS at offset 20
+    int opruss_offsets[] = {0, 5, 20};
+    const char *param_names[] = {"COD", "BOD", "TSS"};
+    double params[3];
+    for (int p = 0; p < 3; p++) {
+        int off = opruss_offsets[p];
+        uint16_t raw_val = registers[off];
+        params[p] = (double)raw_val * 0.01;
+        ESP_LOGI(TAG, "Opruss_Ace %s: raw=%u (0x%04X) -> %.2f mg/L",
+                 param_names[p], raw_val, raw_val, params[p]);
+    }
+
+    // Map to quality_params_t
+    reading->quality_params.cod_value = params[0];
+    reading->quality_params.cod_valid = true;
+    reading->quality_params.bod_value = params[1];
+    reading->quality_params.bod_valid = true;
+    reading->quality_params.tss_value = params[2];
+    reading->quality_params.tss_valid = true;
+
+    // Primary value = COD (first parameter)
+    reading->value = reading->quality_params.cod_value;
+    reading->valid = true;
+    strncpy(reading->data_source, "modbus_rs485_multi", sizeof(reading->data_source) - 1);
+    reading->data_source[sizeof(reading->data_source) - 1] = '\0';
+
+    ESP_LOGI(TAG, "Opruss_Ace %s: COD=%.2f, BOD=%.2f, TSS=%.2f",
+             reading->unit_id,
+             reading->quality_params.cod_value, reading->quality_params.bod_value,
+             reading->quality_params.tss_value);
+
+    return ESP_OK;
+}
+
 esp_err_t sensor_read_all_configured(sensor_reading_t *readings, int max_readings, int *actual_count)
 {
     if (!readings || !actual_count || max_readings <= 0) {
@@ -1222,9 +1332,15 @@ double apply_calculation(const sensor_config_t *sensor, double raw_value,
 
         case CALC_SCALE_OFFSET:
             // Linear transformation: (raw × scale) + offset
-            result = (raw_value * calc->scale) + calc->offset;
-            ESP_LOGI(TAG, "CALC_SCALE_OFFSET: %.4f × %.4f + %.4f = %.4f",
-                     raw_value, calc->scale, calc->offset, result);
+            // Skip invalid configuration (scale=0, offset=100 is corrupted config)
+            if (calc->scale == 0.0f && calc->offset == 100.0f) {
+                ESP_LOGW(TAG, "CALC_SCALE_OFFSET: Ignoring invalid configuration (scale=0, offset=100), using raw value");
+                result = raw_value;
+            } else {
+                result = (raw_value * calc->scale) + calc->offset;
+                ESP_LOGI(TAG, "CALC_SCALE_OFFSET: %.4f × %.4f + %.4f = %.4f",
+                         raw_value, calc->scale, calc->offset, result);
+            }
             break;
 
         case CALC_LEVEL_PERCENTAGE:

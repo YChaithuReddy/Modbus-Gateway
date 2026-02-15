@@ -55,6 +55,7 @@ esp_err_t sensor_read_all_configured(sensor_reading_t *readings, int max_reading
 esp_err_t sensor_read_single(const sensor_config_t *sensor, sensor_reading_t *reading);
 esp_err_t sensor_read_quality(const sensor_config_t *sensor, sensor_reading_t *reading);
 esp_err_t sensor_read_aquadax_quality(const sensor_config_t *sensor, sensor_reading_t *reading);
+esp_err_t sensor_read_opruss_ace(const sensor_config_t *sensor, sensor_reading_t *reading);
 
 // Utility functions
 const char* get_register_type_description(const char* reg_type);
