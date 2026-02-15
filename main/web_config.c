@@ -3116,7 +3116,12 @@ static esp_err_t config_page_handler(httpd_req_t *req)
         "  h += '<div><select name=\"sensor_' + sensorCount + '_baud_rate\" style=\"width:100%;padding:10px;border:1px solid #e0e0e0;border-radius:6px;font-size:15px\">';"
         "  h += '<option value=\"9600\">9600</option><option value=\"19200\">19200</option><option value=\"38400\">38400</option><option value=\"115200\">115200</option>';"
         "  h += '</select>';"
-        "  h += '<small style=\"color:#888;display:block;margin-top:5px;font-size:13px\">Serial communication speed</small></div></div>';"
+        "  h += '<small style=\"color:#888;display:block;margin-top:5px;font-size:13px\">Serial communication speed</small></div>';"
+        "  h += '<label style=\"font-weight:600;padding-top:10px\">Parity:</label>';"
+        "  h += '<div><select name=\"sensor_' + sensorCount + '_parity\" style=\"width:100%;padding:10px;border:1px solid #e0e0e0;border-radius:6px;font-size:15px\">';"
+        "  h += '<option value=\"none\" selected>None</option><option value=\"even\">Even</option><option value=\"odd\">Odd</option>';"
+        "  h += '</select>';"
+        "  h += '<small style=\"color:#888;display:block;margin-top:5px;font-size:13px\">Error checking method</small></div></div>';"
         "  h += '<div style=\"background:#f0f8ff;padding:12px;margin:10px 0;border-radius:6px;border:1px solid #17a2b8\">';"
         "  h += '<strong style=\"color:#17a2b8\">Fixed Parameters:</strong> Qty=12, FLOAT32 BIG_ENDIAN (ABCD), Scale=1.0<br>';"
         "  h += '<strong style=\"color:#28a745\">Output:</strong> {\"params_data\":{\"COD\":val,\"BOD\":val,\"TSS\":val,\"pH\":val,\"Temp\":val},\"type\":\"QUALITY\"}';"
@@ -3160,12 +3165,17 @@ static esp_err_t config_page_handler(httpd_req_t *req)
         "  h += '<small style=\"color:#888;display:block;margin-top:5px;font-size:13px\">Modbus slave address (1-247)</small></div>';"
         "  h += '<label style=\"font-weight:600;padding-top:10px\">Register Address:</label>';"
         "  h += '<div><input type=\"number\" name=\"sensor_' + sensorCount + '_register_address\" value=\"0\" style=\"width:100%;padding:10px;border:1px solid #ccc;border-radius:6px;font-size:15px\">';"
-        "  h += '<small style=\"color:#888;display:block;margin-top:5px;font-size:13px\">Default: 0 - Start address for 21 registers (COD@0, BOD@6, TSS@20)</small></div>';"
+        "  h += '<small style=\"color:#888;display:block;margin-top:5px;font-size:13px\">Default: 0 - Start address for 21 registers (COD@0, BOD@5, TSS@20)</small></div>';"
         "  h += '<label style=\"font-weight:600;padding-top:10px\">Baud Rate:</label>';"
         "  h += '<div><select name=\"sensor_' + sensorCount + '_baud_rate\" style=\"width:100%;padding:10px;border:1px solid #e0e0e0;border-radius:6px;font-size:15px\">';"
         "  h += '<option value=\"9600\">9600</option><option value=\"19200\">19200</option><option value=\"38400\">38400</option><option value=\"115200\">115200</option>';"
         "  h += '</select>';"
-        "  h += '<small style=\"color:#888;display:block;margin-top:5px;font-size:13px\">Serial communication speed</small></div></div>';"
+        "  h += '<small style=\"color:#888;display:block;margin-top:5px;font-size:13px\">Serial communication speed</small></div>';"
+        "  h += '<label style=\"font-weight:600;padding-top:10px\">Parity:</label>';"
+        "  h += '<div><select name=\"sensor_' + sensorCount + '_parity\" style=\"width:100%;padding:10px;border:1px solid #e0e0e0;border-radius:6px;font-size:15px\">';"
+        "  h += '<option value=\"none\" selected>None</option><option value=\"even\">Even</option><option value=\"odd\">Odd</option>';"
+        "  h += '</select>';"
+        "  h += '<small style=\"color:#888;display:block;margin-top:5px;font-size:13px\">Error checking method</small></div></div>';"
         "  h += '<div style=\"background:#fef5e7;padding:12px;margin:10px 0;border-radius:6px;border:1px solid #e67e22\">';"
         "  h += '<strong style=\"color:#e67e22\">Fixed Parameters:</strong> Qty=21, UINT16 BIG_ENDIAN, Scale=0.01<br>';"
         "  h += '<strong style=\"color:#28a745\">Output:</strong> {\"params_data\":{\"COD\":val,\"BOD\":val,\"TSS\":val},\"type\":\"QUALITY\"}';"
@@ -9605,7 +9615,7 @@ static esp_err_t start_webserver(void)
 {
     httpd_config_t config = HTTPD_DEFAULT_CONFIG();
     config.server_port = 80;
-    config.max_uri_handlers = 50; // Increased to accommodate all 45+ handlers (SIM/SD/RTC/Modbus endpoints)
+    config.max_uri_handlers = 60; // Increased to accommodate all 51+ handlers (SIM/SD/RTC/Modbus/Quality sensors)
     config.max_open_sockets = 7;      // Must handle concurrent: page stream + /logo + /favicon + API calls
     config.stack_size = 12288;        // 12KB stack for 5KB chunk buffer + overhead
     config.task_priority = 6;         // Higher priority for faster response (was 5)
