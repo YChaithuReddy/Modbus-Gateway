@@ -488,38 +488,38 @@ esp_err_t generate_quality_sensor_json(const sensor_reading_t* reading, char* js
 
     if (reading->quality_params.ph_valid) {
         snprintf(params_data + strlen(params_data), sizeof(params_data) - strlen(params_data),
-            "%s\"pH\":%.2f", strlen(params_data) > 0 ? "," : "", reading->quality_params.ph_value);
+            "%s\"pH\":\"%.2f\"", strlen(params_data) > 0 ? "," : "", reading->quality_params.ph_value);
     }
     if (reading->quality_params.tds_valid) {
         snprintf(params_data + strlen(params_data), sizeof(params_data) - strlen(params_data),
-            "%s\"TDS\":%.2f", strlen(params_data) > 0 ? "," : "", reading->quality_params.tds_value);
+            "%s\"TDS\":\"%.2f\"", strlen(params_data) > 0 ? "," : "", reading->quality_params.tds_value);
     }
     if (reading->quality_params.temp_valid) {
         snprintf(params_data + strlen(params_data), sizeof(params_data) - strlen(params_data),
-            "%s\"Temp\":%.2f", strlen(params_data) > 0 ? "," : "", reading->quality_params.temp_value);
+            "%s\"Temp\":\"%.2f\"", strlen(params_data) > 0 ? "," : "", reading->quality_params.temp_value);
     }
     if (reading->quality_params.humidity_valid) {
         snprintf(params_data + strlen(params_data), sizeof(params_data) - strlen(params_data),
-            "%s\"HUMIDITY\":%.2f", strlen(params_data) > 0 ? "," : "", reading->quality_params.humidity_value);
+            "%s\"HUMIDITY\":\"%.2f\"", strlen(params_data) > 0 ? "," : "", reading->quality_params.humidity_value);
     }
     if (reading->quality_params.tss_valid) {
         snprintf(params_data + strlen(params_data), sizeof(params_data) - strlen(params_data),
-            "%s\"TSS\":%.2f", strlen(params_data) > 0 ? "," : "", reading->quality_params.tss_value);
+            "%s\"TSS\":\"%.2f\"", strlen(params_data) > 0 ? "," : "", reading->quality_params.tss_value);
     }
     if (reading->quality_params.bod_valid) {
         snprintf(params_data + strlen(params_data), sizeof(params_data) - strlen(params_data),
-            "%s\"BOD\":%.2f", strlen(params_data) > 0 ? "," : "", reading->quality_params.bod_value);
+            "%s\"BOD\":\"%.2f\"", strlen(params_data) > 0 ? "," : "", reading->quality_params.bod_value);
     }
     if (reading->quality_params.cod_valid) {
         snprintf(params_data + strlen(params_data), sizeof(params_data) - strlen(params_data),
-            "%s\"COD\":%.2f", strlen(params_data) > 0 ? "," : "", reading->quality_params.cod_value);
+            "%s\"COD\":\"%.2f\"", strlen(params_data) > 0 ? "," : "", reading->quality_params.cod_value);
     }
 
     // Create JSON for water quality sensor with only valid parameter values
-    // Field order: params_data → type → created_on → unit_id (matching installed device format)
+    // Field order: unit_id → params_data → created_on (matching dashboard device format)
     snprintf(json_buffer, buffer_size,
-        "{\"params_data\":{%s},\"type\":\"QUALITY\",\"created_on\":\"%s\",\"unit_id\":\"%s\"}",
-        params_data, reading->timestamp, reading->unit_id);
+        "{\"unit_id\":\"%s\",\"params_data\":{%s},\"created_on\":\"%s\"}",
+        reading->unit_id, params_data, reading->timestamp);
 
     ESP_LOGI(TAG, "Quality JSON generated (%d bytes): %s", strlen(json_buffer), json_buffer);
     return ESP_OK;

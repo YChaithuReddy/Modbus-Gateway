@@ -2718,13 +2718,15 @@ static esp_err_t config_page_handler(httpd_req_t *req)
                     "<div><strong style='color:#555'>Slave ID:</strong> %d</div>"
                     "<div><strong style='color:#555'>Register:</strong> %d (0x%04X)</div>"
                     "<div><strong style='color:#555'>Baud Rate:</strong> %d bps</div>"
-                    "<div><strong style='color:#555'>Quantity:</strong> 21 registers</div>"
-                    "<div><strong style='color:#555'>Data Format:</strong> UINT16 x0.01</div>"
+                    "<div><strong style='color:#555'>Quantity:</strong> 22 registers</div>"
+                    "<div><strong style='color:#555'>Data Format:</strong> FLOAT32 CDAB</div>"
                     "</div>"
                     "<div style='display:flex;flex-wrap:wrap;gap:6px;margin-bottom:10px'>"
                     "<span style='background:#d4edda;color:#155724;padding:4px 10px;border-radius:12px;font-size:12px;font-weight:600;border:1px solid #c3e6cb'>COD</span>"
                     "<span style='background:#d4edda;color:#155724;padding:4px 10px;border-radius:12px;font-size:12px;font-weight:600;border:1px solid #c3e6cb'>BOD</span>"
                     "<span style='background:#d4edda;color:#155724;padding:4px 10px;border-radius:12px;font-size:12px;font-weight:600;border:1px solid #c3e6cb'>TSS</span>"
+                    "<span style='background:#cce5ff;color:#004085;padding:4px 10px;border-radius:12px;font-size:12px;font-weight:600;border:1px solid #b8daff'>TDS</span>"
+                    "<span style='background:#cce5ff;color:#004085;padding:4px 10px;border-radius:12px;font-size:12px;font-weight:600;border:1px solid #b8daff'>Temp</span>"
                     "</div>"
                     "<button type='button' onclick='editSensor(%d)' style='background:#17a2b8;color:white;margin:2px;padding:6px 12px'>Edit</button> "
                     "<button type='button' onclick='testSensor(%d)' style='background:#007bff;color:white;margin:2px;padding:6px 12px'>Test RS485</button> "
@@ -3147,11 +3149,11 @@ static esp_err_t config_page_handler(httpd_req_t *req)
         "  h += '<input type=\"hidden\" name=\"sensor_' + sensorCount + '_data_type\" value=\"OPRUSS_ACE_FIXED\">';"
         "  h += '<input type=\"hidden\" name=\"sensor_' + sensorCount + '_byte_order\" value=\"BIG_ENDIAN\">';"
         "  h += '<input type=\"hidden\" name=\"sensor_' + sensorCount + '_register_type\" value=\"HOLDING\">';"
-        "  h += '<input type=\"hidden\" name=\"sensor_' + sensorCount + '_quantity\" value=\"21\">';"
-        "  h += '<input type=\"hidden\" name=\"sensor_' + sensorCount + '_scale_factor\" value=\"0.01\">';"
+        "  h += '<input type=\"hidden\" name=\"sensor_' + sensorCount + '_quantity\" value=\"22\">';"
+        "  h += '<input type=\"hidden\" name=\"sensor_' + sensorCount + '_scale_factor\" value=\"1.0\">';"
         "  h += '<input type=\"hidden\" name=\"sensor_' + sensorCount + '_sensor_height\" value=\"0\">';"
         "  h += '<input type=\"hidden\" name=\"sensor_' + sensorCount + '_max_water_level\" value=\"0\">';"
-        "  h += '<p style=\"color:#e67e22;font-weight:600;margin:15px 0;padding:10px;background:#fef5e7;border-radius:6px;font-size:14px\">Opruss Ace Sensor - Reads COD, BOD, TSS (3x UINT16 with 0.01 scale)</p>';"
+        "  h += '<p style=\"color:#e67e22;font-weight:600;margin:15px 0;padding:10px;background:#fef5e7;border-radius:6px;font-size:14px\">Opruss Ace Sensor - Reads COD, BOD, TSS + TDS, Temp (Slave 2)</p>';"
         "  h += '<div id=\"sensor-form-' + sensorCount + '\" style=\"display:block\">';"
         "  h += '<div style=\"display:grid;grid-template-columns:180px 1fr;gap:20px;align-items:start;margin-bottom:20px\">';"
         "  h += '<label style=\"font-weight:600;padding-top:10px\">Sensor Name:</label>';"
@@ -3165,7 +3167,7 @@ static esp_err_t config_page_handler(httpd_req_t *req)
         "  h += '<small style=\"color:#888;display:block;margin-top:5px;font-size:13px\">Modbus slave address (1-247)</small></div>';"
         "  h += '<label style=\"font-weight:600;padding-top:10px\">Register Address:</label>';"
         "  h += '<div><input type=\"number\" name=\"sensor_' + sensorCount + '_register_address\" value=\"0\" style=\"width:100%;padding:10px;border:1px solid #ccc;border-radius:6px;font-size:15px\">';"
-        "  h += '<small style=\"color:#888;display:block;margin-top:5px;font-size:13px\">Default: 0 - Start address for 21 registers (COD@0, BOD@5, TSS@20)</small></div>';"
+        "  h += '<small style=\"color:#888;display:block;margin-top:5px;font-size:13px\">Default: 0 - Start address for 22 registers (COD@0-1, BOD@6-7, TSS@20-21)</small></div>';"
         "  h += '<label style=\"font-weight:600;padding-top:10px\">Baud Rate:</label>';"
         "  h += '<div><select name=\"sensor_' + sensorCount + '_baud_rate\" style=\"width:100%;padding:10px;border:1px solid #e0e0e0;border-radius:6px;font-size:15px\">';"
         "  h += '<option value=\"9600\">9600</option><option value=\"19200\">19200</option><option value=\"38400\">38400</option><option value=\"115200\">115200</option>';"
@@ -3189,7 +3191,7 @@ static esp_err_t config_page_handler(httpd_req_t *req)
         "  div.innerHTML += h;"
         "  sensorCount++;"
         "  console.log('SUCCESS: Opruss Ace sensor added. Updated count:', sensorCount);"
-        "  alert('SUCCESS: Opruss Ace sensor form added!\\n\\nSTEPS:\\n1. Fill in Name and Unit ID\\n2. Set Slave ID and Register Address (default 0)\\n3. Click Save Sensor\\n\\nReads COD (reg 0), BOD (reg 6), TSS (reg 20) as UINT16 x 0.01.');"
+        "  alert('SUCCESS: Opruss Ace sensor form added!\\n\\nSTEPS:\\n1. Fill in Name and Unit ID\\n2. Set Slave ID and Register Address (default 0)\\n3. Click Save Sensor\\n\\nReads COD (reg 0-1), BOD (reg 6-7), TSS (reg 20-21) as FLOAT32 CDAB.');"
         "}"
         "var qualityParameterTypes = ["
         "  {key: 'pH', name: 'pH', units: 'pH', description: 'Acidity/Alkalinity measurement'},"
@@ -3431,8 +3433,8 @@ static esp_err_t config_page_handler(httpd_req_t *req)
         "formHtml += '<p style=\"color:#007bff;font-size:11px;margin:5px 0\"><em>Aquadax Quality defaults: Address 1280 (0x0500), Qty 12 - Reads COD, BOD, TSS, pH, Temperature as Float32</em></p>';"
         "} else if (sensorType === 'Opruss_Ace') {"
         "formHtml += '<input type=\"hidden\" name=\"sensor_' + sensorId + '_data_type\" value=\"OPRUSS_ACE_FIXED\">';"
-        "formHtml += '<p style=\"color:#28a745;font-size:12px;margin:10px 0\"><strong>Data Format:</strong> Fixed - 3x UINT16 with 0.01 scale</p>';"
-        "formHtml += '<p style=\"color:#007bff;font-size:11px;margin:5px 0\"><em>Opruss Ace defaults: Address 0, Qty 21 - Reads COD (reg 0), BOD (reg 6), TSS (reg 20) as UINT16 x 0.01</em></p>';"
+        "formHtml += '<p style=\"color:#28a745;font-size:12px;margin:10px 0\"><strong>Data Format:</strong> Fixed - COD/BOD/TSS (FLOAT32 CDAB) + TDS/Temp from Slave 2 (FLOAT32 DCBA)</p>';"
+        "formHtml += '<p style=\"color:#007bff;font-size:11px;margin:5px 0\"><em>Opruss Ace: Address 0, Qty 22 (COD/BOD/TSS) + Slave 2 Input Reg 0x0016 (TDS) &amp; 0x0020 (Temp)</em></p>';"
         "} else if (sensorType === 'Piezometer') {"
         "formHtml += '<input type=\"hidden\" name=\"sensor_' + sensorId + '_data_type\" value=\"UINT16_HI\">';"
         "formHtml += '<p style=\"color:#28a745;font-size:12px;margin:10px 0\"><strong>Data Format:</strong> Fixed - UINT16_HI (16-bit unsigned integer)</p>';"
@@ -3609,9 +3611,9 @@ static esp_err_t config_page_handler(httpd_req_t *req)
         "const quantityInput = document.querySelector('input[name=\"sensor_' + sensorId + '_quantity\"]');"
         "const regAddrInput = document.querySelector('input[name=\"sensor_' + sensorId + '_register_address\"]');"
         "const scaleInput = document.querySelector('input[name=\"sensor_' + sensorId + '_scale_factor\"]');"
-        "if (quantityInput) quantityInput.value = '21';"
+        "if (quantityInput) quantityInput.value = '22';"
         "if (regAddrInput) regAddrInput.value = '0';"
-        "if (scaleInput) scaleInput.value = '0.01';"
+        "if (scaleInput) scaleInput.value = '1.0';"
         "}"
         "}");
     
@@ -6533,6 +6535,146 @@ static esp_err_t test_sensor_handler(httpd_req_t *req)
             return ESP_OK;
         }
 
+        // For Opruss_Ace sensors, do bulk read and show water quality table (5 params)
+        if (strcmp(sensor->sensor_type, "Opruss_Ace") == 0) {
+            // Read 22 registers from main sensor (FLOAT32 CDAB: COD@0-1, BOD@6-7, TSS@20-21)
+            result = modbus_read_holding_registers(sensor->slave_id, sensor->register_address, 22);
+
+            if (result != MODBUS_SUCCESS) {
+                snprintf(format_table, 6000,
+                    "<div class='test-result'>"
+                    "<h4 style='color:#dc3545'>&#10007; RS485 Failed - Opruss Ace</h4>"
+                    "<p>Modbus read failed for slave %d, register %d</p>"
+                    "</div>", sensor->slave_id, sensor->register_address);
+                httpd_resp_set_type(req, "text/html");
+                httpd_resp_send(req, format_table, strlen(format_table));
+                free(format_table);
+                return ESP_OK;
+            }
+
+            int reg_count = modbus_get_response_length();
+            uint16_t registers[24] = {0};
+            for (int i = 0; i < reg_count && i < 24; i++) {
+                registers[i] = modbus_get_response_buffer(i);
+            }
+
+            if (reg_count < 22) {
+                snprintf(format_table, 6000,
+                    "<div class='test-result'>"
+                    "<h4 style='color:#dc3545'>&#10007; Insufficient registers (%d, need 22)</h4>"
+                    "</div>", reg_count);
+                httpd_resp_set_type(req, "text/html");
+                httpd_resp_send(req, format_table, strlen(format_table));
+                free(format_table);
+                return ESP_OK;
+            }
+
+            // Read TDS from external sensor (Slave 2, Input Reg 0x0016, Qty 2, FLOAT32 DCBA)
+            float tds_val = 0, temp_val = 0;
+            bool tds_ok = false, temp_ok = false;
+            vTaskDelay(pdMS_TO_TICKS(100)); // Brief delay between Modbus reads
+            modbus_result_t tds_result = modbus_read_input_registers(2, 0x0016, 2);
+            if (tds_result == MODBUS_SUCCESS && modbus_get_response_length() >= 2) {
+                uint16_t r0 = modbus_get_response_buffer(0);
+                uint16_t r1 = modbus_get_response_buffer(1);
+                // FLOAT32 DCBA: byte-swap each register, then word-swap
+                uint16_t lo_s = ((r0 & 0xFF) << 8) | ((r0 >> 8) & 0xFF);
+                uint16_t hi_s = ((r1 & 0xFF) << 8) | ((r1 >> 8) & 0xFF);
+                uint32_t d_bits = ((uint32_t)hi_s << 16) | lo_s;
+                memcpy(&tds_val, &d_bits, sizeof(float));
+                tds_ok = true;
+            }
+            // Read Temperature from external sensor (Slave 2, Input Reg 0x0020, Qty 2, FLOAT32 DCBA)
+            vTaskDelay(pdMS_TO_TICKS(100));
+            modbus_result_t temp_result = modbus_read_input_registers(2, 0x0020, 2);
+            if (temp_result == MODBUS_SUCCESS && modbus_get_response_length() >= 2) {
+                uint16_t r0 = modbus_get_response_buffer(0);
+                uint16_t r1 = modbus_get_response_buffer(1);
+                // FLOAT32 DCBA: byte-swap each register, then word-swap
+                uint16_t lo_s = ((r0 & 0xFF) << 8) | ((r0 >> 8) & 0xFF);
+                uint16_t hi_s = ((r1 & 0xFF) << 8) | ((r1 >> 8) & 0xFF);
+                uint32_t t_bits = ((uint32_t)hi_s << 16) | lo_s;
+                memcpy(&temp_val, &t_bits, sizeof(float));
+                temp_ok = true;
+            }
+
+            int total_params = 3 + (tds_ok ? 1 : 0) + (temp_ok ? 1 : 0);
+            snprintf(format_table, 6000,
+                "<div class='test-result'>"
+                "<h4 style='color:#e67e22'>&#10003; Water Quality Sensor - %d Parameters</h4>"
+                "<table style='width:100%%;border-collapse:collapse;margin:10px 0'>"
+                "<tr style='background:#e67e22;color:white'>"
+                "<th style='padding:10px;text-align:left'>PARAMETER</th>"
+                "<th style='padding:10px;text-align:left'>RAW VALUE</th>"
+                "<th style='padding:10px;text-align:left'>SCALED VALUE</th>"
+                "<th style='padding:10px;text-align:left'>DATA TYPE</th></tr>", total_params);
+
+            // COD, BOD, TSS from main sensor (FLOAT32 CDAB)
+            const char *op_names[] = {"COD", "BOD", "TSS"};
+            const char *op_units[] = {"mg/L", "mg/L", "mg/L"};
+            int op_offsets[] = {0, 6, 20};
+            char row_buf[300];
+            for (int op = 0; op < 3; op++) {
+                int off = op_offsets[op];
+                if (off + 1 >= reg_count) break;
+                uint32_t fb = ((uint32_t)registers[off + 1] << 16) | registers[off];
+                float fv;
+                memcpy(&fv, &fb, sizeof(float));
+                snprintf(row_buf, sizeof(row_buf),
+                    "<tr style='border-bottom:1px solid #e0e0e0'>"
+                    "<td style='padding:8px;font-weight:bold'>%s</td>"
+                    "<td style='padding:8px'>%.2f</td>"
+                    "<td style='padding:8px;color:#e67e22;font-weight:bold'>%.2f %s</td>"
+                    "<td style='padding:8px;font-size:12px'>FLOAT32_CDAB</td></tr>",
+                    op_names[op], (double)fv, (double)fv, op_units[op]);
+                strncat(format_table, row_buf, 6000 - strlen(format_table) - 1);
+            }
+            // TDS from external sensor (FLOAT32 ABCD, Input Reg 0x0016)
+            if (tds_ok) {
+                snprintf(row_buf, sizeof(row_buf),
+                    "<tr style='border-bottom:1px solid #e0e0e0'>"
+                    "<td style='padding:8px;font-weight:bold'>TDS</td>"
+                    "<td style='padding:8px'>%.2f</td>"
+                    "<td style='padding:8px;color:#e67e22;font-weight:bold'>%.2f ppm</td>"
+                    "<td style='padding:8px;font-size:12px'>FLOAT32_DCBA (Slave 2, 0x0016)</td></tr>",
+                    (double)tds_val, (double)tds_val);
+                strncat(format_table, row_buf, 6000 - strlen(format_table) - 1);
+            }
+            // Temperature from external sensor (FLOAT32 ABCD, Input Reg 0x0020)
+            if (temp_ok) {
+                snprintf(row_buf, sizeof(row_buf),
+                    "<tr style='border-bottom:1px solid #e0e0e0'>"
+                    "<td style='padding:8px;font-weight:bold'>Temp</td>"
+                    "<td style='padding:8px'>%.2f</td>"
+                    "<td style='padding:8px;color:#e67e22;font-weight:bold'>%.2f &deg;C</td>"
+                    "<td style='padding:8px;font-size:12px'>FLOAT32_DCBA (Slave 2, 0x0020)</td></tr>",
+                    (double)temp_val, (double)temp_val);
+                strncat(format_table, row_buf, 6000 - strlen(format_table) - 1);
+            }
+            if (!tds_ok && !temp_ok) {
+                strncat(format_table,
+                    "<tr style='border-bottom:1px solid #e0e0e0;background:#fff3cd'>"
+                    "<td style='padding:8px' colspan='4'>TDS sensor (Slave 2) not responding</td></tr>",
+                    6000 - strlen(format_table) - 1);
+            }
+
+            strncat(format_table, "</table>", 6000 - strlen(format_table) - 1);
+
+            // Add raw hex for main sensor registers
+            strncat(format_table, "<div style='margin-top:10px'><b>Raw Hex (Slave 1):</b> <span class='hex-display'>",
+                    6000 - strlen(format_table) - 1);
+            for (int i = 0; i < reg_count && i < 22; i++) {
+                snprintf(row_buf, sizeof(row_buf), "%04X ", registers[i]);
+                strncat(format_table, row_buf, 6000 - strlen(format_table) - 1);
+            }
+            strncat(format_table, "</span></div></div>", 6000 - strlen(format_table) - 1);
+
+            httpd_resp_set_type(req, "text/html");
+            httpd_resp_send(req, format_table, strlen(format_table));
+            free(format_table);
+            return ESP_OK;
+        }
+
         // For non-QUALITY sensors, use normal test logic
         int test_slave_id = sensor->slave_id;
         int test_register = sensor->register_address;
@@ -6551,7 +6693,7 @@ static esp_err_t test_sensor_handler(httpd_req_t *req)
         if (result == MODBUS_SUCCESS) {
             // Use the same comprehensive logic as test_rs485_handler
             // Get the raw register values
-            uint16_t registers[24]; // Support up to 24 registers (Opruss_Ace needs 21)
+            uint16_t registers[24]; // Support up to 24 registers (Opruss_Ace needs 22)
             int reg_count = modbus_get_response_length();
             if (reg_count > 24 || reg_count <= 0) {
                 ESP_LOGW(TAG, "Invalid register count: %d, limiting to safe range", reg_count);
@@ -7824,7 +7966,7 @@ static esp_err_t test_rs485_handler(httpd_req_t *req)
     
     if (result == MODBUS_SUCCESS) {
         // Get the raw register values
-        uint16_t registers[24]; // Support up to 24 registers (Opruss_Ace needs 21)
+        uint16_t registers[24]; // Support up to 24 registers (Opruss_Ace needs 22)
         int reg_count = modbus_get_response_length();
         if (reg_count > 24 || reg_count <= 0) {
             ESP_LOGW(TAG, "Invalid register count: %d, limiting to safe range", reg_count);
@@ -8048,21 +8190,25 @@ static esp_err_t test_rs485_handler(httpd_req_t *req)
                 memcpy(&fv, &fb, sizeof(float));
                 ESP_LOGI(TAG, "Aquadax_Quality Test %s = %.3f", aq_names[aq], fv);
             }
-        } else if (reg_count >= 20 && strstr(data_type, "OPRUSS_ACE_FIXED")) {
-            // OPRUSS_ACE_FIXED: 3x UINT16 with 0.01 scale
-            // Register layout: COD(0), BOD(5), TSS(20)
-            int op_offsets[] = {0, 5, 20}; // COD, BOD, TSS
-            uint16_t cod_raw = registers[op_offsets[0]];
-            primary_value = (double)cod_raw * scale_factor;
+        } else if (reg_count >= 22 && strstr(data_type, "OPRUSS_ACE_FIXED")) {
+            // OPRUSS_ACE_FIXED: 3x FLOAT32 CDAB (word-swap)
+            // Register layout: COD(0-1), BOD(6-7), TSS(20-21)
+            int op_offsets[] = {0, 6, 20}; // COD, BOD, TSS
+            // FLOAT32 CDAB: word-swap (reg[off+1] << 16 | reg[off])
+            uint32_t cod_bits = ((uint32_t)registers[op_offsets[0] + 1] << 16) | registers[op_offsets[0]];
+            float cod_fv;
+            memcpy(&cod_fv, &cod_bits, sizeof(float));
+            primary_value = (double)cod_fv;
             // Log all 3 parameters for test display
             const char *op_names[] = {"COD", "BOD", "TSS"};
             for (int op = 0; op < 3; op++) {
                 int off = op_offsets[op];
-                if (off >= reg_count) break;
-                uint16_t raw = registers[off];
-                double scaled = (double)raw * scale_factor;
-                ESP_LOGI(TAG, "Opruss_Ace Test %s = %.2f (raw: %u × %.2f)",
-                         op_names[op], scaled, raw, scale_factor);
+                if (off + 1 >= reg_count) break;
+                uint32_t fb = ((uint32_t)registers[off + 1] << 16) | registers[off];
+                float fv;
+                memcpy(&fv, &fb, sizeof(float));
+                ESP_LOGI(TAG, "Opruss_Ace Test %s = %.2f (reg[%d]=0x%04X reg[%d]=0x%04X)",
+                         op_names[op], (double)fv, off, registers[off], off + 1, registers[off + 1]);
             }
         } else if (reg_count >= 1) {
             primary_value = (double)registers[0] * scale_factor;
@@ -8137,10 +8283,10 @@ static esp_err_t test_rs485_handler(httpd_req_t *req)
         }
 
         // Special water quality table for Opruss_Ace
-        if (strstr(data_type, "OPRUSS_ACE_FIXED") && reg_count >= 20) {
+        if (strstr(data_type, "OPRUSS_ACE_FIXED") && reg_count >= 22) {
             const char *op_names[] = {"COD", "BOD", "TSS"};
             const char *op_units[] = {"mg/L", "mg/L", "mg/L"};
-            int op_offsets[] = {0, 5, 20}; // COD, BOD, TSS
+            int op_offsets[] = {0, 6, 20}; // COD(0-1), BOD(6-7), TSS(20-21)
             snprintf(temp_str, sizeof(temp_str),
                 "<h4 style='color:#e67e22'>✓ Water Quality Sensor - 3 Parameters</h4>"
                 "<table style='width:100%%;border-collapse:collapse;margin:10px 0'>"
@@ -8152,22 +8298,24 @@ static esp_err_t test_rs485_handler(httpd_req_t *req)
             strcat(format_table, temp_str);
             for (int op = 0; op < 3; op++) {
                 int off = op_offsets[op];
-                if (off >= reg_count) break;
-                uint16_t raw = registers[off];
-                double scaled = (double)raw * scale_factor;
+                if (off + 1 >= reg_count) break;
+                // FLOAT32 CDAB: word-swap (reg[off+1] << 16 | reg[off])
+                uint32_t fb = ((uint32_t)registers[off + 1] << 16) | registers[off];
+                float fv;
+                memcpy(&fv, &fb, sizeof(float));
                 snprintf(temp_str, sizeof(temp_str),
                     "<tr style='border-bottom:1px solid #e0e0e0'>"
                     "<td style='padding:8px;font-weight:bold'>%s</td>"
-                    "<td style='padding:8px'>%u</td>"
+                    "<td style='padding:8px'>%.2f</td>"
                     "<td style='padding:8px;color:#e67e22;font-weight:bold'>%.2f %s</td>"
-                    "<td style='padding:8px;font-size:12px'>UINT16×%.2f</td></tr>",
-                    op_names[op], raw, scaled, op_units[op], scale_factor);
+                    "<td style='padding:8px;font-size:12px'>FLOAT32_CDAB</td></tr>",
+                    op_names[op], (double)fv, (double)fv, op_units[op]);
                 strcat(format_table, temp_str);
             }
             strcat(format_table, "</table>");
             // Add raw hex
             strcat(format_table, "<div><b>Raw Hex:</b> <span class='hex-display'>");
-            for (int i = 0; i < reg_count && i < 21; i++) {
+            for (int i = 0; i < reg_count && i < 22; i++) {
                 snprintf(temp_str, sizeof(temp_str), "%04X ", registers[i]);
                 strcat(format_table, temp_str);
             }
@@ -8605,7 +8753,7 @@ static esp_err_t test_water_quality_sensor_handler(httpd_req_t *req)
     
     if (result == MODBUS_SUCCESS) {
         // Get the raw register values
-        uint16_t registers[24];  // Increased for Opruss Ace (21 registers)
+        uint16_t registers[24];  // Increased for Opruss Ace (22 registers)
         int reg_count = modbus_get_response_length();
         if (reg_count > 24) reg_count = 24; // Safety limit
         
@@ -11181,7 +11329,7 @@ static esp_err_t modbus_read_live_handler(httpd_req_t *req) {
     char temp[256];
 
     // Get register values
-    uint16_t registers[24];  // Increased for Opruss Ace (21 registers)
+    uint16_t registers[24];  // Increased for Opruss Ace (22 registers)
     for (int i = 0; i < quantity && i < 24; i++) {  // Safety limit
         registers[i] = modbus_get_response_buffer(i);
     }

@@ -2220,42 +2220,42 @@ static void create_telemetry_payload(char* payload, size_t payload_size) {
                         if (readings[i].quality_params.ph_valid) {
                             snprintf(params_data + strlen(params_data),
                                 sizeof(params_data) - strlen(params_data),
-                                "%s\"pH\":%.2f", strlen(params_data) > 0 ? "," : "", readings[i].quality_params.ph_value);
+                                "%s\"pH\":\"%.2f\"", strlen(params_data) > 0 ? "," : "", readings[i].quality_params.ph_value);
                         }
                         if (readings[i].quality_params.tds_valid) {
                             snprintf(params_data + strlen(params_data),
                                 sizeof(params_data) - strlen(params_data),
-                                "%s\"TDS\":%.2f", strlen(params_data) > 0 ? "," : "", readings[i].quality_params.tds_value);
+                                "%s\"TDS\":\"%.2f\"", strlen(params_data) > 0 ? "," : "", readings[i].quality_params.tds_value);
                         }
                         if (readings[i].quality_params.temp_valid) {
                             snprintf(params_data + strlen(params_data),
                                 sizeof(params_data) - strlen(params_data),
-                                "%s\"Temp\":%.2f", strlen(params_data) > 0 ? "," : "", readings[i].quality_params.temp_value);
+                                "%s\"Temp\":\"%.2f\"", strlen(params_data) > 0 ? "," : "", readings[i].quality_params.temp_value);
                         }
                         if (readings[i].quality_params.humidity_valid) {
                             snprintf(params_data + strlen(params_data),
                                 sizeof(params_data) - strlen(params_data),
-                                "%s\"HUMIDITY\":%.2f", strlen(params_data) > 0 ? "," : "", readings[i].quality_params.humidity_value);
+                                "%s\"HUMIDITY\":\"%.2f\"", strlen(params_data) > 0 ? "," : "", readings[i].quality_params.humidity_value);
                         }
                         if (readings[i].quality_params.tss_valid) {
                             snprintf(params_data + strlen(params_data),
                                 sizeof(params_data) - strlen(params_data),
-                                "%s\"TSS\":%.2f", strlen(params_data) > 0 ? "," : "", readings[i].quality_params.tss_value);
+                                "%s\"TSS\":\"%.2f\"", strlen(params_data) > 0 ? "," : "", readings[i].quality_params.tss_value);
                         }
                         if (readings[i].quality_params.bod_valid) {
                             snprintf(params_data + strlen(params_data),
                                 sizeof(params_data) - strlen(params_data),
-                                "%s\"BOD\":%.2f", strlen(params_data) > 0 ? "," : "", readings[i].quality_params.bod_value);
+                                "%s\"BOD\":\"%.2f\"", strlen(params_data) > 0 ? "," : "", readings[i].quality_params.bod_value);
                         }
                         if (readings[i].quality_params.cod_valid) {
                             snprintf(params_data + strlen(params_data),
                                 sizeof(params_data) - strlen(params_data),
-                                "%s\"COD\":%.2f", strlen(params_data) > 0 ? "," : "", readings[i].quality_params.cod_value);
+                                "%s\"COD\":\"%.2f\"", strlen(params_data) > 0 ? "," : "", readings[i].quality_params.cod_value);
                         }
 
                         batch_pos += snprintf(batch_payload + batch_pos, sizeof(telemetry_payload) - batch_pos,
-                            "{\"params_data\":{%s},\"type\":\"QUALITY\",\"created_on\":\"%s\",\"unit_id\":\"%s\"}",
-                            params_data, timestamp, matching_sensor->unit_id);
+                            "{\"unit_id\":\"%s\",\"params_data\":{%s},\"created_on\":\"%s\"}",
+                            matching_sensor->unit_id, params_data, timestamp);
                     } else {
                         // Regular sensor with value field
                         batch_pos += snprintf(batch_payload + batch_pos, sizeof(telemetry_payload) - batch_pos,

@@ -646,7 +646,7 @@ esp_err_t sensor_read_single(const sensor_config_t *sensor, sensor_reading_t *re
         return sensor_read_aquadax_quality(sensor, reading);
     }
 
-    // For Opruss Ace sensors, use single bulk read for 3 UINT16 parameters
+    // For Opruss Ace sensors, use single bulk read for 3 FLOAT32 CDAB parameters
     if (strcmp(sensor->sensor_type, "Opruss_Ace") == 0) {
         return sensor_read_opruss_ace(sensor, reading);
     }
@@ -974,7 +974,7 @@ esp_err_t sensor_read_aquadax_quality(const sensor_config_t *sensor, sensor_read
     return ESP_OK;
 }
 
-// Read Opruss Ace water quality sensor - single bulk read of 21 registers for 3 UINT16 parameters
+// Read Opruss Ace water quality sensor - single bulk read of 22 registers for 3 FLOAT32 CDAB parameters
 esp_err_t sensor_read_opruss_ace(const sensor_config_t *sensor, sensor_reading_t *reading)
 {
     if (!sensor || !reading) {
@@ -1009,7 +1009,8 @@ esp_err_t sensor_read_opruss_ace(const sensor_config_t *sensor, sensor_reading_t
     int retry_count = sys_config ? sys_config->modbus_retry_count : 1;
     int retry_delay_ms = sys_config ? sys_config->modbus_retry_delay : 50;
 
-    // Read 21 holding registers in a single bulk read (offsets 0-20)
+    // Read 22 holding registers in a single bulk read (offsets 0-21)
+    // Each parameter is FLOAT32 CDAB (word-swap) spanning 2 registers
     modbus_result_t modbus_result;
     int attempt = 0;
     do {
@@ -1019,7 +1020,7 @@ esp_err_t sensor_read_opruss_ace(const sensor_config_t *sensor, sensor_reading_t
             vTaskDelay(pdMS_TO_TICKS(retry_delay_ms));
         }
         modbus_result = modbus_read_holding_registers(sensor->slave_id,
-                                                       sensor->register_address, 21);
+                                                       sensor->register_address, 22);
         attempt++;
     } while (modbus_result != MODBUS_SUCCESS && attempt <= retry_count);
 
@@ -1032,10 +1033,10 @@ esp_err_t sensor_read_opruss_ace(const sensor_config_t *sensor, sensor_reading_t
 
     // Get register values
     int reg_count = modbus_get_response_length();
-    if (reg_count < 21) {
+    if (reg_count < 22) {
         reading->valid = false;
         strncpy(reading->data_source, "error", sizeof(reading->data_source) - 1);
-        ESP_LOGE(TAG, "Opruss_Ace: Insufficient registers (got %d, need 21)", reg_count);
+        ESP_LOGE(TAG, "Opruss_Ace: Insufficient registers (got %d, need 22)", reg_count);
         return ESP_FAIL;
     }
 
@@ -1044,17 +1045,20 @@ esp_err_t sensor_read_opruss_ace(const sensor_config_t *sensor, sensor_reading_t
         registers[i] = modbus_get_response_buffer(i);
     }
 
-    // Parse 3 UINT16 values with 0.01 scale factor
-    // Register layout: COD at offset 0, BOD at offset 5, TSS at offset 20
-    int opruss_offsets[] = {0, 5, 20};
+    // Parse 3 FLOAT32 CDAB (word-swap) values
+    // Register layout: COD at offset 0-1, BOD at offset 6-7, TSS at offset 20-21
+    int opruss_offsets[] = {0, 6, 20};
     const char *param_names[] = {"COD", "BOD", "TSS"};
     double params[3];
     for (int p = 0; p < 3; p++) {
         int off = opruss_offsets[p];
-        uint16_t raw_val = registers[off];
-        params[p] = (double)raw_val * 0.01;
-        ESP_LOGI(TAG, "Opruss_Ace %s: raw=%u (0x%04X) -> %.2f mg/L",
-                 param_names[p], raw_val, raw_val, params[p]);
+        // FLOAT32 CDAB: word-swap (reg[off+1] << 16 | reg[off])
+        uint32_t float_bits = ((uint32_t)registers[off + 1] << 16) | registers[off];
+        float fv;
+        memcpy(&fv, &float_bits, sizeof(float));
+        params[p] = (double)fv;
+        ESP_LOGI(TAG, "Opruss_Ace %s: reg[%d]=0x%04X reg[%d]=0x%04X -> FLOAT32=%.2f mg/L",
+                 param_names[p], off, registers[off], off + 1, registers[off + 1], params[p]);
     }
 
     // Map to quality_params_t
@@ -1065,16 +1069,92 @@ esp_err_t sensor_read_opruss_ace(const sensor_config_t *sensor, sensor_reading_t
     reading->quality_params.tss_value = params[2];
     reading->quality_params.tss_valid = true;
 
+    // Read TDS from external sensor (Slave 2, Input Register 0x0016, Qty 2, FLOAT32 DCBA)
+    // DCBA = byte-swap each register, then word-swap
+    // Proven: reg[0]=0xE4CB reg[1]=0xD842 → swap(D842)=42D8, swap(E4CB)=CBE4 → 0x42D8CBE4 = 108.4 (display: 108.20)
+    vTaskDelay(pdMS_TO_TICKS(100)); // Brief delay between Modbus reads
+    modbus_result_t tds_result;
+    int tds_attempt = 0;
+    do {
+        if (tds_attempt > 0) {
+            ESP_LOGW(TAG, "Retry %d/%d for TDS sensor (slave 2, reg 0x0016)", tds_attempt, retry_count);
+            vTaskDelay(pdMS_TO_TICKS(retry_delay_ms));
+        }
+        tds_result = modbus_read_input_registers(2, 0x0016, 2);
+        tds_attempt++;
+    } while (tds_result != MODBUS_SUCCESS && tds_attempt <= retry_count);
+
+    if (tds_result == MODBUS_SUCCESS) {
+        int tds_reg_count = modbus_get_response_length();
+        if (tds_reg_count >= 2) {
+            uint16_t tds_regs[2];
+            tds_regs[0] = modbus_get_response_buffer(0);
+            tds_regs[1] = modbus_get_response_buffer(1);
+            // FLOAT32 DCBA: byte-swap each register, then word-swap
+            uint16_t lo_s = ((tds_regs[0] & 0xFF) << 8) | ((tds_regs[0] >> 8) & 0xFF);
+            uint16_t hi_s = ((tds_regs[1] & 0xFF) << 8) | ((tds_regs[1] >> 8) & 0xFF);
+            uint32_t d_bits = ((uint32_t)hi_s << 16) | lo_s;
+            float tds_fv;
+            memcpy(&tds_fv, &d_bits, sizeof(float));
+            reading->quality_params.tds_value = (double)tds_fv;
+            reading->quality_params.tds_valid = true;
+            ESP_LOGI(TAG, "Opruss_Ace TDS = %.2f ppt (reg: %04X %04X -> swap: %04X %04X -> 0x%08lX)",
+                     (double)tds_fv, tds_regs[0], tds_regs[1], lo_s, hi_s, (unsigned long)d_bits);
+        } else {
+            ESP_LOGW(TAG, "Opruss_Ace TDS: Insufficient registers (got %d, need 2)", tds_reg_count);
+        }
+    } else {
+        ESP_LOGW(TAG, "Opruss_Ace TDS sensor (slave 2, reg 0x0016) read failed");
+    }
+
+    // Read Temperature from external sensor (Slave 2, Input Register 0x0020, Qty 2, FLOAT32 DCBA)
+    // Proven: reg[0]=0x6AA9 reg[1]=0xD241 → swap(D241)=41D2, swap(6AA9)=A96A → 0x41D2A96A = 26.33 (matches display)
+    vTaskDelay(pdMS_TO_TICKS(100));
+    modbus_result_t temp_result;
+    int temp_attempt = 0;
+    do {
+        if (temp_attempt > 0) {
+            ESP_LOGW(TAG, "Retry %d/%d for Temp sensor (slave 2, reg 0x0020)", temp_attempt, retry_count);
+            vTaskDelay(pdMS_TO_TICKS(retry_delay_ms));
+        }
+        temp_result = modbus_read_input_registers(2, 0x0020, 2);
+        temp_attempt++;
+    } while (temp_result != MODBUS_SUCCESS && temp_attempt <= retry_count);
+
+    if (temp_result == MODBUS_SUCCESS) {
+        int temp_reg_count = modbus_get_response_length();
+        if (temp_reg_count >= 2) {
+            uint16_t temp_regs[2];
+            temp_regs[0] = modbus_get_response_buffer(0);
+            temp_regs[1] = modbus_get_response_buffer(1);
+            // FLOAT32 DCBA: byte-swap each register, then word-swap
+            uint16_t lo_s = ((temp_regs[0] & 0xFF) << 8) | ((temp_regs[0] >> 8) & 0xFF);
+            uint16_t hi_s = ((temp_regs[1] & 0xFF) << 8) | ((temp_regs[1] >> 8) & 0xFF);
+            uint32_t t_bits = ((uint32_t)hi_s << 16) | lo_s;
+            float temp_fv;
+            memcpy(&temp_fv, &t_bits, sizeof(float));
+            reading->quality_params.temp_value = (double)temp_fv;
+            reading->quality_params.temp_valid = true;
+            ESP_LOGI(TAG, "Opruss_Ace Temp = %.2f C (reg: %04X %04X -> swap: %04X %04X -> 0x%08lX)",
+                     (double)temp_fv, temp_regs[0], temp_regs[1], lo_s, hi_s, (unsigned long)t_bits);
+        } else {
+            ESP_LOGW(TAG, "Opruss_Ace Temp: Insufficient registers (got %d, need 2)", temp_reg_count);
+        }
+    } else {
+        ESP_LOGW(TAG, "Opruss_Ace Temp sensor (slave 2, reg 0x0020) read failed");
+    }
+
     // Primary value = COD (first parameter)
     reading->value = reading->quality_params.cod_value;
     reading->valid = true;
     strncpy(reading->data_source, "modbus_rs485_multi", sizeof(reading->data_source) - 1);
     reading->data_source[sizeof(reading->data_source) - 1] = '\0';
 
-    ESP_LOGI(TAG, "Opruss_Ace %s: COD=%.2f, BOD=%.2f, TSS=%.2f",
+    ESP_LOGI(TAG, "Opruss_Ace %s: COD=%.2f, BOD=%.2f, TSS=%.2f, TDS=%.2f, Temp=%.2f",
              reading->unit_id,
              reading->quality_params.cod_value, reading->quality_params.bod_value,
-             reading->quality_params.tss_value);
+             reading->quality_params.tss_value, reading->quality_params.tds_value,
+             reading->quality_params.temp_value);
 
     return ESP_OK;
 }
