@@ -7924,10 +7924,14 @@ static esp_err_t test_rs485_handler(httpd_req_t *req)
         return ESP_OK;
     }
     
-    if (quantity < 1 || quantity > 4) {
+    // Allow higher quantity for known multi-register quality sensors
+    int max_qty = 4; // Default limit for generic sensors
+    if (strstr(data_type, "AQUADAX_QUALITY_FIXED")) max_qty = 12;
+    else if (strstr(data_type, "OPRUSS_ACE_FIXED")) max_qty = 22;
+    if (quantity < 1 || quantity > max_qty) {
         snprintf(response, 1500,
-                 "{\"status\":\"error\",\"message\":\"Invalid Quantity: %d. Must be 1-4 registers for stability.\"}",
-                 quantity);
+                 "{\"status\":\"error\",\"message\":\"Invalid Quantity: %d. Must be 1-%d registers.\"}",
+                 quantity, max_qty);
         httpd_resp_set_type(req, "application/json");
         httpd_resp_send(req, response, strlen(response));
         free(response);
