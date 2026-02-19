@@ -2147,7 +2147,7 @@ static void create_telemetry_payload(char* payload, size_t payload_size) {
             int batch_pos = 0;
             bool use_body_array = (valid_count > 1);
             if (use_body_array) {
-                batch_pos = snprintf(batch_payload, sizeof(telemetry_payload), "{\"body\":[");
+                batch_pos = snprintf(batch_payload, sizeof(telemetry_payload), "[");
                 ESP_LOGI(TAG, "[BATCH] Multiple sensors (%d) - using body array format", valid_count);
             } else {
                 ESP_LOGI(TAG, "[BATCH] Single sensor - using flat format (no body array)");
@@ -2268,9 +2268,9 @@ static void create_telemetry_payload(char* payload, size_t payload_size) {
                 }
             }
 
-            // Close the JSON - only add body array closing if multiple sensors
+            // Close the JSON array for multiple sensors
             if (use_body_array) {
-                batch_pos += snprintf(batch_payload + batch_pos, sizeof(telemetry_payload) - batch_pos, "]}");
+                batch_pos += snprintf(batch_payload + batch_pos, sizeof(telemetry_payload) - batch_pos, "]");
             }
 
             // ALWAYS copy payload to output buffer (critical for SD card caching when offline)
