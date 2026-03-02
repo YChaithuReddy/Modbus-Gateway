@@ -457,9 +457,9 @@
     .container {
       position: relative;
       z-index: 1;
-      max-width: 660px;
+      max-width: 960px;
       width: 100%;
-      padding: 20px 20px 56px;
+      padding: 20px 24px 56px;
     }
 
     /* ─────────────────────────────────────────────
@@ -564,7 +564,7 @@
       );
       backdrop-filter: blur(24px) saturate(180%);
       -webkit-backdrop-filter: blur(24px) saturate(180%);
-      border-color: rgba(0,194,168,0.35);
+      border-color: transparent;
       text-align: center;
       padding: 40px 36px 36px;
       box-shadow:
@@ -574,6 +574,68 @@
         0 0 120px rgba(0,194,168,0.08),
         inset 0 1px 0 rgba(255,255,255,0.1),
         inset 0 -1px 0 rgba(0,0,0,0.25);
+      animation: card-breathe 4s ease-in-out infinite, card-float 6s ease-in-out infinite;
+    }
+
+    /* ─── Animated rotating gradient border ─── */
+    .flash-card-wrapper {
+      position: relative;
+      margin-bottom: 14px;
+      border-radius: var(--radius-xl);
+      padding: 1px;
+      background: linear-gradient(
+        var(--border-angle, 0deg),
+        rgba(0,194,168,0.5) 0%,
+        rgba(0,100,180,0.15) 25%,
+        rgba(0,194,168,0.08) 50%,
+        rgba(0,229,200,0.3) 75%,
+        rgba(0,194,168,0.5) 100%
+      );
+      animation: border-rotate 4s linear infinite;
+    }
+
+    .flash-card-wrapper .flash-card {
+      margin-bottom: 0;
+      border: none;
+    }
+
+    @property --border-angle {
+      syntax: '<angle>';
+      initial-value: 0deg;
+      inherits: false;
+    }
+
+    @keyframes border-rotate {
+      to { --border-angle: 360deg; }
+    }
+
+    /* ─── Breathing glow pulse ─── */
+    @keyframes card-breathe {
+      0%, 100% {
+        box-shadow:
+          0 2px 8px rgba(0,0,0,0.5),
+          0 8px 32px rgba(0,0,0,0.4),
+          0 0 40px rgba(0,194,168,0.1),
+          0 0 80px rgba(0,194,168,0.05),
+          inset 0 1px 0 rgba(255,255,255,0.1),
+          inset 0 -1px 0 rgba(0,0,0,0.25);
+      }
+      50% {
+        box-shadow:
+          0 2px 8px rgba(0,0,0,0.5),
+          0 8px 32px rgba(0,0,0,0.4),
+          0 0 80px rgba(0,194,168,0.25),
+          0 0 160px rgba(0,194,168,0.12),
+          0 0 200px rgba(0,194,168,0.06),
+          inset 0 1px 0 rgba(255,255,255,0.12),
+          inset 0 -1px 0 rgba(0,0,0,0.25);
+      }
+    }
+
+    /* ─── Gentle floating motion ─── */
+    @keyframes card-float {
+      0%, 100% { transform: translateY(0); }
+      50%      { transform: translateY(-4px); }
     }
 
     .flash-card::before {
@@ -598,13 +660,16 @@
       opacity: 1;
     }
 
-    /* Flash card — override hover transform since it's the hero card */
+    /* Flash card hover — intensify the glow */
     .flash-card:hover {
-      transform: translateY(-3px);
+      animation-play-state: paused;
+      transform: translateY(-6px) scale(1.01);
       box-shadow:
-        var(--shadow-raised),
-        var(--shadow-glow-lg),
-        inset 0 1px 0 rgba(255,255,255,0.09),
+        0 4px 12px rgba(0,0,0,0.5),
+        0 16px 48px rgba(0,0,0,0.4),
+        0 0 100px rgba(0,194,168,0.3),
+        0 0 200px rgba(0,194,168,0.15),
+        inset 0 1px 0 rgba(255,255,255,0.12),
         inset 0 -1px 0 rgba(0,0,0,0.25);
     }
 
@@ -1261,7 +1326,9 @@
       .mesh-orb,
       .status-bar-inner,
       .trace-path,
-      .trace-path-2 {
+      .trace-path-2,
+      .flash-card,
+      .flash-card-wrapper {
         animation: none;
       }
 
@@ -1398,8 +1465,9 @@
   ─────────────────────────────────────────────── -->
   <main class="container">
 
-    <!-- Flash Button Card -->
-    <div class="card flash-card animate-in">
+    <!-- Flash Button Card — wrapped with animated gradient border -->
+    <div class="flash-card-wrapper animate-in">
+    <div class="card flash-card">
 
       <div class="flash-icon" aria-hidden="true">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
@@ -1445,6 +1513,7 @@
         </p>
       </div>
 
+    </div>
     </div>
 
     <!-- Requirements Card -->
