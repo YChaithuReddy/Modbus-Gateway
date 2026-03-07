@@ -37,6 +37,9 @@
 #include "esp_mac.h"
 #include "esp_ota_ops.h"
 #include "ota_update.h"
+#include "auth.h"
+#include "ws_server.h"
+#include "provisioning.h"
 #include "driver/gpio.h"
 #include "esp_task_wdt.h"
 
@@ -84,657 +87,15 @@ typedef struct {
 static sim_test_status_t g_sim_test_status = {0};
 static SemaphoreHandle_t g_sim_test_mutex = NULL;
 
-// HTML templates
-static const char* html_header = 
-"<!DOCTYPE html><html><head>"
-"<meta charset=UTF-8>"
-"<title>FLUXGEN IoT Gateway</title>"
-"<meta name=viewport content='width=device-width,initial-scale=1'>"
-"<style>"
-"/* ===== DESIGN SYSTEM: CSS VARIABLES ===== */"
-":root{"
-"/* Color Palette - Professional Industrial IoT */"
-"--primary-900:#0c2d5e;--primary-800:#1e40af;--primary-700:#1d4ed8;--primary-600:#2563eb;--primary-500:#3b82f6;--primary-400:#60a5fa;--primary-300:#93c5fd;--primary-200:#bfdbfe;--primary-100:#dbeafe;"
-"--accent-600:#0891b2;--accent-500:#06b6d4;--accent-400:#22d3ee;--accent-300:#67e8f9;"
-"--success-600:#059669;--success-500:#10b981;--success-400:#34d399;"
-"--warning-600:#d97706;--warning-500:#f59e0b;--warning-400:#fbbf24;"
-"--error-600:#dc2626;--error-500:#ef4444;--error-400:#f87171;"
-"--gray-900:#0f172a;--gray-800:#1e293b;--gray-700:#334155;--gray-600:#475569;--gray-500:#64748b;--gray-400:#94a3b8;--gray-300:#cbd5e1;--gray-200:#e2e8f0;--gray-100:#f1f5f9;--gray-50:#f8fafc;"
-"/* Semantic Colors */"
-"--color-primary:var(--primary-600);--color-primary-hover:var(--primary-700);--color-primary-light:var(--primary-100);"
-"--color-accent:var(--accent-500);--color-accent-hover:var(--accent-600);"
-"--color-success:var(--success-500);--color-warning:var(--warning-500);--color-error:var(--error-500);--color-danger:#dc2626;"
-"--color-text-primary:var(--gray-900);--color-text-secondary:var(--gray-700);--color-text-tertiary:var(--gray-500);--color-text-disabled:var(--gray-400);"
-"--color-bg-primary:#ffffff;--color-bg-secondary:var(--gray-50);--color-bg-tertiary:var(--gray-100);"
-"--color-border-light:var(--gray-200);--color-border-medium:var(--gray-300);--color-border-dark:var(--gray-400);"
-"/* Glass & Effects */"
-"--glass-white:rgba(255,255,255,0.85);--glass-white-light:rgba(255,255,255,0.6);--glass-dark:rgba(15,23,42,0.6);"
-"--shadow-xs:0 1px 2px rgba(0,0,0,0.05);--shadow-sm:0 2px 8px rgba(0,0,0,0.08);--shadow-md:0 4px 16px rgba(0,0,0,0.12);--shadow-lg:0 8px 32px rgba(0,0,0,0.16);--shadow-xl:0 20px 60px rgba(0,0,0,0.24);"
-"--glow-primary:rgba(37,99,235,0.4);--glow-accent:rgba(6,182,212,0.4);--glow-success:rgba(16,185,129,0.4);"
-"/* Spacing Scale (Mobile-First) */"
-"--space-xs:4px;--space-sm:8px;--space-md:16px;--space-lg:24px;--space-xl:32px;--space-2xl:48px;--space-3xl:64px;"
-"/* Border Radius */"
-"--radius-sm:6px;--radius-md:12px;--radius-lg:16px;--radius-xl:20px;--radius-2xl:24px;--radius-full:9999px;"
-"/* Typography Scale */"
-"--text-xs:0.75rem;--text-sm:0.875rem;--text-base:1rem;--text-lg:1.125rem;--text-xl:1.25rem;--text-2xl:1.5rem;--text-3xl:1.875rem;--text-4xl:2.25rem;"
-"/* Font Weights */"
-"--weight-normal:400;--weight-medium:500;--weight-semibold:600;--weight-bold:700;--weight-extrabold:800;--weight-black:900;"
-"/* Line Heights */"
-"--leading-tight:1.25;--leading-normal:1.5;--leading-relaxed:1.625;"
-"/* Z-Index Layers */"
-"--z-base:0;--z-dropdown:100;--z-sticky:200;--z-modal-backdrop:1000;--z-modal:1001;--z-tooltip:1200;"
-"/* Transitions */"
-"--transition-fast:150ms cubic-bezier(0.4,0,0.2,1);--transition-base:300ms cubic-bezier(0.4,0,0.2,1);--transition-slow:500ms cubic-bezier(0.4,0,0.2,1);"
-"}"
-"/* ===== RESET & BASE STYLES ===== */"
-"*,*::before,*::after{margin:0;padding:0;box-sizing:border-box}"
-"html{font-size:16px;-webkit-font-smoothing:antialiased;-moz-osx-font-smoothing:grayscale;scroll-behavior:smooth;overflow-x:hidden;width:100%;max-width:100vw}"
-"body{font-family:Rajdhani,sans-serif;font-weight:var(--weight-normal);line-height:var(--leading-normal);color:var(--color-text-primary);background:linear-gradient(135deg,#667eea 0%,#764ba2 100%);min-height:100vh;overflow-x:hidden;position:relative;width:100%;max-width:100vw}"
-"/* ===== TYPOGRAPHY ===== */"
-"h1,h2,h3,h4,h5,h6{font-family:Orbitron,monospace;font-weight:var(--weight-bold);line-height:var(--leading-tight);color:var(--color-primary);margin-bottom:var(--space-md)}"
-"h1{font-size:var(--text-4xl);font-weight:var(--weight-black);letter-spacing:-0.02em}"
-"h2{font-size:var(--text-3xl);font-weight:var(--weight-extrabold)}"
-"h3{font-size:var(--text-2xl);font-weight:var(--weight-bold)}"
-"h4{font-size:var(--text-xl);font-weight:var(--weight-semibold)}"
-"p{margin-bottom:var(--space-md);line-height:var(--leading-relaxed)}"
-"strong,b{font-weight:var(--weight-semibold);color:var(--color-text-primary)}"
-"small{font-size:var(--text-sm);color:var(--color-text-tertiary)}"
-"/* ===== FORM ELEMENTS ===== */"
-"input,select,textarea{width:100%;padding:var(--space-md);border:2px solid var(--color-border-light);border-radius:var(--radius-md);background:var(--color-bg-primary);color:var(--color-text-primary);font-family:Rajdhani,sans-serif;font-size:var(--text-base);transition:all var(--transition-base);box-shadow:var(--shadow-xs)}"
-"input:hover,select:hover,textarea:hover{border-color:var(--color-border-medium)}"
-"input:focus,select:focus,textarea:focus{outline:0;border-color:var(--color-primary);box-shadow:0 0 0 4px var(--color-primary-light),var(--shadow-sm);background:var(--color-bg-primary)}"
-"input:disabled,select:disabled,textarea:disabled{background:var(--color-bg-tertiary);color:var(--color-text-disabled);cursor:not-allowed;opacity:0.6}"
-"input::placeholder,textarea::placeholder{color:var(--color-text-tertiary)}"
-"/* ===== BUTTONS ===== */"
-"button,.btn{display:inline-flex;align-items:center;justify-content:center;gap:var(--space-sm);padding:var(--space-md) var(--space-xl);border:none;border-radius:var(--radius-md);font-family:Orbitron,monospace;font-size:var(--text-sm);font-weight:var(--weight-semibold);text-transform:uppercase;letter-spacing:0.05em;cursor:pointer;transition:transform var(--transition-fast),box-shadow var(--transition-fast);position:relative;overflow:hidden;box-shadow:var(--shadow-sm);will-change:transform;transform:translateZ(0)}"
-".btn-primary,button{background:linear-gradient(135deg,var(--color-primary),var(--color-accent));color:#fff}"
-".btn-primary:hover,button:hover{transform:translateY(-2px);box-shadow:0 8px 16px rgba(37,99,235,0.3)}"
-".btn-primary:active,button:active{transform:translateY(0) scale(0.98)}"
-".btn-secondary{background:var(--color-bg-primary);color:var(--color-primary);border:2px solid var(--color-primary)}"
-".btn-secondary:hover{background:var(--color-primary);color:#fff;border-color:var(--color-primary);box-shadow:0 8px 24px var(--glow-primary)}"
-".btn-success{background:linear-gradient(135deg,var(--color-success),var(--success-400));color:#fff}"
-".btn-success:hover{box-shadow:0 12px 32px var(--glow-success)}"
-".btn-danger{background:linear-gradient(135deg,var(--error-600),var(--color-error));color:#fff}"
-".btn-ghost{background:transparent;color:var(--color-primary);border:1px solid transparent}"
-".btn-ghost:hover{background:var(--color-primary-light);border-color:var(--color-primary)}"
-".btn-small{padding:var(--space-sm) var(--space-md);font-size:var(--text-xs)}"
-".btn-large{padding:var(--space-lg) var(--space-2xl);font-size:var(--text-base)}"
-"button:disabled,.btn:disabled{opacity:0.5;cursor:not-allowed;transform:none!important}"
-"/* ===== TABLES ===== */"
-"table{width:100%;border-collapse:separate;border-spacing:0;background:var(--color-bg-primary);border-radius:var(--radius-lg);overflow:hidden;box-shadow:var(--shadow-md);margin:var(--space-lg) 0}"
-"thead{background:linear-gradient(135deg,var(--color-primary),var(--color-accent))}"
-"th{padding:var(--space-md) var(--space-lg);text-align:left;font-family:Orbitron,monospace;font-weight:var(--weight-bold);font-size:var(--text-sm);color:#fff;text-transform:uppercase;letter-spacing:0.05em;border-bottom:2px solid rgba(255,255,255,0.2)}"
-"td{padding:var(--space-md) var(--space-lg);color:var(--color-text-secondary);border-bottom:1px solid var(--color-border-light);font-size:var(--text-sm)}"
-"tbody tr{transition:background-color var(--transition-fast)}"
-"tbody tr:hover{background:var(--color-bg-secondary)}"
-"tbody tr:last-child td{border-bottom:none}"
-"/* ===== STATUS BADGES ===== */"
-".badge{display:inline-flex;align-items:center;gap:var(--space-xs);padding:var(--space-xs) var(--space-md);border-radius:var(--radius-full);font-size:var(--text-xs);font-weight:var(--weight-semibold);text-transform:uppercase;letter-spacing:0.05em}"
-".badge-success,.status-good{background:rgba(16,185,129,0.1);color:var(--color-success);border:1px solid var(--color-success)}"
-".badge-warning,.status-warning{background:rgba(245,158,11,0.1);color:var(--warning-600);border:1px solid var(--color-warning)}"
-".badge-error,.status-error{background:rgba(239,68,68,0.1);color:var(--error-600);border:1px solid var(--color-error)}"
-".badge-info{background:rgba(59,130,246,0.1);color:var(--color-primary);border:1px solid var(--color-primary)}"
-".badge::before{content:'';width:6px;height:6px;border-radius:50%}"
-".badge-success::before{background:var(--color-success)}"
-".badge-warning::before{background:var(--color-warning)}"
-".badge-error::before{background:var(--color-error)}"
-".badge-info::before{background:var(--color-primary)}"
-"/* ===== ALERT/RESULT BOXES ===== */"
-".test-result,.alert{padding:var(--space-lg);margin:var(--space-lg) 0;border-radius:var(--radius-lg);border:1px solid;box-shadow:var(--shadow-md);animation:slideIn 0.3s;background:white;overflow:hidden;max-width:100%;box-sizing:border-box}"
-".test-result{border-color:var(--color-success);background:linear-gradient(135deg,rgba(16,185,129,0.05),rgba(16,185,129,0.02))}"
-".test-result h4{color:var(--color-success);margin:0 0 var(--space-md) 0;font-family:Orbitron,monospace;font-size:var(--text-lg);display:flex;align-items:center;gap:var(--space-sm)}"
-".alert-success{background:rgba(16,185,129,0.05);border-color:var(--color-success);color:var(--success-600)}"
-".alert-warning{background:rgba(245,158,11,0.05);border-color:var(--color-warning);color:var(--warning-600)}"
-".alert-error{background:rgba(239,68,68,0.05);border-color:var(--color-error);color:var(--error-600)}"
-"/* ===== SCADACORE FORMAT TABLE ===== */"
-".scada-table{width:100%;border-collapse:collapse;margin-top:var(--space-md);font-size:var(--text-sm);box-shadow:var(--shadow-sm);border-radius:var(--radius-md);overflow:hidden;table-layout:fixed}"
-".scada-table th{padding:var(--space-md);font-weight:var(--weight-bold);text-align:center;color:white;font-family:Orbitron,monospace;word-wrap:break-word}"
-".scada-table td{padding:var(--space-sm) var(--space-md);border-bottom:1px solid var(--color-border-light);text-align:left;word-wrap:break-word;overflow-wrap:break-word;white-space:normal}"
-".scada-table td:first-child{width:50%;font-weight:var(--weight-semibold)}"
-".scada-table td:last-child{width:50%;text-align:right;font-family:monospace}"
-".scada-table tr:last-child td{border-bottom:none}"
-".scada-table tr:nth-child(even){background:var(--color-bg-secondary)}"
-".scada-table strong{color:var(--color-primary);font-weight:var(--weight-semibold)}"
-".scada-header-main{background:linear-gradient(135deg,#374151,#1f2937);color:white;font-weight:bold;text-align:center;padding:10px}"
-".scada-header-float{background:linear-gradient(135deg,#3b82f6,#2563eb);color:white;font-weight:bold;padding:8px;text-align:center}"
-".scada-header-int{background:linear-gradient(135deg,#22c55e,#16a34a);color:white;font-weight:bold;padding:8px;text-align:center}"
-".scada-header-uint{background:linear-gradient(135deg,#f59e0b,#d97706);color:white;font-weight:bold;padding:8px;text-align:center}"
-".scada-header-float64{background:linear-gradient(135deg,#6610f2,#520dc2);color:white;font-weight:bold;padding:8px;text-align:center}"
-".scada-header-int64{background:linear-gradient(135deg,#20c997,#17a579);color:white;font-weight:bold;padding:8px;text-align:center}"
-".scada-header-uint64{background:linear-gradient(135deg,#dc3545,#b02a37);color:white;font-weight:bold;padding:8px;text-align:center}"
-".value-box{background:var(--color-bg-tertiary);padding:var(--space-sm);border-radius:var(--radius-sm);font-family:monospace;margin:var(--space-xs) 0}"
-".hex-display{font-family:monospace;color:var(--color-accent);font-weight:var(--weight-semibold);letter-spacing:1px}"
-".scada-breakdown{background:linear-gradient(135deg,rgba(59,130,246,0.08),rgba(59,130,246,0.03));padding:var(--space-md);border-radius:var(--radius-md);margin:var(--space-md) 0;border-left:4px solid var(--color-primary)}"
-".alert-info{background:rgba(59,130,246,0.05);border-color:var(--color-primary);color:var(--primary-700)}"
-"@keyframes slideIn{from{opacity:0;transform:translateX(-20px)}to{opacity:1;transform:translateX(0)}}"
-"/* ===== HEADER ===== */"
-".header{display:flex;align-items:center;gap:var(--space-lg);padding:var(--space-xl);background:rgba(255,255,255,0.95);border:1px solid rgba(255,255,255,0.3);border-radius:var(--radius-xl);box-shadow:var(--shadow-lg);margin-bottom:var(--space-xl);position:relative;overflow:hidden}"
-".header::before{content:'';position:absolute;top:0;left:0;right:0;height:4px;background:linear-gradient(90deg,var(--color-primary) 0%,var(--color-accent) 50%,var(--color-success) 100%);box-shadow:0 2px 8px var(--glow-primary)}"
-".logo{width:auto;max-width:100%;height:45px;object-fit:contain;display:block}"
-"/* ===== CARDS ===== */"
-".card,.sensor-card{background:rgba(255,255,255,0.95);border:1px solid rgba(255,255,255,0.4);border-radius:var(--radius-xl);padding:var(--space-xl);margin:var(--space-lg) 0;box-shadow:var(--shadow-lg);position:relative;transition:transform var(--transition-base),box-shadow var(--transition-base);overflow:visible;min-height:100px;display:flex;flex-direction:column;justify-content:center;will-change:transform;transform:translateZ(0);width:100%;box-sizing:border-box}"
-".card::before,.sensor-card::before{content:'';position:absolute;top:0;left:0;right:0;height:4px;background:linear-gradient(90deg,var(--color-primary) 0%,var(--color-accent) 50%,var(--color-success) 100%);opacity:0.9}"
-".card:hover,.sensor-card:hover{transform:translateY(-4px);box-shadow:0 12px 40px rgba(0,0,0,0.2);border-color:rgba(255,255,255,0.7)}"
-".card h3,.sensor-card h3{margin:0 0 var(--space-md);font-size:var(--text-xl);font-weight:var(--weight-bold);color:var(--color-primary);font-family:Orbitron,monospace}"
-".card p strong,.sensor-card p strong{display:inline;color:var(--color-text-primary);font-weight:var(--weight-semibold)}"
-".card p:has(strong),.sensor-card p:has(strong){color:var(--color-text-secondary);line-height:var(--leading-relaxed);margin-bottom:var(--space-sm);display:grid;grid-template-columns:minmax(140px,auto) 1fr;gap:var(--space-md);align-items:baseline}"
-".card p:has(strong) strong,.sensor-card p:has(strong) strong{text-align:left}"
-".card p:has(strong) span,.sensor-card p:has(strong) span{text-align:right;color:var(--color-text-secondary);word-break:break-word}"
-".card p:not(:has(strong)),.sensor-card p:not(:has(strong)){color:var(--color-text-secondary);line-height:1.4;margin-bottom:var(--space-sm);display:block;word-wrap:break-word;overflow-wrap:break-word;letter-spacing:normal}"
-".card-header{display:flex;align-items:center;justify-content:space-between;margin-bottom:var(--space-lg);padding-bottom:var(--space-md);border-bottom:2px solid var(--color-border-light)}"
-".card-footer{margin-top:var(--space-lg);padding-top:var(--space-md);border-top:1px solid var(--color-border-light);display:flex;gap:var(--space-md);flex-wrap:wrap}"
-".card-metric{display:flex;flex-direction:column;gap:var(--space-xs);align-items:center;text-align:center}"
-".card-metric-label{font-size:var(--text-xs);color:var(--color-text-tertiary);text-transform:uppercase;letter-spacing:0.05em;font-weight:var(--weight-semibold);text-align:center}"
-".card-metric-value{font-size:var(--text-2xl);font-weight:var(--weight-bold);color:var(--color-primary);font-family:Orbitron,monospace;text-align:center;line-height:1.2}"
-".status-item{display:flex;flex-direction:column;align-items:center;text-align:center;padding:var(--space-md);gap:var(--space-xs)}"
-".status-item strong{display:block;font-size:var(--text-sm);color:var(--color-text-primary);margin-bottom:var(--space-xs);font-weight:var(--weight-semibold)}"
-".status-item span{font-size:var(--text-base);color:var(--color-text-secondary)}"
-"/* ===== FORM LAYOUTS ===== */"
-".form-grid{display:grid;grid-template-columns:180px 1fr;gap:var(--space-md);align-items:center;margin:var(--space-md) 0;width:100%}"
-".form-grid label{font-weight:var(--weight-semibold);color:var(--color-text-primary);text-align:left}"
-".form-grid input,.form-grid select,.form-grid textarea{width:100%;max-width:100%;padding:var(--space-sm);border:1px solid var(--color-border-medium);border-radius:var(--radius-sm);font-size:var(--text-base)}"
-".form-grid textarea{font-family:monospace;resize:vertical}"
-"/* ===== HEAP USAGE BAR ===== */"
-".heap-bar{width:100%;height:24px;background:var(--color-bg-tertiary);border-radius:var(--radius-sm);position:relative;overflow:hidden;margin-top:var(--space-xs)}"
-".heap-bar-fill{height:100%;background:var(--color-success);transition:width 0.3s ease,background-color 0.3s ease;display:flex;align-items:center;justify-content:flex-end;padding-right:var(--space-sm);color:white;font-weight:var(--weight-semibold);font-size:var(--text-sm)}"
-".heap-bar-fill.warning{background:var(--color-warning)}"
-".heap-bar-fill.critical{background:var(--color-error)}"
-"/* ===== SECTION SPACING ===== */"
-".section-title{padding:var(--space-lg) 0;margin-bottom:var(--space-xl);border-bottom:3px solid var(--color-primary);display:flex;align-items:center;gap:var(--space-md)}"
-".sensor-card{margin-bottom:var(--space-xl)}"
-".sensor-card h3{margin-top:0;margin-bottom:var(--space-md);padding-bottom:var(--space-sm);border-bottom:2px solid var(--color-border-light)}"
-".sensor-card p:last-child{margin-bottom:0}"
-".sensor-card>p{word-wrap:break-word;overflow-wrap:break-word;hyphens:auto;max-width:100%}"
-".config-row{display:flex;justify-content:space-between;padding:var(--space-md);background:var(--color-bg-secondary);border-radius:var(--radius-md);color:var(--color-text-secondary)}"
-".config-row strong{color:var(--color-primary);font-weight:var(--weight-semibold)}"
-".status-box{border-radius:var(--radius-md);padding:var(--space-lg);margin-bottom:var(--space-md)}"
-".status-box.success{background:rgba(16,185,129,0.1);border:2px solid var(--color-success)}"
-".status-box.warning{background:rgba(245,158,11,0.1);border:2px solid var(--color-warning)}"
-".status-title{font-weight:var(--weight-bold);font-size:var(--text-lg);margin-bottom:var(--space-sm)}"
-".status-title.success{color:var(--color-success)}"
-".status-title.warning{color:var(--color-warning)}"
-".info-box{background:var(--color-bg-secondary);border-radius:var(--radius-md);padding:var(--space-md)}"
-".hint{color:var(--color-text-tertiary);font-size:var(--text-sm)}"
-"/* ===== LAYOUT ===== */"
-".container{display:flex;min-height:100vh;position:relative;z-index:1}"
-"/* ===== SIDEBAR ===== */"
-".sidebar{width:320px;background:rgba(255,255,255,0.95);padding:0;position:fixed;height:100vh;overflow-y:auto;overflow-x:hidden;border-right:1px solid rgba(255,255,255,0.3);box-shadow:8px 0 40px rgba(0,0,0,0.12);z-index:var(--z-sticky);scrollbar-width:thin;scrollbar-color:var(--color-border-medium) transparent;-webkit-overflow-scrolling:touch;display:flex;flex-direction:column}"
-".sidebar .header{flex-shrink:0}"
-".sidebar-nav{display:flex;flex-direction:column;flex:1;justify-content:space-evenly;padding:10px 0}"
-".sidebar::-webkit-scrollbar{width:6px}"
-".sidebar::-webkit-scrollbar-track{background:transparent}"
-".sidebar::-webkit-scrollbar-thumb{background:var(--color-border-medium);border-radius:var(--radius-full)}"
-".sidebar::-webkit-scrollbar-thumb:hover{background:var(--color-border-dark)}"
-".main-content{margin-left:320px;padding:var(--space-2xl);flex:1;max-width:calc(100% - 320px)}"
-"/* ===== NAVIGATION MENU ===== */"
-".menu-item{display:flex;align-items:center;gap:16px;width:100%;padding:16px 24px;color:var(--color-text-primary);text-decoration:none;border:none;background:transparent;cursor:pointer;text-align:left;font-size:13px;font-family:Orbitron,monospace;font-weight:var(--weight-semibold);text-transform:uppercase;letter-spacing:0.08em;transition:background-color var(--transition-fast),color var(--transition-fast);position:relative;overflow:hidden;box-sizing:border-box;border-radius:8px;margin:4px 12px}"
-".menu-item::before{content:'';position:absolute;left:0;top:0;bottom:0;width:0;background:linear-gradient(180deg,var(--color-primary),var(--color-accent));transition:width var(--transition-fast)}"
-".menu-item:hover{background:var(--color-primary-light);color:var(--color-primary)}"
-".menu-item:hover::before{width:4px}"
-".menu-item.active{background:linear-gradient(135deg,var(--color-primary),var(--color-accent));color:#fff;box-shadow:0 4px 16px var(--glow-primary),inset 0 1px 0 rgba(255,255,255,0.2);font-weight:var(--weight-bold)}"
-".menu-item.active::before{width:4px;background:var(--color-success)}"
-".menu-item.active .menu-icon{transform:scale(1.1);filter:drop-shadow(0 0 8px rgba(255,255,255,0.5))}"
-".menu-icon{width:24px;height:24px;min-width:24px;display:inline-flex;align-items:center;justify-content:center;transition:all var(--transition-base);flex-shrink:0}"
-"svg.menu-icon{stroke:currentColor;fill:none}"
-"/* ===== SECTIONS ===== */"
-".section{display:none;background:rgba(255,255,255,0.95);border:1px solid rgba(255,255,255,0.4);border-radius:var(--radius-2xl);padding:var(--space-2xl);margin-bottom:var(--space-2xl);box-shadow:var(--shadow-lg);position:relative;overflow:hidden;animation:fadeInUp 0.3s ease-out;width:100%;box-sizing:border-box}"
-".section.active{display:block}"
-".section::before{content:'';position:absolute;top:0;left:0;right:0;height:4px;background:linear-gradient(90deg,var(--color-primary) 0%,var(--color-accent) 50%,var(--color-success) 100%);box-shadow:0 2px 8px var(--glow-primary)}"
-"@keyframes fadeInUp{from{opacity:0;transform:translateY(30px)}to{opacity:1;transform:translateY(0)}}"
-".section-title{font-size:var(--text-3xl);font-weight:var(--weight-extrabold);color:var(--color-primary);font-family:Orbitron,monospace;margin-bottom:var(--space-2xl);display:flex;align-items:center;gap:var(--space-md);padding-bottom:var(--space-lg);border-bottom:3px solid var(--color-border-light);position:relative}"
-".section-title::after{content:'';position:absolute;bottom:-3px;left:0;width:80px;height:3px;background:linear-gradient(90deg,var(--color-primary),var(--color-accent));border-radius:var(--radius-full)}"
-".section-title i{width:48px;height:48px;display:flex;align-items:center;justify-content:center;background:linear-gradient(135deg,var(--color-primary),var(--color-accent));border-radius:var(--radius-md);color:#fff;font-size:var(--text-xl);box-shadow:var(--shadow-md)}"
-"/* ===== SIDEBAR HEADER ===== */"
-".sidebar .header{background:rgba(255,255,255,0.98);border-bottom:1px solid rgba(255,255,255,0.4);padding:var(--space-lg) var(--space-md);margin:0;border-radius:0;box-shadow:0 2px 10px rgba(0,0,0,0.05);position:relative;overflow:visible;display:flex;justify-content:center;align-items:center}"
-".sidebar .header::before{content:'';position:absolute;top:0;left:0;right:0;height:3px;background:linear-gradient(90deg,#0066cc 0%,#00aaff 100%);box-shadow:0 1px 4px rgba(0,102,204,0.3)}"
-".sidebar .logo{height:40px;width:auto}"
-"/* ===== STATUS INDICATORS ===== */"
-"#heap_usage{color:var(--color-warning);font-weight:var(--weight-bold)}#wifi_status{color:var(--color-success);font-weight:var(--weight-bold)}#uptime{color:var(--color-accent);font-weight:var(--weight-bold)}"
-"#networks{scrollbar-width:thin;scrollbar-color:#c1c1c1 #f1f1f1}#networks::-webkit-scrollbar{width:8px}#networks::-webkit-scrollbar-track{background:#f1f1f1;border-radius:4px}#networks::-webkit-scrollbar-thumb{background:#c1c1c1;border-radius:4px}#networks::-webkit-scrollbar-thumb:hover{background:#a8a8a8}"
-".wifi-grid{display:grid;grid-template-columns:120px 1fr;gap:15px;align-items:center;margin:20px 0}"
-".wifi-input-group{position:relative;display:flex;align-items:center;width:100%}"
-".wifi-grid label{text-align:left;font-weight:var(--weight-semibold);color:var(--color-text-primary)}"
-".wifi-grid input,.wifi-grid select{width:100%;max-width:100%}"
-".scan-button{background:linear-gradient(135deg,var(--color-accent),var(--color-success));transition:all .3s;box-shadow:0 2px 8px rgba(56,178,172,.3);border:none;color:white;font-family:Orbitron,monospace;font-weight:600;padding:var(--space-md) var(--space-lg)}.scan-button:hover{transform:translateY(-1px);box-shadow:0 4px 12px rgba(56,178,172,.4)}"
-".network-item{padding:var(--space-md);border-radius:var(--radius-md);border:1px solid var(--color-border-light);margin-bottom:var(--space-sm);transition:all var(--transition-base);background:var(--color-bg-primary)}"
-".network-item:hover{transform:translateY(-2px);box-shadow:var(--shadow-sm);border-color:var(--color-primary);background:var(--color-primary-light)}"
-"/* ===== UTILITY CLASSES ===== */"
-".grid{display:grid;gap:var(--space-lg)}"
-".grid-2{grid-template-columns:repeat(auto-fit,minmax(300px,1fr))}"
-".grid-3{grid-template-columns:repeat(auto-fit,minmax(250px,1fr))}"
-".grid-4{grid-template-columns:repeat(auto-fit,minmax(200px,1fr))}"
-".flex{display:flex;gap:var(--space-md)}"
-".flex-center{display:flex;align-items:center;justify-content:center}"
-".flex-between{display:flex;align-items:center;justify-content:space-between}"
-".flex-col{flex-direction:column}"
-".gap-sm{gap:var(--space-sm)}.gap-md{gap:var(--space-md)}.gap-lg{gap:var(--space-lg)}"
-".text-center{text-align:center}.text-right{text-align:right}"
-".mt-0{margin-top:0}.mt-sm{margin-top:var(--space-sm)}.mt-md{margin-top:var(--space-md)}.mt-lg{margin-top:var(--space-lg)}"
-".mb-0{margin-bottom:0}.mb-sm{margin-bottom:var(--space-sm)}.mb-md{margin-bottom:var(--space-md)}.mb-lg{margin-bottom:var(--space-lg)}"
-".p-sm{padding:var(--space-sm)}.p-md{padding:var(--space-md)}.p-lg{padding:var(--space-lg)}"
-".hidden{display:none}.visible{display:block}"
-"/* ===== RESPONSIVE DESIGN (Mobile-First) ===== */"
-"@media (max-width:480px){"
-"*{box-sizing:border-box}"
-":root{--space-xs:4px;--space-sm:8px;--space-md:12px;--space-lg:16px;--space-xl:20px;--space-2xl:24px;--space-3xl:28px}"
-"body{overflow-x:hidden;width:100%;max-width:100vw}"
-".container{display:block;width:100%;max-width:100vw;overflow-x:hidden}"
-".sidebar{width:100%!important;height:auto;position:static;overflow:visible;border-right:none;border-bottom:1px solid rgba(255,255,255,0.3);box-shadow:none}"
-".main-content{margin-left:0!important;padding:var(--space-md);width:100%;max-width:100vw;box-sizing:border-box}"
-".menu{display:flex;flex-wrap:wrap;justify-content:space-around;padding:var(--space-sm) 0}"
-".menu-item{flex:0 0 auto;padding:var(--space-sm) var(--space-md);font-size:11px;white-space:nowrap;margin:2px;border-radius:var(--radius-sm)}"
-".menu-item span{display:none}"
-".menu-icon{width:20px;height:20px;min-width:20px;margin:0}"
-".section{padding:var(--space-md);margin-bottom:var(--space-md);border-radius:var(--radius-md);width:100%;box-sizing:border-box}"
-".section-title{font-size:18px;margin-bottom:var(--space-md);padding-bottom:var(--space-sm);word-wrap:break-word}"
-".section-title i{width:28px;height:28px;font-size:16px}"
-".card,.sensor-card{padding:var(--space-md);margin:var(--space-sm) 0;border-radius:var(--radius-md);width:100%;box-sizing:border-box;min-height:auto}"
-".card h3,.sensor-card h3{font-size:16px;margin-bottom:var(--space-sm);color:var(--primary-700);font-weight:var(--weight-bold);word-wrap:break-word}"
-".card p:has(strong),.sensor-card p:has(strong){font-size:13px;line-height:1.5;color:var(--color-text-primary);word-wrap:break-word;grid-template-columns:110px 1fr;gap:var(--space-sm)}"
-".card p:has(strong) strong,.sensor-card p:has(strong) strong{font-size:12px;text-align:left;font-weight:var(--weight-semibold)}"
-".card p:has(strong) span,.sensor-card p:has(strong) span{font-size:13px;text-align:right;word-break:break-word}"
-".card p:not(:has(strong)),.sensor-card p:not(:has(strong)){font-size:13px;line-height:1.35;word-break:break-word;color:var(--color-text-secondary);margin-bottom:8px;letter-spacing:0}"
-".card strong,.sensor-card strong{display:block;color:var(--primary-800);font-size:13px;margin:var(--space-xs) 0}"
-".card-header{justify-content:flex-start;flex-wrap:wrap}"
-".card *,.sensor-card *{max-width:100%}"
-".card label,.sensor-card label{display:block;text-align:left;color:var(--primary-800);font-weight:var(--weight-semibold);margin-bottom:var(--space-xs);font-size:13px}"
-"input,select,textarea{width:100%!important;max-width:100%!important;padding:var(--space-sm);font-size:16px;border-radius:var(--radius-sm);box-sizing:border-box}"
-"button,.btn{padding:var(--space-sm) var(--space-md);width:100%!important;max-width:100%!important;font-size:13px;min-height:44px;white-space:normal;word-wrap:break-word;box-sizing:border-box}"
-".input-large,.input-medium,.input-small,.input-tiny{width:100%!important;max-width:100%!important}"
-".required-field,.optional-field{width:100%;max-width:100%;box-sizing:border-box;padding:8px}"
-".sensor-form-grid{display:block;width:100%}"
-".sensor-form-grid>*{width:100%;margin-bottom:var(--space-sm)}"
-".sensor-actions{display:flex;flex-direction:column;gap:8px;margin-top:10px;width:100%}"
-".sensor-actions button{width:100%!important;min-height:44px;padding:12px;margin:4px 0}"
-"table{font-size:11px;width:100%;display:block;overflow-x:auto;-webkit-overflow-scrolling:touch}"
-"thead,tbody,tr,th,td{display:block}"
-"th,td{padding:var(--space-xs) var(--space-sm);font-size:11px;text-align:left}"
-"tr{border-bottom:1px solid var(--color-border-light);padding:var(--space-xs) 0}"
-".header{flex-direction:column;align-items:center;justify-content:center;padding:var(--space-md);gap:var(--space-sm);width:100%;box-sizing:border-box}"
-".logo{height:32px;max-width:85%;width:auto;object-fit:contain}"
-".badge{font-size:10px;padding:3px var(--space-xs);white-space:nowrap}"
-".badge::before{width:4px;height:4px}"
-".card-metric{gap:6px;padding:var(--space-sm);flex-direction:column;align-items:flex-start}"
-".card-metric-label{font-size:11px;line-height:1.3}"
-".card-metric-value{font-size:20px;line-height:1.2}"
-".status-item{padding:var(--space-sm);gap:6px;flex-direction:column;align-items:flex-start}"
-".status-item strong{font-size:11px;margin-bottom:4px}"
-".status-item span{font-size:13px;word-wrap:break-word}"
-".grid,.grid-2,.grid-3,.grid-4{display:block;width:100%}"
-".grid>*,.grid-2>*,.grid-3>*,.grid-4>*{width:100%;margin-bottom:var(--space-md)}"
-".flex,.flex-between{flex-direction:column;align-items:stretch;gap:var(--space-sm);width:100%}"
-"h1{font-size:22px;line-height:1.3;word-wrap:break-word}h2{font-size:18px;line-height:1.3;word-wrap:break-word}h3{font-size:16px;line-height:1.4;word-wrap:break-word}"
-"p{font-size:13px;line-height:1.6;word-wrap:break-word}"
-".test-result,.alert{padding:var(--space-md);margin:var(--space-sm) 0;width:100%;box-sizing:border-box;word-wrap:break-word}"
-".sidebar .header{padding:var(--space-md);justify-content:center}"
-".sidebar .logo{height:32px;max-width:80%}"
-".wifi-grid{display:block;width:100%}"
-".wifi-grid>*{width:100%;margin-bottom:var(--space-sm)}"
-".wifi-grid label{font-size:13px;margin-bottom:6px;display:block}"
-".wifi-grid input,.wifi-grid select{width:100%!important}"
-".form-grid{display:block;width:100%}"
-".form-grid label{display:block;margin-bottom:6px;font-size:13px}"
-".form-grid input,.form-grid select,.form-grid textarea{width:100%!important;max-width:100%!important;margin-bottom:var(--space-md)}"
-".heap-bar{height:22px}"
-".heap-bar-fill{font-size:12px}"
-".section-title{font-size:18px;padding:var(--space-md) 0}"
-".scada-table{font-size:9px;overflow-x:auto;display:table;width:100%;-webkit-overflow-scrolling:touch;table-layout:fixed}"
-".scada-table th{padding:3px 4px;font-size:8px;white-space:normal;word-wrap:break-word}"
-".scada-table td{padding:2px 4px;font-size:9px;word-break:break-all;border-bottom:1px solid var(--color-border-light)}"
-".scada-table strong{font-size:8px}"
-".scada-breakdown{padding:var(--space-sm);font-size:10px}"
-".test-result{padding:var(--space-sm);margin:var(--space-sm) 0}"
-".test-result h4{font-size:var(--text-sm)}"
-"div[style*='grid-template-columns']{display:block!important}"
-"div[style*='grid-template-columns']>*{width:100%!important;margin-bottom:var(--space-sm)}"
-"}"
-"@media (min-width:481px) and (max-width:768px){"
-"*{box-sizing:border-box}"
-"body{overflow-x:hidden;width:100%;max-width:100vw}"
-".container{display:block;width:100%;max-width:100vw}"
-".sidebar{width:100%!important;height:auto;position:static;overflow:visible;border-right:none;border-bottom:1px solid rgba(255,255,255,0.3);box-shadow:none}"
-".main-content{margin-left:0!important;padding:var(--space-lg);width:100%;max-width:100vw;box-sizing:border-box}"
-".menu{display:flex;flex-wrap:wrap;gap:var(--space-sm)}"
-".menu-item{flex:1 1 auto;padding:var(--space-md) var(--space-lg);font-size:14px;min-width:120px;text-align:center}"
-".section{padding:var(--space-lg);margin-bottom:var(--space-lg);width:100%;box-sizing:border-box}"
-".section-title{font-size:24px}"
-".card,.sensor-card{padding:var(--space-lg);margin:var(--space-md) 0;width:100%;box-sizing:border-box}"
-".card p:has(strong),.sensor-card p:has(strong){grid-template-columns:160px 1fr;gap:var(--space-md)}"
-".card p:has(strong) strong,.sensor-card p:has(strong) strong{font-size:14px}"
-".card p:has(strong) span,.sensor-card p:has(strong) span{font-size:14px}"
-".card p:not(:has(strong)),.sensor-card p:not(:has(strong)){font-size:14px;line-height:1.4;word-break:break-word;margin-bottom:10px;letter-spacing:0}"
-"input,select,textarea{width:100%!important;max-width:100%!important;font-size:16px;box-sizing:border-box}"
-"button,.btn{padding:var(--space-md) var(--space-lg);width:100%;font-size:14px;min-height:48px;box-sizing:border-box}"
-"table{font-size:14px;overflow-x:auto;display:block;width:100%}"
-".header{flex-direction:row;text-align:center;padding:var(--space-lg);justify-content:center;width:100%;box-sizing:border-box}"
-".logo{height:38px;max-width:200px}"
-".company-info h1{font-size:20px}"
-".company-info p{font-size:12px}"
-".grid-2,.grid-3,.grid-4{grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:var(--space-md)}"
-".flex-between{flex-direction:column;align-items:stretch;gap:var(--space-md)}"
-".wifi-grid{display:grid;grid-template-columns:150px 1fr;gap:var(--space-md)}"
-"h1{font-size:28px}h2{font-size:24px}h3{font-size:20px}"
-"div[style*='grid-template-columns']{display:grid!important;grid-template-columns:repeat(auto-fit,minmax(200px,1fr))!important;gap:var(--space-md)}"
-"}"
-"@media (min-width:769px) and (max-width:1024px){"
-".sidebar{width:280px}"
-".main-content{margin-left:280px;padding:var(--space-xl)}"
-".grid-4{grid-template-columns:repeat(2,1fr)}"
-"}"
-"@media (min-width:769px){"
-".sensor-form-grid{grid-template-columns:160px 1fr;gap:12px}"
-".sensor-actions{flex-direction:row;flex-wrap:wrap}"
-".sensor-actions button{flex:1 1 auto;min-width:90px;width:auto;margin:2px}"
-"}"
-"@media (min-width:1025px){"
-".sidebar{width:320px}"
-".main-content{margin-left:320px;padding:var(--space-2xl)}"
-"}"
-"</style>"
-"<script>"
-"function showSection(sectionId){"
-"var sections=document.querySelectorAll('.section');"
-"var menuItems=document.querySelectorAll('.menu-item');"
-"sections.forEach(function(s){s.classList.remove('active');});"
-"menuItems.forEach(function(m){m.classList.remove('active');});"
-"var el=document.getElementById(sectionId);if(el)el.classList.add('active');"
-"var activeBtn=document.querySelector('[onclick*=\"'+sectionId+'\"]'); if(activeBtn) activeBtn.classList.add('active');"
-"}"
-"function showAzureSection(){"
-"const password=prompt('Azure IoT Configuration Access\\n\\nPlease enter the admin password to access Azure IoT Hub settings:');"
-"if(password===null) return;"
-"if(password==='admin123'){"
-"showSection('azure');"
-"}else{"
-"alert('Access Denied\\n\\nIncorrect password. Azure IoT Hub configuration is protected for security reasons.\\n\\nContact your system administrator if you need access.');"
-"}}"
-"function updateSystemStatus(){"
-"fetch('/api/system_status').then(response=>response.json()).then(data=>{"
-"document.getElementById('uptime').textContent=data.system.uptime_formatted;"
-"document.getElementById('mac_address').textContent=data.system.mac_address;"
-"document.getElementById('flash_total').textContent=(data.system.flash_total/1024/1024).toFixed(1)+' MB';"
-"document.getElementById('tasks').textContent=data.tasks.count;"
-"document.getElementById('heap').textContent=(data.memory.free_heap/1024).toFixed(1)+' KB';"
-"const heapUsage=document.getElementById('heap_usage');"
-"heapUsage.textContent=data.memory.heap_usage_percent.toFixed(1)+'%';"
-"heapUsage.className=data.memory.heap_usage_percent>80?'status-error':(data.memory.heap_usage_percent>60?'status-warning':'status-good');"
-"document.getElementById('internal_heap').textContent=(data.memory.internal_heap/1024).toFixed(1)+' KB';"
-"document.getElementById('spiram_heap').textContent=data.memory.spiram_heap>0?(data.memory.spiram_heap/1024).toFixed(1)+' KB':'Not Available';"
-"document.getElementById('largest_block').textContent=(data.memory.largest_free_block/1024).toFixed(1)+' KB';"
-"document.getElementById('app_partition').textContent=(data.partitions.app_partition_size/1024).toFixed(0)+' KB ('+data.partitions.app_usage_percent.toFixed(1)+'% used)';"
-"document.getElementById('nvs_partition').textContent=(data.partitions.nvs_partition_size/1024).toFixed(0)+' KB ('+data.partitions.nvs_usage_percent.toFixed(1)+'% used)';"
-"const wifiStatus=document.getElementById('wifi_status');"
-"wifiStatus.textContent=data.wifi.status;"
-"wifiStatus.className=data.wifi.status==='connected'?'status-good':'status-error';"
-"const rssi=document.getElementById('rssi');"
-"rssi.textContent=data.wifi.rssi+' dBm';"
-"rssi.className=data.wifi.rssi>-50?'status-good':(data.wifi.rssi>-70?'status-warning':'status-error');"
-"document.getElementById('ssid').textContent=data.wifi.ssid;"
-"if(data.sim){"
-"const simStatus=document.getElementById('sim_status');"
-"if(simStatus){"
-"simStatus.textContent=data.sim.status==='connected'?'Connected':'Disconnected';"
-"simStatus.className=data.sim.status==='connected'?'status-good':'status-error';"
-"}"
-"const simSignal=document.getElementById('sim_signal');"
-"if(simSignal){"
-"if(data.sim.signal!==0){simSignal.textContent=data.sim.signal+' dBm ('+data.sim.signal_quality+')';}"
-"else if(data.sim.status==='connected'){simSignal.textContent='Good';}"
-"else{simSignal.textContent='N/A';}"
-"}"
-"const simNetwork=document.getElementById('sim_network');"
-"if(simNetwork){"
-"if(data.sim.operator&&data.sim.operator!=='Unknown'){simNetwork.textContent=data.sim.operator;}"
-"else if(data.sim.status==='connected'){simNetwork.textContent='Connected';}"
-"else{simNetwork.textContent='N/A';}"
-"}"
-"const simIp=document.getElementById('sim_ip');"
-"if(simIp){"
-"if(data.sim.ip&&data.sim.ip!=='N/A'){simIp.textContent=data.sim.ip;}"
-"else if(data.sim.status==='connected'){simIp.textContent='Assigned';}"
-"else{simIp.textContent='N/A';}"
-"}"
-"}"
-"}).catch(err=>console.log('Status update failed:',err));"
-"fetch('/api/modbus/status').then(r=>r.json()).then(data=>{"
-"const ids=['modbus_','ov_modbus_'];"
-"ids.forEach(prefix=>{"
-"const el=document.getElementById(prefix+'total_reads');if(el)el.textContent=data.total_reads;"
-"const el2=document.getElementById(prefix+'success');if(el2)el2.textContent=data.successful_reads;"
-"const el3=document.getElementById(prefix+'failed');if(el3)el3.textContent=data.failed_reads;"
-"const rate=document.getElementById(prefix+'success_rate');"
-"if(rate){rate.textContent=data.success_rate.toFixed(1)+'%';rate.className=data.success_rate>95?'status-good':(data.success_rate>80?'status-warning':'status-error');}"
-"const el5=document.getElementById(prefix+'crc_errors');if(el5)el5.textContent=data.crc_errors;"
-"const el6=document.getElementById(prefix+'timeout_errors');if(el6)el6.textContent=data.timeout_errors;"
-"});"
-"}).catch(err=>console.log('Modbus status failed:',err));"
-"fetch('/api/azure/status').then(r=>r.json()).then(data=>{"
-"const ids=['azure_','ov_azure_'];"
-"ids.forEach(prefix=>{"
-"const conn=document.getElementById(prefix+'connection');"
-"if(conn){conn.textContent=data.connection_state;conn.className=data.connection_state==='connected'?'status-good':'status-error';}"
-"const hours=Math.floor(data.connection_uptime/3600);"
-"const mins=Math.floor((data.connection_uptime%3600)/60);"
-"const up=document.getElementById(prefix+'uptime');if(up)up.textContent=hours+'h '+mins+'m';"
-"const msg=document.getElementById(prefix+'messages');if(msg)msg.textContent=data.messages_sent;"
-"const lastTel=data.last_telemetry_ago;"
-"const lt=document.getElementById(prefix+'last_telemetry');if(lt)lt.textContent=lastTel>0?lastTel+'s ago':'Never';"
-"const rc=document.getElementById(prefix+'reconnects');if(rc)rc.textContent=data.reconnect_attempts;"
-"const did=document.getElementById(prefix+'device_id');if(did)did.textContent=data.device_id;"
-"});"
-"}).catch(err=>console.log('Azure status failed:',err));}"
+// HTML templates - loaded from embedded file (main/web/index.html)
+extern const uint8_t index_html_start[] asm("_binary_index_html_start");
+extern const uint8_t index_html_end[] asm("_binary_index_html_end");
 
-"function performWatchdogAction(action){"
-"const btn=event.target;"
-"const resultDiv=document.getElementById('watchdog-result');"
-"if(action==='reset'){"
-"if(!confirm('Are you sure you want to restart the system? This will disconnect all clients.'))return;"
-"btn.disabled=true;"
-"btn.textContent='🔄 Restarting...';"
-"resultDiv.innerHTML='<span style=\"color:#ff9500\">⚠️ System restart initiated. Device will reboot in 3 seconds...</span>';"
-"resultDiv.style.display='block';"
-"resultDiv.style.backgroundColor='#fff3cd';"
-"resultDiv.style.borderColor='#ffeaa7';"
-"resultDiv.style.color='#856404';"
-"}"
-"const formData=new URLSearchParams();formData.append('action',action);"
-"fetch('/watchdog_control',{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},body:formData})"
-".then(r=>r.json()).then(data=>{"
-"if(data.status==='success'){"
-"if(action==='reset'){"
-"setTimeout(()=>{window.location.reload();},5000);"
-"}else{"
-"resultDiv.innerHTML='<span style=\"color:#28a745\">✅ '+data.message+'</span>';"
-"resultDiv.style.display='block';"
-"resultDiv.style.backgroundColor='#d4edda';"
-"resultDiv.style.borderColor='#c3e6cb';"
-"resultDiv.style.color='#155724';"
-"updateWatchdogStatus();"
-"}"
-"}else{"
-"resultDiv.innerHTML='<span style=\"color:#dc3545\">❌ Error: '+data.message+'</span>';"
-"resultDiv.style.display='block';"
-"resultDiv.style.backgroundColor='#f8d7da';"
-"resultDiv.style.borderColor='#f5c6cb';"
-"resultDiv.style.color='#721c24';"
-"}"
-"}).catch(e=>{"
-"resultDiv.innerHTML='<span style=\"color:#dc3545\">❌ Communication Error: '+e.message+'</span>';"
-"resultDiv.style.display='block';"
-"resultDiv.style.backgroundColor='#f8d7da';"
-"resultDiv.style.borderColor='#f5c6cb';"
-"resultDiv.style.color='#721c24';"
-"}).finally(()=>{if(action!=='reset'){btn.disabled=false;btn.textContent=btn.textContent.replace('...','');}});"
-"}"
+// html_header now points to the embedded index.html file
+// This replaces the 650-line C string literal that was here before
 
-"function updateWatchdogStatus(){"
-"const formData=new URLSearchParams();formData.append('action','status');"
-"fetch('/watchdog_control',{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},body:formData})"
-".then(r=>r.json()).then(data=>{"
-"if(data.status==='success'){"
-"document.getElementById('wd-status').textContent=data.watchdog_enabled==='true'?'Enabled':'Disabled';"
-"document.getElementById('wd-timeout').textContent=data.timeout_seconds+' seconds';"
-"document.getElementById('wd-cpu0').textContent=data.cpu0_monitored==='true'?'Active':'Inactive';"
-"document.getElementById('wd-cpu1').textContent=data.cpu1_monitored==='true'?'Active':'Inactive';"
-"const uptimeMs=data.uptime_ms;"
-"const hours=Math.floor(uptimeMs/3600000);"
-"const minutes=Math.floor((uptimeMs%3600000)/60000);"
-"const seconds=Math.floor((uptimeMs%60000)/1000);"
-"document.getElementById('wd-uptime').textContent=hours+'h '+minutes+'m '+seconds+'s';"
-"}"
-"}).catch(err=>console.log('Watchdog status update failed:',err));"
-"}"
-
-"function setGPIO(){"
-"const pin=document.getElementById('gpio-pin').value;"
-"const value=document.getElementById('gpio-value').value;"
-"const resultDiv=document.getElementById('gpio-result');"
-"if(!pin||pin<0||pin>39){"
-"resultDiv.innerHTML='<span style=\"color:#dc3545\">❌ Invalid GPIO pin. Use 0-39.</span>';"
-"resultDiv.style.display='block';"
-"resultDiv.style.backgroundColor='#f8d7da';"
-"return;"
-"}"
-"const formData=new URLSearchParams();"
-"formData.append('action','set');"
-"formData.append('pin',pin);"
-"formData.append('value',value);"
-"fetch('/gpio_trigger',{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},body:formData})"
-".then(r=>r.json()).then(data=>{"
-"if(data.status==='success'){"
-"resultDiv.innerHTML='<span style=\"color:#28a745\">✅ GPIO '+data.pin+' set to '+(data.value==1?'HIGH':'LOW')+'</span>';"
-"resultDiv.style.backgroundColor='#d4edda';"
-"}else{"
-"resultDiv.innerHTML='<span style=\"color:#dc3545\">❌ Error: '+data.message+'</span>';"
-"resultDiv.style.backgroundColor='#f8d7da';"
-"}"
-"resultDiv.style.display='block';"
-"}).catch(e=>{"
-"resultDiv.innerHTML='<span style=\"color:#dc3545\">❌ Communication Error: '+e.message+'</span>';"
-"resultDiv.style.display='block';"
-"resultDiv.style.backgroundColor='#f8d7da';"
-"});"
-"}"
-
-"function readGPIO(){"
-"const pin=document.getElementById('gpio-read-pin').value;"
-"const resultDiv=document.getElementById('gpio-result');"
-"if(!pin||pin<0||pin>39){"
-"resultDiv.innerHTML='<span style=\"color:#dc3545\">❌ Invalid GPIO pin. Use 0-39.</span>';"
-"resultDiv.style.display='block';"
-"resultDiv.style.backgroundColor='#f8d7da';"
-"return;"
-"}"
-"const formData=new URLSearchParams();"
-"formData.append('action','read');"
-"formData.append('pin',pin);"
-"fetch('/gpio_trigger',{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},body:formData})"
-".then(r=>r.json()).then(data=>{"
-"if(data.status==='success'){"
-"resultDiv.innerHTML='<span style=\"color:#28a745\">📖 GPIO '+data.pin+' is '+(data.value==1?'HIGH (1)':'LOW (0)')+'</span>';"
-"resultDiv.style.backgroundColor='#d4edda';"
-"}else{"
-"resultDiv.innerHTML='<span style=\"color:#dc3545\">❌ Error: '+data.message+'</span>';"
-"resultDiv.style.backgroundColor='#f8d7da';"
-"}"
-"resultDiv.style.display='block';"
-"}).catch(e=>{"
-"resultDiv.innerHTML='<span style=\"color:#dc3545\">❌ Communication Error: '+e.message+'</span>';"
-"resultDiv.style.display='block';"
-"resultDiv.style.backgroundColor='#f8d7da';"
-"});"
-"}"
-
-"function quickGPIO(pin,value){"
-"const formData=new URLSearchParams();"
-"formData.append('action','set');"
-"formData.append('pin',pin);"
-"formData.append('value',value);"
-"const resultDiv=document.getElementById('gpio-result');"
-"fetch('/gpio_trigger',{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},body:formData})"
-".then(r=>r.json()).then(data=>{"
-"if(data.status==='success'){"
-"resultDiv.innerHTML='<span style=\"color:#28a745\">✅ Quick Control: GPIO '+pin+' set to '+(value==1?'HIGH':'LOW')+'</span>';"
-"resultDiv.style.backgroundColor='#d4edda';"
-"}else{"
-"resultDiv.innerHTML='<span style=\"color:#dc3545\">❌ Error: '+data.message+'</span>';"
-"resultDiv.style.backgroundColor='#f8d7da';"
-"}"
-"resultDiv.style.display='block';"
-"}).catch(e=>{"
-"resultDiv.innerHTML='<span style=\"color:#dc3545\">❌ Communication Error: '+e.message+'</span>';"
-"resultDiv.style.display='block';"
-"resultDiv.style.backgroundColor='#f8d7da';"
-"});"
-"}"
-
-"function toggleNetworkMode(){"
-"var w=document.getElementById('mode_wifi');var s=document.getElementById('mode_sim');"
-"if(!w||!s)return;"
-"var wm=w.checked;var sm=s.checked;"
-"var e=document.getElementById('wifi_panel');if(e)e.style.display=wm?'block':'none';"
-"e=document.getElementById('sim_panel');if(e)e.style.display=sm?'block':'none';"
-"e=document.getElementById('wifi-network-status');if(e)e.style.display=wm?'block':'none';"
-"e=document.getElementById('sim-network-status');if(e)e.style.display=sm?'block':'none';}"
-"function toggleSDOptions(){"
-"var c=document.getElementById('sd_enabled');if(!c)return;var en=c.checked;"
-"var e=document.getElementById('sd_options');if(e)e.style.display=en?'block':'none';"
-"e=document.getElementById('sd_hw_options');if(e)e.style.display=en?'block':'none';}"
-"function toggleRTCOptions(){"
-"var c=document.getElementById('rtc_enabled');if(!c)return;var en=c.checked;"
-"var e=document.getElementById('rtc_options');if(e)e.style.display=en?'block':'none';"
-"e=document.getElementById('rtc_hw_options');if(e)e.style.display=en?'block':'none';}"
-"function toggleAzurePassword(){"
-"var input=document.getElementById('azure_device_key');if(!input)return;"
-"var toggle=event.target;"
-"if(input.type==='password'){input.type='text';toggle.textContent='HIDE';}else{input.type='password';toggle.textContent='SHOW';}}"
-"function refreshOtaStatus(){"
-"fetch('/api/ota/status').then(function(r){return r.json();}).then(function(data){"
-"var e=document.getElementById('ota_current_version');if(e)e.textContent=data.current_version||'Unknown';"
-"e=document.getElementById('ota_current_partition');if(e)e.textContent=data.running_partition||'Unknown';"
-"e=document.getElementById('ota_status');if(e)e.textContent=data.state||'Idle';"
-"e=document.getElementById('ota_last_update');if(e&&data.last_update)e.textContent=data.last_update;"
-"}).catch(function(e){console.error('OTA status error:',e);});}"
-"function showSensorSubMenu(menuType){"
-"var r=document.getElementById('regular-sensors-list');"
-"var w=document.getElementById('water-quality-sensors-list');"
-"var m=document.getElementById('modbus-explorer-list');"
-"var br=document.getElementById('btn-regular-sensors');"
-"var bw=document.getElementById('btn-water-quality-sensors');"
-"var bm=document.getElementById('btn-modbus-explorer');"
-"if(menuType==='regular'){if(r)r.style.display='block';if(w)w.style.display='none';if(m)m.style.display='none';if(br)br.style.background='#007bff';if(bw)bw.style.background='#6c757d';if(bm)bm.style.background='#6c757d';}"
-"else if(menuType==='water_quality'){if(r)r.style.display='none';if(w)w.style.display='block';if(m)m.style.display='none';if(br)br.style.background='#6c757d';if(bw)bw.style.background='#17a2b8';if(bm)bm.style.background='#6c757d';}"
-"else if(menuType==='explorer'){if(r)r.style.display='none';if(w)w.style.display='none';if(m)m.style.display='block';if(br)br.style.background='#6c757d';if(bw)bw.style.background='#6c757d';if(bm)bm.style.background='#6c757d';}}"
-"window.onload=function(){const savedSection=sessionStorage.getItem('showSection');if(savedSection){sessionStorage.removeItem('showSection');if(savedSection==='azure'){showAzureSection();}else{showSection(savedSection);}}else{const hash=window.location.hash.substring(1);if(hash&&hash!==''){if(hash==='azure'){showAzureSection();}else{showSection(hash);}}else{showSection('overview');}}toggleNetworkMode();toggleSDOptions();toggleRTCOptions();updateSystemStatus();setInterval(updateSystemStatus,5000);refreshOtaStatus();if(document.getElementById('wd-uptime')){updateWatchdogStatus();setInterval(updateWatchdogStatus,30000);}}"
-"</script>"
-"</head><body>"
-"<div class='container'>"
-"<div class='sidebar'>"
-"<div class='header' style='padding:var(--space-2xl) var(--space-lg);flex-direction:column;gap:var(--space-md)'>"
-"<img src='/logo' class='logo' style='height:80px;max-width:100%;object-fit:contain' alt='FluxGen - Building a Water Positive Future'>"
-"</div>"
-"<nav class='sidebar-nav'>"
-"<button class='menu-item' onclick='showSection(\"overview\")'>"
-"<svg class='menu-icon' viewBox='0 0 24 24' fill='none' stroke='currentColor' stroke-width='2'><path d='M3 3v18h18'/><path d='M18 9l-5 5-4-4-6 6'/></svg>OVERVIEW"
-"</button>"
-"<button class='menu-item' onclick='showSection(\"wifi\")'>"
-"<svg class='menu-icon' viewBox='0 0 24 24' fill='none' stroke='currentColor' stroke-width='2'><circle cx='6' cy='6' r='3'/><circle cx='18' cy='6' r='3'/><circle cx='6' cy='18' r='3'/><circle cx='18' cy='18' r='3'/><path d='M6 9v6M18 9v6M9 6h6M9 18h6'/></svg>NETWORK CONFIG"
-"</button>"
-"<button class='menu-item' onclick='showAzureSection()'>"
-"<svg class='menu-icon' viewBox='0 0 24 24' fill='none' stroke='currentColor' stroke-width='2'><path d='M18 10h-1.26A8 8 0 109 20h9a5 5 0 000-10z'/></svg>AZURE IOT HUB"
-"</button>"
-"<button class='menu-item' onclick='showSection(\"sensors\")'>"
-"<svg class='menu-icon' viewBox='0 0 24 24' fill='none' stroke='currentColor' stroke-width='2'><rect x='4' y='4' width='16' height='16' rx='2'/><path d='M9 9h6v6H9z'/><path d='M9 2v2M15 2v2M9 20v2M15 20v2M2 9h2M2 15h2M20 9h2M20 15h2'/></svg>MODBUS SENSORS"
-"</button>"
-"<button class='menu-item' onclick='showSection(\"write_ops\")'>"
-"<svg class='menu-icon' viewBox='0 0 24 24' fill='none' stroke='currentColor' stroke-width='2'><path d='M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7'/><path d='M18.5 2.5a2.121 2.121 0 013 3L12 15l-4 1 1-4 9.5-9.5z'/></svg>WRITE OPERATIONS"
-"</button>"
-"<button class='menu-item' onclick='showSection(\"ota\")'>"
-"<svg class='menu-icon' viewBox='0 0 24 24' fill='none' stroke='currentColor' stroke-width='2'><path d='M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4'/><polyline points='17 8 12 3 7 8'/><line x1='12' y1='3' x2='12' y2='15'/></svg>OTA UPDATE"
-"</button>"
-"</nav>"
-"</div>"
-"<div class='main-content'>";
+// Legacy html_header compatibility - original started here:
+// "<!DOCTYPE html><html><head>"
 
 static const char* html_footer = "</div></div></body></html>";
 
@@ -1842,6 +1203,8 @@ static esp_err_t favicon_handler(httpd_req_t *req)
 // Configuration page HTML
 static esp_err_t config_page_handler(httpd_req_t *req)
 {
+    // Require authentication - redirect to login if not authenticated
+    CHECK_AUTH_PAGE(req);
     // Check available heap before processing - need at least 15KB free
     size_t free_heap = esp_get_free_heap_size();
     if (free_heap < 15000) {
@@ -1887,10 +1250,10 @@ static esp_err_t config_page_handler(httpd_req_t *req)
     html_escape(escaped_password, g_system_config.wifi_password, sizeof(escaped_password));
 
     // Send HTML header in small pieces to avoid TCP send buffer overflow
-    // html_header is ~125KB - sending as one chunk overwhelms the 5760-byte TCP buffer
+    // Send embedded index.html in chunks (from main/web/index.html)
     {
-        const char *ptr = html_header;
-        size_t remaining = strlen(html_header);
+        const char *ptr = (const char *)index_html_start;
+        size_t remaining = (size_t)(index_html_end - index_html_start);
         while (remaining > 0) {
             size_t send_len = remaining > 4096 ? 4096 : remaining;
             if (httpd_resp_send_chunk(req, ptr, send_len) != ESP_OK) {
@@ -6143,8 +5506,8 @@ static esp_err_t save_config_handler(httpd_req_t *req)
 
     // Send HTML header in small chunks (same pattern as config_page_handler)
     {
-        const char *ptr = html_header;
-        size_t remaining = strlen(html_header);
+        const char *ptr = (const char *)index_html_start;
+        size_t remaining = (size_t)(index_html_end - index_html_start);
         while (remaining > 0) {
             size_t send_len = remaining > 4096 ? 4096 : remaining;
             if (httpd_resp_send_chunk(req, ptr, send_len) != ESP_OK) {
@@ -9776,11 +9139,152 @@ static esp_err_t api_ota_upload_handler(httpd_req_t *req) {
 }
 
 // Start HTTP server
+
+// ============================================================================
+// AUTHENTICATION HANDLERS
+// ============================================================================
+
+// Embedded login page
+extern const uint8_t login_html_start[] asm("_binary_login_html_start");
+extern const uint8_t login_html_end[] asm("_binary_login_html_end");
+
+// Login page handler (no auth required)
+static esp_err_t login_page_handler(httpd_req_t *req) {
+    // If already authenticated, redirect to main page
+    if (auth_check_request(req)) {
+        httpd_resp_set_status(req, "302 Found");
+        httpd_resp_set_hdr(req, "Location", "/");
+        httpd_resp_sendstr(req, "Already logged in");
+        return ESP_OK;
+    }
+    httpd_resp_set_type(req, "text/html");
+    httpd_resp_send(req, (const char *)login_html_start,
+                    (ssize_t)(login_html_end - login_html_start));
+    return ESP_OK;
+}
+
+// Login API handler (no auth required)
+static esp_err_t login_api_handler(httpd_req_t *req) {
+    char buf[256] = {0};
+    int ret = httpd_req_recv(req, buf, sizeof(buf) - 1);
+    if (ret <= 0) {
+        httpd_resp_set_type(req, "application/json");
+        httpd_resp_sendstr(req, "{\"success\":false,\"message\":\"No data received\"}");
+        return ESP_OK;
+    }
+
+    // Parse username and password from form data
+    char username[32] = {0}, password[64] = {0};
+    char *p;
+
+    p = strstr(buf, "username=");
+    if (p) {
+        p += 9;
+        int i = 0;
+        while (*p && *p != '&' && i < 31) {
+            if (*p == '+') { username[i++] = ' '; p++; }
+            else if (*p == '%' && p[1] && p[2]) {
+                char hex[3] = {p[1], p[2], 0};
+                username[i++] = (char)strtol(hex, NULL, 16);
+                p += 3;
+            } else { username[i++] = *p++; }
+        }
+    }
+
+    p = strstr(buf, "password=");
+    if (p) {
+        p += 9;
+        int i = 0;
+        while (*p && *p != '&' && i < 63) {
+            if (*p == '+') { password[i++] = ' '; p++; }
+            else if (*p == '%' && p[1] && p[2]) {
+                char hex[3] = {p[1], p[2], 0};
+                password[i++] = (char)strtol(hex, NULL, 16);
+                p += 3;
+            } else { password[i++] = *p++; }
+        }
+    }
+
+    httpd_resp_set_type(req, "application/json");
+
+    if (auth_verify_credentials(username, password)) {
+        const char *token = auth_create_session();
+        char cookie[128];
+        snprintf(cookie, sizeof(cookie), "session=%s; Path=/; HttpOnly; SameSite=Strict", token);
+        httpd_resp_set_hdr(req, "Set-Cookie", cookie);
+        httpd_resp_sendstr(req, "{\"success\":true}");
+    } else {
+        httpd_resp_sendstr(req, "{\"success\":false,\"message\":\"Invalid username or password\"}");
+    }
+    return ESP_OK;
+}
+
+// Logout handler
+static esp_err_t logout_handler(httpd_req_t *req) {
+    // Extract session token from cookie and destroy it
+    char cookie_buf[256] = {0};
+    if (httpd_req_get_hdr_value_str(req, "Cookie", cookie_buf, sizeof(cookie_buf)) == ESP_OK) {
+        char *session_start = strstr(cookie_buf, "session=");
+        if (session_start) {
+            session_start += 8;
+            char token[33] = {0};
+            int i = 0;
+            while (session_start[i] && session_start[i] != ';' && i < 32) {
+                token[i] = session_start[i]; i++;
+            }
+            auth_destroy_session(token);
+        }
+    }
+
+    // Clear the cookie
+    httpd_resp_set_hdr(req, "Set-Cookie", "session=; Path=/; HttpOnly; Max-Age=0");
+    httpd_resp_set_status(req, "302 Found");
+    httpd_resp_set_hdr(req, "Location", "/login");
+    httpd_resp_sendstr(req, "Logged out");
+    return ESP_OK;
+}
+
+// Change password API handler
+static esp_err_t change_password_handler(httpd_req_t *req) {
+    CHECK_AUTH(req);
+
+    char buf[256] = {0};
+    int ret = httpd_req_recv(req, buf, sizeof(buf) - 1);
+    if (ret <= 0) {
+        httpd_resp_set_type(req, "application/json");
+        httpd_resp_sendstr(req, "{\"success\":false,\"message\":\"No data\"}");
+        return ESP_OK;
+    }
+
+    char old_pass[64] = {0}, new_pass[64] = {0};
+    char *p;
+
+    p = strstr(buf, "old_password=");
+    if (p) { p += 13; int i = 0; while (*p && *p != '&' && i < 63) old_pass[i++] = *p++; }
+
+    p = strstr(buf, "new_password=");
+    if (p) { p += 13; int i = 0; while (*p && *p != '&' && i < 63) new_pass[i++] = *p++; }
+
+    httpd_resp_set_type(req, "application/json");
+
+    if (strlen(new_pass) < 6) {
+        httpd_resp_sendstr(req, "{\"success\":false,\"message\":\"Password must be at least 6 characters\"}");
+        return ESP_OK;
+    }
+
+    if (auth_change_password(old_pass, new_pass) == ESP_OK) {
+        httpd_resp_sendstr(req, "{\"success\":true,\"message\":\"Password changed. Please login again.\"}");
+    } else {
+        httpd_resp_sendstr(req, "{\"success\":false,\"message\":\"Current password is incorrect\"}");
+    }
+    return ESP_OK;
+}
+
 static esp_err_t start_webserver(void)
 {
     httpd_config_t config = HTTPD_DEFAULT_CONFIG();
     config.server_port = 80;
-    config.max_uri_handlers = 60; // Increased to accommodate all 51+ handlers (SIM/SD/RTC/Modbus/Quality sensors)
+    config.max_uri_handlers = 70; // Auth + WebSocket + provisioning handlers
     config.max_open_sockets = 7;      // Must handle concurrent: page stream + /logo + /favicon + API calls
     config.stack_size = 12288;        // 12KB stack for 5KB chunk buffer + overhead
     config.task_priority = 6;         // Higher priority for faster response (was 5)
@@ -9795,6 +9299,8 @@ static esp_err_t start_webserver(void)
     config.keep_alive_count = 3;      // Allow 3 probes before closing
 
     if (httpd_start(&g_server, &config) == ESP_OK) {
+        // Initialize authentication
+        auth_init();
         // Main configuration page
         httpd_uri_t config_uri = {
             .uri = "/",
@@ -9803,6 +9309,42 @@ static esp_err_t start_webserver(void)
             .user_ctx = NULL
         };
         httpd_register_uri_handler(g_server, &config_uri);
+
+        // Login page (no auth required)
+        httpd_uri_t login_page_uri = {
+            .uri = "/login",
+            .method = HTTP_GET,
+            .handler = login_page_handler,
+            .user_ctx = NULL
+        };
+        httpd_register_uri_handler(g_server, &login_page_uri);
+
+        // Login API (no auth required)
+        httpd_uri_t login_api_uri = {
+            .uri = "/api/login",
+            .method = HTTP_POST,
+            .handler = login_api_handler,
+            .user_ctx = NULL
+        };
+        httpd_register_uri_handler(g_server, &login_api_uri);
+
+        // Logout
+        httpd_uri_t logout_uri = {
+            .uri = "/logout",
+            .method = HTTP_GET,
+            .handler = logout_handler,
+            .user_ctx = NULL
+        };
+        httpd_register_uri_handler(g_server, &logout_uri);
+
+        // Change password API
+        httpd_uri_t change_password_uri = {
+            .uri = "/api/change_password",
+            .method = HTTP_POST,
+            .handler = change_password_handler,
+            .user_ctx = NULL
+        };
+        httpd_register_uri_handler(g_server, &change_password_uri);
 
         // Save configuration
         httpd_uri_t save_uri = {
@@ -10311,6 +9853,9 @@ static esp_err_t start_webserver(void)
             .user_ctx = NULL
         };
         httpd_register_uri_handler(g_server, &api_ota_reboot_uri);
+// Initialize WebSocket server for real-time data push
+        ws_init(g_server);
+        provisioning_register_handlers(g_server);
 
         ESP_LOGI(TAG, "SUCCESS: OTA API endpoints registered (/api/ota/status, /api/ota/start, /api/ota/upload, /api/ota/cancel, /api/ota/confirm, /api/ota/reboot)");
 
