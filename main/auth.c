@@ -7,6 +7,7 @@
 #include "nvs_flash.h"
 #include "nvs.h"
 #include "mbedtls/sha256.h"
+#include <inttypes.h>
 #include <string.h>
 #include <stdio.h>
 #include <time.h>
@@ -55,7 +56,7 @@ static void generate_token(char *token, size_t len) {
         uint32_t rand = esp_random();
         size_t remaining = len - i;
         size_t to_write = remaining > 8 ? 8 : remaining;
-        snprintf(token + i, to_write + 1, "%08x", rand);
+        snprintf(token + i, to_write + 1, "%08" PRIx32, rand);
     }
     token[len] = '\0';
 }

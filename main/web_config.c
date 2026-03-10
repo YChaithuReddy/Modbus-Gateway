@@ -2027,10 +2027,12 @@ static esp_err_t config_page_handler(httpd_req_t *req)
         if (g_system_config.sensors[i].enabled &&
             (strcmp(g_system_config.sensors[i].sensor_type, "QUALITY") == 0 ||
              strcmp(g_system_config.sensors[i].sensor_type, "Aquadax_Quality") == 0 ||
-             strcmp(g_system_config.sensors[i].sensor_type, "Opruss_Ace") == 0)) {
+             strcmp(g_system_config.sensors[i].sensor_type, "Opruss_Ace") == 0 ||
+             strcmp(g_system_config.sensors[i].sensor_type, "Aster") == 0)) {
             has_quality_sensors = true;
             bool is_aquadax = (strcmp(g_system_config.sensors[i].sensor_type, "Aquadax_Quality") == 0);
             bool is_opruss_ace = (strcmp(g_system_config.sensors[i].sensor_type, "Opruss_Ace") == 0);
+            bool is_aster = (strcmp(g_system_config.sensors[i].sensor_type, "Aster") == 0);
             ESP_LOGI(TAG, "Water Quality Sensor %d: %s (type: %s)", i, g_system_config.sensors[i].name, g_system_config.sensors[i].sensor_type);
 
             if (is_aquadax) {
@@ -2103,6 +2105,38 @@ static esp_err_t config_page_handler(httpd_req_t *req)
                     i, i, i, i);
                 SEND_OR_ABORT(req, chunk);
                 continue;  // Skip shared button code below
+            } else if (is_aster) {
+                // Aster card - entire card in single send to reduce TCP round trips
+                snprintf(chunk, sizeof(chunk),
+                    "<div class='sensor-card' id='sensor-card-%d'>"
+                    "<div style='display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;padding-bottom:10px;border-bottom:2px solid #8e44ad'>"
+                    "<h3 style='margin:0;font-size:18px'>%s <span style='color:#888;font-weight:normal'>(Sensor %d)</span></h3>"
+                    "<span style='background:linear-gradient(135deg,#8e44ad,#9b59b6);color:white;padding:4px 14px;border-radius:20px;font-size:12px;font-weight:600'>ASTER</span>"
+                    "</div>"
+                    "<div style='display:grid;grid-template-columns:1fr 1fr;gap:8px 20px;margin-bottom:12px;padding:12px;background:#f8f9fa;border-radius:8px;font-size:13px'>"
+                    "<div><strong style='color:#555'>Unit ID:</strong> <span style='color:#0d6efd'>%s</span></div>"
+                    "<div><strong style='color:#555'>Slave ID:</strong> %d</div>"
+                    "<div><strong style='color:#555'>Register:</strong> %d (0x%04X)</div>"
+                    "<div><strong style='color:#555'>Baud Rate:</strong> %d bps</div>"
+                    "<div><strong style='color:#555'>Quantity:</strong> 4 registers</div>"
+                    "<div><strong style='color:#555'>Data Format:</strong> UINT16</div>"
+                    "</div>"
+                    "<div style='display:flex;flex-wrap:wrap;gap:6px;margin-bottom:10px'>"
+                    "<span style='background:#e8daef;color:#6c3483;padding:4px 10px;border-radius:12px;font-size:12px;font-weight:600;border:1px solid #d2b4de'>pH</span>"
+                    "<span style='background:#e8daef;color:#6c3483;padding:4px 10px;border-radius:12px;font-size:12px;font-weight:600;border:1px solid #d2b4de'>TDS</span>"
+                    "</div>"
+                    "<button type='button' onclick='editSensor(%d)' style='background:#17a2b8;color:white;margin:2px;padding:6px 12px'>Edit</button> "
+                    "<button type='button' onclick='testSensor(%d)' style='background:#007bff;color:white;margin:2px;padding:6px 12px'>Test RS485</button> "
+                    "<button type='button' onclick='deleteSensor(%d)' style='background:#dc3545;color:white;margin:2px;padding:6px 12px'>Delete</button>"
+                    "<div id='test-result-%d' class='test-result' style='display:none'></div>"
+                    "</div>",
+                    i, g_system_config.sensors[i].name, i + 1,
+                    g_system_config.sensors[i].unit_id, g_system_config.sensors[i].slave_id,
+                    g_system_config.sensors[i].register_address, g_system_config.sensors[i].register_address,
+                    g_system_config.sensors[i].baud_rate > 0 ? g_system_config.sensors[i].baud_rate : 9600,
+                    i, i, i, i);
+                SEND_OR_ABORT(req, chunk);
+                continue;  // Skip shared button code below
             } else {
                 snprintf(chunk, sizeof(chunk),
                     "<div class='sensor-card' id='sensor-card-%d'>"
@@ -2162,6 +2196,7 @@ static esp_err_t config_page_handler(httpd_req_t *req)
         "<button type='button' onclick='addWaterQualitySensor()' style='background:linear-gradient(135deg,#17a2b8,#20c997);color:white;padding:14px 35px;margin:10px;border:none;border-radius:8px;font-size:16px;font-weight:600;cursor:pointer;box-shadow:0 4px 12px rgba(23,162,184,0.3);transition:all 0.3s ease' onmouseover='this.style.transform=\"translateY(-2px)\";this.style.boxShadow=\"0 6px 16px rgba(23,162,184,0.4)\"' onmouseout='this.style.transform=\"translateY(0)\";this.style.boxShadow=\"0 4px 12px rgba(23,162,184,0.3)\"'>💧 Add Water Quality Sensor</button>"
         "<button type='button' onclick='addAquadaxQualitySensor()' style='background:linear-gradient(135deg,#0d6efd,#6610f2);color:white;padding:14px 35px;margin:10px;border:none;border-radius:8px;font-size:16px;font-weight:600;cursor:pointer;box-shadow:0 4px 12px rgba(13,110,253,0.3);transition:all 0.3s ease' onmouseover='this.style.transform=\"translateY(-2px)\";this.style.boxShadow=\"0 6px 16px rgba(13,110,253,0.4)\"' onmouseout='this.style.transform=\"translateY(0)\";this.style.boxShadow=\"0 4px 12px rgba(13,110,253,0.3)\"'>💧 Add Aquadax Quality Sensor</button>"
         "<button type='button' onclick='addOprussAceSensor()' style='background:linear-gradient(135deg,#e67e22,#f39c12);color:white;padding:14px 35px;margin:10px;border:none;border-radius:8px;font-size:16px;font-weight:600;cursor:pointer;box-shadow:0 4px 12px rgba(230,126,34,0.3);transition:all 0.3s ease' onmouseover='this.style.transform=\"translateY(-2px)\";this.style.boxShadow=\"0 6px 16px rgba(230,126,34,0.4)\"' onmouseout='this.style.transform=\"translateY(0)\";this.style.boxShadow=\"0 4px 12px rgba(230,126,34,0.3)\"'>💧 Add Opruss Ace Sensor</button>"
+        "<button type='button' onclick='addAsterSensor()' style='background:linear-gradient(135deg,#8e44ad,#9b59b6);color:white;padding:14px 35px;margin:10px;border:none;border-radius:8px;font-size:16px;font-weight:600;cursor:pointer;box-shadow:0 4px 12px rgba(142,68,173,0.3);transition:all 0.3s ease' onmouseover='this.style.transform=\"translateY(-2px)\";this.style.boxShadow=\"0 6px 16px rgba(142,68,173,0.4)\"' onmouseout='this.style.transform=\"translateY(0)\";this.style.boxShadow=\"0 4px 12px rgba(142,68,173,0.3)\"'>💧 Add Aster Sensor</button>"
         "<p style='color:#666;font-size:12px;margin:10px 0 5px 0'>Create individual water quality sensors with unique Unit IDs and custom Modbus configurations</p>"
         "</div>");
     
@@ -2556,6 +2591,60 @@ static esp_err_t config_page_handler(httpd_req_t *req)
         "  console.log('SUCCESS: Opruss Ace sensor added. Updated count:', sensorCount);"
         "  alert('SUCCESS: Opruss Ace sensor form added!\\n\\nSTEPS:\\n1. Fill in Name and Unit ID\\n2. Set Slave ID and Register Address (default 0)\\n3. Click Save Sensor\\n\\nReads COD (reg 0-1), BOD (reg 6-7), TSS (reg 20-21) as FLOAT32 CDAB.');"
         "}"
+        "function addAsterSensor() {"
+        "  console.log('ADD ASTER SENSOR CLICKED - Current count:', sensorCount);"
+        "  var div = document.getElementById('water-quality-sensors-list');"
+        "  if (!div) { alert('ERROR: Water quality sensors container not found!'); return; }"
+        "  var h = '<div class=\"sensor-card\" id=\"sensor-card-' + sensorCount + '\" style=\"border:2px solid #8e44ad;border-radius:8px;padding:25px;margin:20px 0;background:#ffffff;box-shadow:0 2px 4px rgba(0,0,0,0.1)\">';"
+        "  h += '<h4 style=\"color:#8e44ad;margin-top:0;margin-bottom:20px;font-size:18px\">New Aster Sensor ' + (sensorCount+1) + '</h4>';"
+        "  h += '<input type=\"hidden\" name=\"sensor_' + sensorCount + '_sensor_type\" value=\"Aster\">';"
+        "  h += '<input type=\"hidden\" name=\"sensor_' + sensorCount + '_data_type\" value=\"ASTER_FIXED\">';"
+        "  h += '<input type=\"hidden\" name=\"sensor_' + sensorCount + '_byte_order\" value=\"BIG_ENDIAN\">';"
+        "  h += '<input type=\"hidden\" name=\"sensor_' + sensorCount + '_register_type\" value=\"HOLDING\">';"
+        "  h += '<input type=\"hidden\" name=\"sensor_' + sensorCount + '_quantity\" value=\"4\">';"
+        "  h += '<input type=\"hidden\" name=\"sensor_' + sensorCount + '_scale_factor\" value=\"0.01\">';"
+        "  h += '<input type=\"hidden\" name=\"sensor_' + sensorCount + '_sensor_height\" value=\"0\">';"
+        "  h += '<input type=\"hidden\" name=\"sensor_' + sensorCount + '_max_water_level\" value=\"0\">';"
+        "  h += '<p style=\"color:#8e44ad;font-weight:600;margin:15px 0;padding:10px;background:#f4ecf7;border-radius:6px;font-size:14px\">Aster Sensor - Reads pH (Slave 1, Reg 6) and TDS (Slave 2, Reg 0) as UINT16</p>';"
+        "  h += '<div id=\"sensor-form-' + sensorCount + '\" style=\"display:block\">';"
+        "  h += '<div style=\"display:grid;grid-template-columns:180px 1fr;gap:20px;align-items:start;margin-bottom:20px\">';"
+        "  h += '<label style=\"font-weight:600;padding-top:10px\">Sensor Name:</label>';"
+        "  h += '<div><input type=\"text\" name=\"sensor_' + sensorCount + '_name\" placeholder=\"e.g., Aster WQ 1\" style=\"width:100%;padding:10px;border:1px solid #ccc;border-radius:6px;font-size:15px\">';"
+        "  h += '<small style=\"color:#888;display:block;margin-top:5px;font-size:13px\">Display name for this sensor</small></div>';"
+        "  h += '<label style=\"font-weight:600;padding-top:10px\">Unit ID:</label>';"
+        "  h += '<div><input type=\"text\" name=\"sensor_' + sensorCount + '_unit_id\" placeholder=\"e.g., AST001\" style=\"width:100%;padding:10px;border:1px solid #ccc;border-radius:6px;font-size:15px\">';"
+        "  h += '<small style=\"color:#888;display:block;margin-top:5px;font-size:13px\">Unique identifier sent in telemetry</small></div>';"
+        "  h += '<label style=\"font-weight:600;padding-top:10px\">Slave ID:</label>';"
+        "  h += '<div><input type=\"number\" name=\"sensor_' + sensorCount + '_slave_id\" value=\"1\" min=\"1\" max=\"247\" style=\"width:100%;padding:10px;border:1px solid #ccc;border-radius:6px;font-size:15px\">';"
+        "  h += '<small style=\"color:#888;display:block;margin-top:5px;font-size:13px\">Modbus slave address (1-247)</small></div>';"
+        "  h += '<label style=\"font-weight:600;padding-top:10px\">Register Address:</label>';"
+        "  h += '<div><input type=\"number\" name=\"sensor_' + sensorCount + '_register_address\" value=\"6\" style=\"width:100%;padding:10px;border:1px solid #ccc;border-radius:6px;font-size:15px\">';"
+        "  h += '<small style=\"color:#888;display:block;margin-top:5px;font-size:13px\">Default: 6 (0x0006) - pH register start address, Qty 4</small></div>';"
+        "  h += '<label style=\"font-weight:600;padding-top:10px\">Baud Rate:</label>';"
+        "  h += '<div><select name=\"sensor_' + sensorCount + '_baud_rate\" style=\"width:100%;padding:10px;border:1px solid #e0e0e0;border-radius:6px;font-size:15px\">';"
+        "  h += '<option value=\"9600\">9600</option><option value=\"19200\">19200</option><option value=\"38400\">38400</option><option value=\"115200\">115200</option>';"
+        "  h += '</select>';"
+        "  h += '<small style=\"color:#888;display:block;margin-top:5px;font-size:13px\">Serial communication speed</small></div>';"
+        "  h += '<label style=\"font-weight:600;padding-top:10px\">Parity:</label>';"
+        "  h += '<div><select name=\"sensor_' + sensorCount + '_parity\" style=\"width:100%;padding:10px;border:1px solid #e0e0e0;border-radius:6px;font-size:15px\">';"
+        "  h += '<option value=\"none\" selected>None</option><option value=\"even\">Even</option><option value=\"odd\">Odd</option>';"
+        "  h += '</select>';"
+        "  h += '<small style=\"color:#888;display:block;margin-top:5px;font-size:13px\">Error checking method</small></div></div>';"
+        "  h += '<div style=\"background:#f4ecf7;padding:12px;margin:10px 0;border-radius:6px;border:1px solid #8e44ad\">';"
+        "  h += '<strong style=\"color:#8e44ad\">Fixed Parameters:</strong> Qty=4, UINT16 BIG_ENDIAN, Scale=0.01<br>';"
+        "  h += '<strong style=\"color:#28a745\">Output:</strong> {\"params_data\":{\"pH\":val,\"TDS\":val},\"type\":\"QUALITY\"}';"
+        "  h += '</div>';"
+        "  h += '<div style=\"margin-top:25px;padding-top:20px;border-top:1px solid #e0e0e0;text-align:center\">';"
+        "  h += '<button type=\"button\" onclick=\"testNewSensorRS485(' + sensorCount + ')\" style=\"background:linear-gradient(135deg,#8e44ad,#6c3483);color:white;padding:12px 28px;border:none;border-radius:6px;font-weight:600;cursor:pointer;margin-right:10px;font-size:15px\">Test RS485</button>';"
+        "  h += '<button type=\"button\" onclick=\"saveSingleSensor(' + sensorCount + ')\" style=\"background:linear-gradient(135deg,#28a745,#218838);color:white;padding:12px 28px;border:none;border-radius:6px;font-weight:600;cursor:pointer;margin-right:10px;font-size:15px\">Save Sensor</button>';"
+        "  h += '<button type=\"button\" onclick=\"removeSensorForm(' + sensorCount + ')\" style=\"background:linear-gradient(135deg,#dc3545,#c82333);color:white;padding:12px 28px;border:none;border-radius:6px;font-weight:600;cursor:pointer;font-size:15px\">Cancel</button>';"
+        "  h += '<div id=\"test-result-new-' + sensorCount + '\" style=\"margin-top:15px;display:none\"></div>';"
+        "  h += '</div></div>';"
+        "  div.innerHTML += h;"
+        "  sensorCount++;"
+        "  console.log('SUCCESS: Aster sensor added. Updated count:', sensorCount);"
+        "  alert('SUCCESS: Aster sensor form added!\\n\\nSTEPS:\\n1. Fill in Name and Unit ID\\n2. Set Slave ID and Register Address (default 6)\\n3. Click Save Sensor\\n\\nReads pH (reg 6, offset 2, UINT16x0.01) and TDS (Slave 2, reg 0, offset 1, UINT16).');"
+        "}"
         "var qualityParameterTypes = ["
         "  {key: 'pH', name: 'pH', units: 'pH', description: 'Acidity/Alkalinity measurement'},"
         "  {key: 'Temp', name: 'Temp', units: 'degC', description: 'Water temperature sensor'},"
@@ -2804,6 +2893,10 @@ static esp_err_t config_page_handler(httpd_req_t *req)
         "formHtml += '<input type=\"hidden\" name=\"sensor_' + sensorId + '_data_type\" value=\"OPRUSS_ACE_FIXED\">';"
         "formHtml += '<p style=\"color:#28a745;font-size:12px;margin:10px 0\"><strong>Data Format:</strong> Fixed - COD/BOD/TSS (FLOAT32 CDAB) + TDS/Temp from Slave 2 (FLOAT32 DCBA)</p>';"
         "formHtml += '<p style=\"color:#007bff;font-size:11px;margin:5px 0\"><em>Opruss Ace: Address 0, Qty 22 (COD/BOD/TSS) + Slave 2 Input Reg 0x0016 (TDS) &amp; 0x0020 (Temp)</em></p>';"
+        "} else if (sensorType === 'Aster') {"
+        "formHtml += '<input type=\"hidden\" name=\"sensor_' + sensorId + '_data_type\" value=\"ASTER_FIXED\">';"
+        "formHtml += '<p style=\"color:#28a745;font-size:12px;margin:10px 0\"><strong>Data Format:</strong> Fixed - pH (UINT16×0.01 from Reg 6) + TDS (UINT16 from Slave 2 Reg 0)</p>';"
+        "formHtml += '<p style=\"color:#007bff;font-size:11px;margin:5px 0\"><em>Aster: pH from Holding Reg 6 (Qty 4, offset 2), TDS from Slave 2 Holding Reg 0 (Qty 4, offset 1)</em></p>';"
         "} else if (sensorType === 'Piezometer') {"
         "formHtml += '<input type=\"hidden\" name=\"sensor_' + sensorId + '_data_type\" value=\"UINT16_HI\">';"
         "formHtml += '<p style=\"color:#28a745;font-size:12px;margin:10px 0\"><strong>Data Format:</strong> Fixed - UINT16_HI (16-bit unsigned integer)</p>';"
@@ -2983,10 +3076,17 @@ static esp_err_t config_page_handler(httpd_req_t *req)
         "if (quantityInput) quantityInput.value = '22';"
         "if (regAddrInput) regAddrInput.value = '0';"
         "if (scaleInput) scaleInput.value = '1.0';"
+        "} else if (sensorType === 'Aster') {"
+        "const quantityInput = document.querySelector('input[name=\"sensor_' + sensorId + '_quantity\"]');"
+        "const regAddrInput = document.querySelector('input[name=\"sensor_' + sensorId + '_register_address\"]');"
+        "const scaleInput = document.querySelector('input[name=\"sensor_' + sensorId + '_scale_factor\"]');"
+        "if (quantityInput) quantityInput.value = '4';"
+        "if (regAddrInput) regAddrInput.value = '6';"
+        "if (scaleInput) scaleInput.value = '0.01';"
         "}"
         "}");
-    
-    
+
+
     // Data type information and helper functions
     httpd_resp_sendstr_chunk(req,
         "function showDataTypeInfo(selectElement, sensorId) {"
@@ -7304,6 +7404,7 @@ static esp_err_t test_rs485_handler(httpd_req_t *req)
     int max_qty = 4; // Default limit for generic sensors
     if (strstr(data_type, "AQUADAX_QUALITY_FIXED")) max_qty = 12;
     else if (strstr(data_type, "OPRUSS_ACE_FIXED")) max_qty = 22;
+    else if (strstr(data_type, "ASTER_FIXED")) max_qty = 4;
     if (quantity < 1 || quantity > max_qty) {
         snprintf(response, 1500,
                  "{\"status\":\"error\",\"message\":\"Invalid Quantity: %d. Must be 1-%d registers.\"}",
@@ -7590,10 +7691,17 @@ static esp_err_t test_rs485_handler(httpd_req_t *req)
                 ESP_LOGI(TAG, "Opruss_Ace Test %s = %.2f (reg[%d]=0x%04X reg[%d]=0x%04X)",
                          op_names[op], (double)fv, off, registers[off], off + 1, registers[off + 1]);
             }
+        } else if (reg_count >= 4 && strstr(data_type, "ASTER_FIXED")) {
+            // ASTER_FIXED: pH at register offset 2 (UINT16 × 0.01), TDS at offset 1 (UINT16)
+            double ph_value = (double)registers[2] * 0.01;
+            double tds_value = (double)registers[1];
+            primary_value = ph_value; // Use pH as primary
+            ESP_LOGI(TAG, "Aster Test pH = %.2f (reg[2]=0x%04X), TDS = %.0f (reg[1]=0x%04X)",
+                     ph_value, registers[2], tds_value, registers[1]);
         } else if (reg_count >= 1) {
             primary_value = (double)registers[0] * scale_factor;
         }
-        
+
         char temp_str[1000];
         
         // Calculate the final test value based on sensor type
@@ -7701,6 +7809,50 @@ static esp_err_t test_rs485_handler(httpd_req_t *req)
             }
             strcat(format_table, "</span></div>");
             // Skip the normal ScadaCore table
+            strcat(format_table, "</div>");
+            httpd_resp_sendstr_chunk(req, format_table);
+            free(format_table);
+            httpd_resp_sendstr_chunk(req, NULL);
+            return ESP_OK;
+        }
+
+        // Special water quality table for Aster
+        if (strstr(data_type, "ASTER_FIXED") && reg_count >= 4) {
+            const char *as_names[] = {"pH", "TDS"};
+            const char *as_units[] = {"pH", "ppm"};
+            int as_offsets[] = {2, 1}; // pH at reg[2], TDS at reg[1]
+            double as_scales[] = {0.01, 1.0};
+            snprintf(temp_str, sizeof(temp_str),
+                "<h4 style='color:#8e44ad'>&#10003; Aster Water Quality - 2 Parameters</h4>"
+                "<table style='width:100%%;border-collapse:collapse;margin:10px 0'>"
+                "<tr style='background:#8e44ad;color:white'>"
+                "<th style='padding:10px;text-align:left'>PARAMETER</th>"
+                "<th style='padding:10px;text-align:left'>RAW VALUE</th>"
+                "<th style='padding:10px;text-align:left'>SCALED VALUE</th>"
+                "<th style='padding:10px;text-align:left'>DATA TYPE</th></tr>");
+            strcat(format_table, temp_str);
+            for (int as = 0; as < 2; as++) {
+                int off = as_offsets[as];
+                if (off >= reg_count) break;
+                double raw = (double)registers[off];
+                double scaled = raw * as_scales[as];
+                snprintf(temp_str, sizeof(temp_str),
+                    "<tr style='border-bottom:1px solid #e0e0e0'>"
+                    "<td style='padding:8px;font-weight:bold'>%s</td>"
+                    "<td style='padding:8px'>%.0f</td>"
+                    "<td style='padding:8px;color:#8e44ad;font-weight:bold'>%.2f %s</td>"
+                    "<td style='padding:8px;font-size:12px'>UINT16x%.2f</td></tr>",
+                    as_names[as], raw, scaled, as_units[as], as_scales[as]);
+                strcat(format_table, temp_str);
+            }
+            strcat(format_table, "</table>");
+            strcat(format_table, "<div><b>Raw Hex:</b> <span class='hex-display'>");
+            for (int i = 0; i < reg_count && i < 4; i++) {
+                snprintf(temp_str, sizeof(temp_str), "%04X ", registers[i]);
+                strcat(format_table, temp_str);
+            }
+            strcat(format_table, "</span></div>");
+            strcat(format_table, "<p style='color:#8e44ad;font-size:12px;margin-top:8px'><em>Note: This tests pH registers only. TDS is read from Slave 2 register 0 during live telemetry.</em></p>");
             strcat(format_table, "</div>");
             httpd_resp_sendstr_chunk(req, format_table);
             free(format_table);
