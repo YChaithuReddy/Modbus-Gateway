@@ -29,7 +29,6 @@
 #include "modbus.h"
 #include "web_config.h"
 #include "sensor_manager.h"
-#include "ws_server.h"
 #include "network_stats.h"
 #include "json_templates.h"
 #include "sd_card_logger.h"
@@ -2115,9 +2114,6 @@ static void create_telemetry_payload(char* payload, size_t payload_size) {
             ESP_LOGI(TAG, "[DATA] Reading[%d]: Unit=%s, Valid=%d, Value=%.2f, Hex=%s", 
                      i, readings[i].unit_id, readings[i].valid, readings[i].value, readings[i].raw_hex);
         }
-        
-        // Push real-time data to WebSocket clients
-        ws_broadcast_sensor_data(readings, actual_count);
         
         int payload_pos = 0;
         int valid_sensors = 0;

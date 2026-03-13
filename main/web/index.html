@@ -619,46 +619,7 @@ else if(menuType==='water_quality'){if(r)r.style.display='none';if(w)w.style.dis
 else if(menuType==='explorer'){if(r)r.style.display='none';if(w)w.style.display='none';if(m)m.style.display='block';if(br)br.style.background='#6c757d';if(bw)bw.style.background='#6c757d';if(bm)bm.style.background='#6c757d';}}
 window.onload=function(){const savedSection=sessionStorage.getItem('showSection');if(savedSection){sessionStorage.removeItem('showSection');if(savedSection==='azure'){showAzureSection();}else{showSection(savedSection);}}else{const hash=window.location.hash.substring(1);if(hash&&hash!==''){if(hash==='azure'){showAzureSection();}else{showSection(hash);}}else{showSection('overview');}}toggleNetworkMode();toggleSDOptions();toggleRTCOptions();updateSystemStatus();setInterval(updateSystemStatus,5000);refreshOtaStatus();if(document.getElementById('wd-uptime')){updateWatchdogStatus();setInterval(updateWatchdogStatus,30000);}}
 
-// ============================================================================
-// WEBSOCKET REAL-TIME DATA
-// ============================================================================
-var ws=null;var wsReconnectTimer=null;
-function connectWebSocket(){
-if(ws&&ws.readyState===WebSocket.OPEN)return;
-try{
-ws=new WebSocket('ws://'+location.host+'/ws');
-ws.onopen=function(){
-var el=document.getElementById('ws-status');
-if(el){el.textContent='LIVE';el.style.color='#10b981';}
-console.log('WebSocket connected');
-};
-ws.onmessage=function(evt){
-try{var d=JSON.parse(evt.data);
-if(d.type==='sensors'&&d.sensors){
-d.sensors.forEach(function(s){
-var el=document.getElementById('live-'+s.unit_id);
-if(el)el.textContent=s.value.toFixed(2);
-var ts=document.getElementById('live-ts-'+s.unit_id);
-if(ts)ts.textContent='Updated: '+new Date().toLocaleTimeString();
-});
-}
-if(d.type==='status'){
-var h=document.getElementById('ov-heap');if(h)h.textContent=d.heap+' bytes';
-var m=document.getElementById('ov-mqtt');if(m){m.textContent=d.mqtt?'Connected':'Disconnected';m.style.color=d.mqtt?'#10b981':'#ef4444';}
-var t=document.getElementById('ov-telemetry');if(t)t.textContent=d.telemetry_sent;
-}
-}catch(e){console.log('WS parse error:',e);}
-};
-ws.onclose=function(){
-var el=document.getElementById('ws-status');
-if(el){el.textContent='OFFLINE';el.style.color='#ef4444';}
-wsReconnectTimer=setTimeout(connectWebSocket,5000);
-};
-ws.onerror=function(){ws.close();};
-}catch(e){console.log('WS error:',e);wsReconnectTimer=setTimeout(connectWebSocket,5000);}
-}
-// Auto-connect WebSocket on page load
-if(typeof WebSocket!=='undefined'){setTimeout(connectWebSocket,1000);}
+
 </script>
 </head><body>
 <div class='container'>

@@ -37,9 +37,6 @@
 #include "esp_mac.h"
 #include "esp_ota_ops.h"
 #include "ota_update.h"
-#include "auth.h"
-#include "ws_server.h"
-#include "provisioning.h"
 #include "driver/gpio.h"
 #include "esp_task_wdt.h"
 
@@ -1203,8 +1200,6 @@ static esp_err_t favicon_handler(httpd_req_t *req)
 // Configuration page HTML
 static esp_err_t config_page_handler(httpd_req_t *req)
 {
-    // Require authentication - redirect to login if not authenticated
-    CHECK_AUTH_PAGE(req);
     // Check available heap before processing - need at least 15KB free
     size_t free_heap = esp_get_free_heap_size();
     if (free_heap < 15000) {
@@ -9216,147 +9211,11 @@ static esp_err_t api_ota_upload_handler(httpd_req_t *req) {
 // AUTHENTICATION HANDLERS
 // ============================================================================
 
-// Embedded login page
-extern const uint8_t login_html_start[] asm("_binary_login_html_start");
-extern const uint8_t login_html_end[] asm("_binary_login_html_end");
-
-// Login page handler (no auth required)
-static esp_err_t login_page_handler(httpd_req_t *req) {
-    // If already authenticated, redirect to main page
-    if (auth_check_request(req)) {
-        httpd_resp_set_status(req, "302 Found");
-        httpd_resp_set_hdr(req, "Location", "/");
-        httpd_resp_sendstr(req, "Already logged in");
-        return ESP_OK;
-    }
-    httpd_resp_set_type(req, "text/html");
-    httpd_resp_send(req, (const char *)login_html_start,
-                    (ssize_t)(login_html_end - login_html_start));
-    return ESP_OK;
-}
-
-// Login API handler (no auth required)
-static esp_err_t login_api_handler(httpd_req_t *req) {
-    char buf[256] = {0};
-    int ret = httpd_req_recv(req, buf, sizeof(buf) - 1);
-    if (ret <= 0) {
-        httpd_resp_set_type(req, "application/json");
-        httpd_resp_sendstr(req, "{\"success\":false,\"message\":\"No data received\"}");
-        return ESP_OK;
-    }
-
-    // Parse username and password from form data
-    char username[32] = {0}, password[64] = {0};
-    char *p;
-
-    p = strstr(buf, "username=");
-    if (p) {
-        p += 9;
-        int i = 0;
-        while (*p && *p != '&' && i < 31) {
-            if (*p == '+') { username[i++] = ' '; p++; }
-            else if (*p == '%' && p[1] && p[2]) {
-                char hex[3] = {p[1], p[2], 0};
-                username[i++] = (char)strtol(hex, NULL, 16);
-                p += 3;
-            } else { username[i++] = *p++; }
-        }
-    }
-
-    p = strstr(buf, "password=");
-    if (p) {
-        p += 9;
-        int i = 0;
-        while (*p && *p != '&' && i < 63) {
-            if (*p == '+') { password[i++] = ' '; p++; }
-            else if (*p == '%' && p[1] && p[2]) {
-                char hex[3] = {p[1], p[2], 0};
-                password[i++] = (char)strtol(hex, NULL, 16);
-                p += 3;
-            } else { password[i++] = *p++; }
-        }
-    }
-
-    httpd_resp_set_type(req, "application/json");
-
-    if (auth_verify_credentials(username, password)) {
-        const char *token = auth_create_session();
-        char cookie[128];
-        snprintf(cookie, sizeof(cookie), "session=%s; Path=/; HttpOnly; SameSite=Strict", token);
-        httpd_resp_set_hdr(req, "Set-Cookie", cookie);
-        httpd_resp_sendstr(req, "{\"success\":true}");
-    } else {
-        httpd_resp_sendstr(req, "{\"success\":false,\"message\":\"Invalid username or password\"}");
-    }
-    return ESP_OK;
-}
-
-// Logout handler
-static esp_err_t logout_handler(httpd_req_t *req) {
-    // Extract session token from cookie and destroy it
-    char cookie_buf[256] = {0};
-    if (httpd_req_get_hdr_value_str(req, "Cookie", cookie_buf, sizeof(cookie_buf)) == ESP_OK) {
-        char *session_start = strstr(cookie_buf, "session=");
-        if (session_start) {
-            session_start += 8;
-            char token[33] = {0};
-            int i = 0;
-            while (session_start[i] && session_start[i] != ';' && i < 32) {
-                token[i] = session_start[i]; i++;
-            }
-            auth_destroy_session(token);
-        }
-    }
-
-    // Clear the cookie
-    httpd_resp_set_hdr(req, "Set-Cookie", "session=; Path=/; HttpOnly; Max-Age=0");
-    httpd_resp_set_status(req, "302 Found");
-    httpd_resp_set_hdr(req, "Location", "/login");
-    httpd_resp_sendstr(req, "Logged out");
-    return ESP_OK;
-}
-
-// Change password API handler
-static esp_err_t change_password_handler(httpd_req_t *req) {
-    CHECK_AUTH(req);
-
-    char buf[256] = {0};
-    int ret = httpd_req_recv(req, buf, sizeof(buf) - 1);
-    if (ret <= 0) {
-        httpd_resp_set_type(req, "application/json");
-        httpd_resp_sendstr(req, "{\"success\":false,\"message\":\"No data\"}");
-        return ESP_OK;
-    }
-
-    char old_pass[64] = {0}, new_pass[64] = {0};
-    char *p;
-
-    p = strstr(buf, "old_password=");
-    if (p) { p += 13; int i = 0; while (*p && *p != '&' && i < 63) old_pass[i++] = *p++; }
-
-    p = strstr(buf, "new_password=");
-    if (p) { p += 13; int i = 0; while (*p && *p != '&' && i < 63) new_pass[i++] = *p++; }
-
-    httpd_resp_set_type(req, "application/json");
-
-    if (strlen(new_pass) < 6) {
-        httpd_resp_sendstr(req, "{\"success\":false,\"message\":\"Password must be at least 6 characters\"}");
-        return ESP_OK;
-    }
-
-    if (auth_change_password(old_pass, new_pass) == ESP_OK) {
-        httpd_resp_sendstr(req, "{\"success\":true,\"message\":\"Password changed. Please login again.\"}");
-    } else {
-        httpd_resp_sendstr(req, "{\"success\":false,\"message\":\"Current password is incorrect\"}");
-    }
-    return ESP_OK;
-}
-
 static esp_err_t start_webserver(void)
 {
     httpd_config_t config = HTTPD_DEFAULT_CONFIG();
     config.server_port = 80;
-    config.max_uri_handlers = 70; // Auth + WebSocket + provisioning handlers
+    config.max_uri_handlers = 50;
     config.max_open_sockets = 7;      // Must handle concurrent: page stream + /logo + /favicon + API calls
     config.stack_size = 12288;        // 12KB stack for 5KB chunk buffer + overhead
     config.task_priority = 6;         // Higher priority for faster response (was 5)
@@ -9371,8 +9230,6 @@ static esp_err_t start_webserver(void)
     config.keep_alive_count = 3;      // Allow 3 probes before closing
 
     if (httpd_start(&g_server, &config) == ESP_OK) {
-        // Initialize authentication
-        auth_init();
         // Main configuration page
         httpd_uri_t config_uri = {
             .uri = "/",
@@ -9381,42 +9238,6 @@ static esp_err_t start_webserver(void)
             .user_ctx = NULL
         };
         httpd_register_uri_handler(g_server, &config_uri);
-
-        // Login page (no auth required)
-        httpd_uri_t login_page_uri = {
-            .uri = "/login",
-            .method = HTTP_GET,
-            .handler = login_page_handler,
-            .user_ctx = NULL
-        };
-        httpd_register_uri_handler(g_server, &login_page_uri);
-
-        // Login API (no auth required)
-        httpd_uri_t login_api_uri = {
-            .uri = "/api/login",
-            .method = HTTP_POST,
-            .handler = login_api_handler,
-            .user_ctx = NULL
-        };
-        httpd_register_uri_handler(g_server, &login_api_uri);
-
-        // Logout
-        httpd_uri_t logout_uri = {
-            .uri = "/logout",
-            .method = HTTP_GET,
-            .handler = logout_handler,
-            .user_ctx = NULL
-        };
-        httpd_register_uri_handler(g_server, &logout_uri);
-
-        // Change password API
-        httpd_uri_t change_password_uri = {
-            .uri = "/api/change_password",
-            .method = HTTP_POST,
-            .handler = change_password_handler,
-            .user_ctx = NULL
-        };
-        httpd_register_uri_handler(g_server, &change_password_uri);
 
         // Save configuration
         httpd_uri_t save_uri = {
@@ -9925,10 +9746,6 @@ static esp_err_t start_webserver(void)
             .user_ctx = NULL
         };
         httpd_register_uri_handler(g_server, &api_ota_reboot_uri);
-// Initialize WebSocket server for real-time data push
-        ws_init(g_server);
-        provisioning_register_handlers(g_server);
-
         ESP_LOGI(TAG, "SUCCESS: OTA API endpoints registered (/api/ota/status, /api/ota/start, /api/ota/upload, /api/ota/cancel, /api/ota/confirm, /api/ota/reboot)");
 
         ESP_LOGI(TAG, "Web server started on port 80");
