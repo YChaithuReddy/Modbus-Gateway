@@ -9215,7 +9215,7 @@ static esp_err_t start_webserver(void)
 {
     httpd_config_t config = HTTPD_DEFAULT_CONFIG();
     config.server_port = 80;
-    config.max_uri_handlers = 50;
+    config.max_uri_handlers = 55;
     config.max_open_sockets = 7;      // Must handle concurrent: page stream + /logo + /favicon + API calls
     config.stack_size = 12288;        // 12KB stack for 5KB chunk buffer + overhead
     config.task_priority = 6;         // Higher priority for faster response (was 5)
