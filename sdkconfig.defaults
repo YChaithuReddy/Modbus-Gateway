@@ -70,3 +70,9 @@ CONFIG_ESP_HTTP_CLIENT_ENABLE_DIGEST_AUTH=n
 
 # FAT Filesystem settings - protect SD card from corruption on power loss
 CONFIG_FATFS_IMMEDIATE_FSYNC=y
+
+# WireGuard VPN client (trombik/esp_wireguard)
+# Enables remote access to web config + MQTT routing through the VPN tunnel.
+# Must NOT set CONFIG_ESP_WIFI_SOFTAP_SUPPORT=n - gateway uses SoftAP for initial setup.
+CONFIG_WIREGUARD_ESP_NETIF=y
+CONFIG_WIREGUARD_MAX_PEERS=4

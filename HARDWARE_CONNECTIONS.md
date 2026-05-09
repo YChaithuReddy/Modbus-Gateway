@@ -47,12 +47,16 @@ This document provides pin connections and wiring diagrams for all hardware comp
 
 | ESP32 Pin | A7670C Pin | Description |
 |-----------|------------|-------------|
-| GPIO 33   | TXD        | ESP32 RX ← A7670C TX |
-| GPIO 32   | RXD        | ESP32 TX → A7670C RX |
+| GPIO 33   | TXD        | ESP32 TX → A7670C RX (UART1 TX) |
+| GPIO 32   | RXD        | ESP32 RX ← A7670C TX (UART1 RX) |
 | GPIO 4    | PWRKEY     | Power control |
-| GPIO 15   | RESET      | Hardware reset |
+| ~~GPIO 15~~ | RESET   | Hardware reset (DISABLED by default - conflicts with SD Card CS) |
 | GND       | GND        | Common ground |
 | 5V (VIN)  | VCC        | Power supply (5V recommended) |
+
+> **Note**: SIM Reset pin is disabled by default (`reset_pin = -1`) because GPIO 15 is
+> used by the SD Card CS. If SD card is not used, SIM Reset can be enabled via the web UI.
+> The modem hardware reset on GPIO 2 provides an alternative reset mechanism.
 
 ### Wiring Diagram
 
@@ -60,13 +64,13 @@ This document provides pin connections and wiring diagrams for all hardware comp
     ┌──────────────┐                    ┌──────────────┐
     │    ESP32     │                    │   A7670C     │
     │              │                    │              │
-    │      GPIO33 ─┼──────────────────►─┼─ TXD        │
-    │              │   (ESP32 RX)       │              │
-    │      GPIO32 ─┼──────────────────►─┼─ RXD        │
+    │      GPIO33 ─┼──────────────────►─┼─ RXD        │
     │              │   (ESP32 TX)       │              │
+    │      GPIO32 ─┼─◄──────────────────┼─ TXD        │
+    │              │   (ESP32 RX)       │              │
     │       GPIO4 ─┼──────────────────►─┼─ PWRKEY     │
     │              │                    │              │
-    │      GPIO15 ─┼──────────────────►─┼─ RESET      │
+    │      GPIO15 ─┼─ ─ ─ ─ ─ ─ ─ ─ ►─┼─ RESET *    │
     │              │                    │              │
     │         GND ─┼──────────────────►─┼─ GND        │
     │              │                    │              │
@@ -86,6 +90,10 @@ This document provides pin connections and wiring diagrams for all hardware comp
 - **Antenna**: Always connect LTE antenna for proper signal
 - **SIM Card**: Insert SIM card before powering on
 - **Level Shifting**: Not required (A7670C is 3.3V compatible)
+- **UART**: Uses UART1 (configurable via web UI between UART1/UART2)
+- **Baud Rate**: Default 115200 (configurable: 9600, 19200, 38400, 57600, 115200)
+- **Reset Pin**: Disabled by default (GPIO 15 conflict with SD Card CS)
+- **Modem Reset**: GPIO 2 provides hardware modem reset (configurable via web UI)
 
 ---
 
@@ -213,9 +221,21 @@ This document provides pin connections and wiring diagrams for all hardware comp
 
 ### Important Notes
 - **DE and RE**: Must be tied together and connected to GPIO 18
+- **RTS Pin History**: Changed from GPIO 32 to GPIO 18 to avoid conflict with SIM RX pin
 - **Termination**: Add 120Ω resistor at end of bus if cable > 10m
-- **Baud Rate**: Default 9600 (configurable per sensor)
+- **Baud Rate**: Default 9600 (configurable per sensor via web UI)
 - **Twisted Pair**: Use twisted pair cable for A and B lines
+- **Max Sensors**: 10 per gateway (reduced from 15 in v1.3.8 for heap savings)
+- **Function Codes**: Supports 0x03 (Holding Registers) and 0x04 (Input Registers)
+
+### Supported Sensor Types
+| Sensor Type | Data Format | Registers | Byte Order |
+|-------------|------------|-----------|------------|
+| Flow Meters | UINT16/32, INT16/32, FLOAT32 | 1-4 | ABCD/DCBA/BADC/CDAB |
+| Aquadax Quality | FLOAT32 (COD, BOD, TSS, pH, Temp) | 12 from addr 1280 | CDAB + byte-swap |
+| Opruss Ace Quality | FLOAT32 (COD, BOD, TSS) | 22 from addr 0 | CDAB (word-swap) |
+| Opruss Ace TDS | FLOAT32 (TDS, Temp) | 2+2, addr 0x0016/0x0020 | DCBA (byte+word swap) |
+| Generic Modbus | Configurable | Configurable | All variants |
 
 ---
 
@@ -360,26 +380,29 @@ This document provides pin connections and wiring diagrams for all hardware comp
 
 ## Pin Summary Table
 
-| GPIO | Function | Module | Direction |
-|------|----------|--------|-----------|
-| 0 | Boot Button | ESP32 | Input |
-| 2 | Modem Reset | System | Output |
-| 4 | SIM Power Key | A7670C | Output |
-| 5 | SD Card CLK | SD Card | Output |
-| 15 | SD Card CS / SIM Reset | SD/SIM | Output |
-| 16 | RS485 RX | MAX485 | Input |
-| 17 | RS485 TX | MAX485 | Output |
-| 18 | RS485 RTS (DE/RE) | MAX485 | Output |
-| 19 | SD Card MISO | SD Card | Input |
-| 21 | RTC SDA | DS3231 | Bidirectional |
-| 22 | RTC SCL | DS3231 | Output |
-| 23 | SD Card MOSI | SD Card | Output |
-| 25 | Web Server LED | LED | Output |
-| 26 | MQTT Status LED | LED | Output |
-| 27 | Sensor Status LED | LED | Output |
-| 32 | SIM Module TX | A7670C | Output |
-| 33 | SIM Module RX | A7670C | Input |
-| 34 | Config Button | Button | Input |
+| GPIO | Function | Module | Direction | UART/Bus |
+|------|----------|--------|-----------|----------|
+| 0 | Boot Button (web server toggle) | ESP32 | Input | - |
+| 2 | Modem Hardware Reset | A7670C | Output | - |
+| 4 | SIM Power Key (PWRKEY) | A7670C | Output | - |
+| 5 | SD Card CLK (SCK) | SD Card | Output | SPI3 |
+| 15 | SD Card CS (shared w/ SIM Reset*) | SD/SIM | Output | SPI3 |
+| 16 | RS485 RX (RXD2) | MAX485 | Input | UART2 |
+| 17 | RS485 TX (TXD2) | MAX485 | Output | UART2 |
+| 18 | RS485 RTS/DE/RE (Direction) | MAX485 | Output | UART2 |
+| 19 | SD Card MISO (DO) | SD Card | Input | SPI3 |
+| 21 | RTC SDA | DS3231 | Bidirectional | I2C0 |
+| 22 | RTC SCL | DS3231 | Output | I2C0 |
+| 23 | SD Card MOSI (DI) | SD Card | Output | SPI3 |
+| 25 | Web Server Active LED | LED | Output | - |
+| 26 | MQTT Connection LED | LED | Output | - |
+| 27 | Sensor Response LED | LED | Output | - |
+| 32 | SIM Module RX (ESP32 RX ← A7670C TX) | A7670C | Input | UART1 |
+| 33 | SIM Module TX (ESP32 TX → A7670C RX) | A7670C | Output | UART1 |
+| 34 | Config Button (AP mode trigger) | Button | Input | - |
+
+> \* GPIO 15 conflict: SD Card CS has priority. SIM Reset is disabled by default (`reset_pin = -1`).
+> SIM module uses GPIO 2 modem reset as the primary hardware reset mechanism.
 
 ---
 
@@ -406,9 +429,11 @@ This document provides pin connections and wiring diagrams for all hardware comp
 
 ### SIM Module Not Responding
 1. Check 5V power supply (must be 2A+)
-2. Verify TX/RX connections (crossed correctly)
+2. Verify TX/RX connections: GPIO 33 → A7670C RXD, GPIO 32 ← A7670C TXD
 3. Ensure SIM card is inserted properly
 4. Check antenna connection
+5. Try modem reset via web UI or GPIO 2 power cycle
+6. Check serial monitor for AT command responses
 
 ### SD Card Not Detected
 1. Verify card is FAT32 formatted
@@ -423,9 +448,12 @@ This document provides pin connections and wiring diagrams for all hardware comp
 
 ### RS485 No Response
 1. Check A/B wiring to sensor
-2. Verify DE/RE tied together
-3. Check baud rate matches sensor
+2. Verify DE/RE tied together and connected to GPIO 18
+3. Check baud rate matches sensor (default 9600)
 4. Try swapping A and B lines
+5. Verify slave ID matches sensor configuration
+6. Check function code: 0x03 for holding registers, 0x04 for input registers
+7. Use "Test RS485" in web UI for live diagnostics
 
 ---
 
@@ -437,5 +465,6 @@ This document provides pin connections and wiring diagrams for all hardware comp
 
 ---
 
-*Last Updated: December 2024*
-*Version: 1.0.0*
+*Last Updated: February 2026*
+*Firmware Version: 1.3.8*
+*Partition Table: FROZEN as of v1.3.7 - DO NOT modify partitions_4mb.csv*

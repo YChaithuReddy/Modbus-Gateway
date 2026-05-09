@@ -170,6 +170,45 @@ if (sta_netif == NULL) {
 **Solution**: Added `spi_bus_free(SD_CARD_SPI_HOST)` before returning error in `sd_card_init()`
 **Files**: `main/sd_card_logger.c`
 
+### Issue #14: WireGuard VPN Client Integration (v1.4.0)
+**Feature**: Auto-registering WireGuard VPN client for remote web config + MQTT access
+**Files added**:
+- `main/wireguard_client.c` — full client (NVS-cached identity, Curve25519 keygen, HTTPS register with HTTP fallback, peer-deletion self-heal, keepalive task)
+- `main/wireguard_client.h` — public API
+- `main/idf_component.yml` — pulls `trombik/esp_wireguard >=0.9.0`
+**Files modified**:
+- `main/CMakeLists.txt` — added wireguard_client.c + INCLUDE_DIR for `managed_components/trombik__esp_wireguard/src` (needed for internal `wireguard.h` + `crypto.h`)
+- `sdkconfig.defaults` — added `CONFIG_WIREGUARD_ESP_NETIF=y` and `CONFIG_WIREGUARD_MAX_PEERS=4`. **Did NOT** add `CONFIG_ESP_WIFI_SOFTAP_SUPPORT=n` from upstream reference (gateway uses SoftAP for setup mode).
+- `main/main.c` — `#include "wireguard_client.h"`; calls `wireguard_setup()` + `wireguard_start_keepalive_task()` after SNTP sync, before MQTT task creation. Skipped in `CONFIG_STATE_SETUP` or when no network.
+- `main/web_config.h` / `web_config.c` — added 1-line getter `web_config_get_server()` so wireguard_client lazy-registers `/vpn-status` URI handler without modifying the fragile 609KB file.
+
+**Server config** (hardcoded in `wireguard_client.c`):
+- VPN endpoint: `20.197.19.49:51821`
+- Registration: HTTPS `iiot.aquagen.co.in/wg/api/agent/register` with HTTP fallback `20.197.19.49:3200/wg/api/agent/register`
+- Auth key: lifetime/reusable (`Zb9SQ7Lv9P_...`)
+- NVS namespace: `wg_id` (privkey, pubkey, local_ip, psk, server_pub)
+
+**Boot sequence respects Issue #6** (two TLS = heap crash):
+- Registration HTTPS happens at boot BEFORE Azure MQTT TLS connects
+- Keepalive's 20s server-verify is rare enough that brief MQTT/HTTPS overlap is acceptable; HTTP buffers tuned to 1024/1024 to limit transient pressure
+
+**Self-healing flow**:
+- No NVS identity → generate Curve25519 → register → save NVS
+- NVS identity present → verify with server → server rejects → wipe NVS → regenerate → re-register
+- Peer deleted at runtime → keepalive detects → wipe NVS → poll every 5s with fresh keys until admin unblocks → `esp_restart()` to bring tunnel up cleanly
+- Tunnel down → keepalive's 10s tick reconnects (no restart needed)
+
+**Memory budget**:
+- Flash: ~50KB (esp_wireguard ~30KB + Curve25519/nacl ~10KB + wireguard_client.c ~12KB). esp_crt_bundle already used elsewhere — no double-cost. Monitor partition headroom (table is FROZEN — Issue #8).
+- Heap: ~15-20KB resident when tunnel up. Transient ~5KB during HTTPS register at boot only.
+- Task: 1 keepalive task, 5120-byte stack, priority 4.
+- NVS: ~256 bytes per device for stored identity strings.
+
+**Remote access pattern**:
+- Once tunnel is up, gateway is reachable from any other VPN peer at `10.100.0.X` (assigned by server)
+- `http://10.100.0.X/` → existing web config UI
+- `http://10.100.0.X/vpn-status` → JSON tunnel/identity status (registered via lazy handler in keepalive task; auto-recovers if web server is toggled via GPIO)
+
 ### Issue #13: Memory Optimization - Heap Reduction (v1.3.8)
 **Problem**: System running low on heap memory, risk of crashes during high load
 **Solution**: Comprehensive heap memory optimization saving ~20KB:

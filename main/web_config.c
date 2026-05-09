@@ -3,6 +3,7 @@
 // Professional industrial IoT gateway with real-time RS485 Modbus communication
 
 #include "web_config.h"
+#include "web_wake.h"
 #include "modbus.h"
 #include "sensor_manager.h"
 #include "iot_configs.h"  // For hardcoded values
@@ -65,6 +66,11 @@ static system_config_t g_system_config = {0};
 static config_state_t g_config_state = CONFIG_STATE_SETUP;
 static httpd_handle_t g_server = NULL;
 static bool g_web_server_auto_start = false;
+
+// Public getter so external modules (wireguard_client) can register URI handlers
+// without touching the rest of this large file.
+httpd_handle_t web_config_get_server(void) { return g_server; }
+
 // static esp_netif_t *g_netif_sta = NULL;  // Unused variable
 // static esp_netif_t *g_netif_ap = NULL;  // Reserved for future AP mode
 
@@ -1834,7 +1840,8 @@ static esp_err_t config_page_handler(httpd_req_t *req)
         if (g_system_config.sensors[i].enabled) {
             if (strcmp(g_system_config.sensors[i].sensor_type, "QUALITY") == 0 ||
                 strcmp(g_system_config.sensors[i].sensor_type, "Aquadax_Quality") == 0 ||
-                strcmp(g_system_config.sensors[i].sensor_type, "Opruss_Ace") == 0) {
+                strcmp(g_system_config.sensors[i].sensor_type, "Opruss_Ace") == 0 ||
+                strcmp(g_system_config.sensors[i].sensor_type, "Hardness_Sensor") == 0) {
                 water_quality_sensor_count++;
             } else {
                 regular_sensor_count++;
@@ -1866,7 +1873,7 @@ static esp_err_t config_page_handler(httpd_req_t *req)
     bool has_regular_sensors = false;
     for (int i = 0; i < g_system_config.sensor_count; i++) {
         if (!connection_alive) goto page_done;
-        if (g_system_config.sensors[i].enabled && strcmp(g_system_config.sensors[i].sensor_type, "QUALITY") != 0 && strcmp(g_system_config.sensors[i].sensor_type, "Aquadax_Quality") != 0 && strcmp(g_system_config.sensors[i].sensor_type, "Opruss_Ace") != 0) {
+        if (g_system_config.sensors[i].enabled && strcmp(g_system_config.sensors[i].sensor_type, "QUALITY") != 0 && strcmp(g_system_config.sensors[i].sensor_type, "Aquadax_Quality") != 0 && strcmp(g_system_config.sensors[i].sensor_type, "Opruss_Ace") != 0 && strcmp(g_system_config.sensors[i].sensor_type, "Hardness_Sensor") != 0) {
             has_regular_sensors = true;
             ESP_LOGI(TAG, "Display Regular Sensor %d: name='%s', sensor_type='%s' (len=%d)", i, g_system_config.sensors[i].name, g_system_config.sensors[i].sensor_type, strlen(g_system_config.sensors[i].sensor_type));
             
@@ -2023,11 +2030,13 @@ static esp_err_t config_page_handler(httpd_req_t *req)
             (strcmp(g_system_config.sensors[i].sensor_type, "QUALITY") == 0 ||
              strcmp(g_system_config.sensors[i].sensor_type, "Aquadax_Quality") == 0 ||
              strcmp(g_system_config.sensors[i].sensor_type, "Opruss_Ace") == 0 ||
-             strcmp(g_system_config.sensors[i].sensor_type, "Aster") == 0)) {
+             strcmp(g_system_config.sensors[i].sensor_type, "Aster") == 0 ||
+             strcmp(g_system_config.sensors[i].sensor_type, "Hardness_Sensor") == 0)) {
             has_quality_sensors = true;
             bool is_aquadax = (strcmp(g_system_config.sensors[i].sensor_type, "Aquadax_Quality") == 0);
             bool is_opruss_ace = (strcmp(g_system_config.sensors[i].sensor_type, "Opruss_Ace") == 0);
             bool is_aster = (strcmp(g_system_config.sensors[i].sensor_type, "Aster") == 0);
+            bool is_hardness = (strcmp(g_system_config.sensors[i].sensor_type, "Hardness_Sensor") == 0);
             ESP_LOGI(TAG, "Water Quality Sensor %d: %s (type: %s)", i, g_system_config.sensors[i].name, g_system_config.sensors[i].sensor_type);
 
             if (is_aquadax) {
@@ -2123,6 +2132,37 @@ static esp_err_t config_page_handler(httpd_req_t *req)
                     i, i, i, i);
                 SEND_OR_ABORT(req, chunk);
                 continue;
+            } else if (is_hardness) {
+                snprintf(chunk, sizeof(chunk),
+                    "<div class='sensor-card' id='sensor-card-%d'>"
+                    "<div style='display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;padding-bottom:10px;border-bottom:2px solid #6f42c1'>"
+                    "<h3 style='margin:0;font-size:18px'>%s <span style='color:#888;font-weight:normal'>(Sensor %d)</span></h3>"
+                    "<span style='background:linear-gradient(135deg,#6f42c1,#8e5be2);color:white;padding:4px 14px;border-radius:20px;font-size:12px;font-weight:600'>HARDNESS</span>"
+                    "</div>"
+                    "<div style='display:grid;grid-template-columns:1fr 1fr;gap:8px 20px;margin-bottom:12px;padding:12px;background:#f8f9fa;border-radius:8px;font-size:13px'>"
+                    "<div><strong style='color:#555'>Unit ID:</strong> <span style='color:#0d6efd'>%s</span></div>"
+                    "<div><strong style='color:#555'>Slave ID:</strong> %d</div>"
+                    "<div><strong style='color:#555'>Register:</strong> %d (0x%04X)</div>"
+                    "<div><strong style='color:#555'>Baud Rate:</strong> %d bps</div>"
+                    "<div><strong style='color:#555'>Quantity:</strong> 6 registers</div>"
+                    "<div><strong style='color:#555'>Data Format:</strong> FLOAT32 CDAB</div>"
+                    "</div>"
+                    "<div style='display:flex;flex-wrap:wrap;gap:6px;margin-bottom:10px'>"
+                    "<span style='background:#e8daef;color:#5b2c8a;padding:4px 10px;border-radius:12px;font-size:12px;font-weight:600;border:1px solid #d2b4de'>Hardness (mg/L)</span>"
+                    "<span style='background:#cce5ff;color:#004085;padding:4px 10px;border-radius:12px;font-size:12px;font-weight:600;border:1px solid #b8daff'>Temp (&deg;C)</span>"
+                    "</div>"
+                    "<button type='button' onclick='editSensor(%d)' style='background:#17a2b8;color:white;margin:2px;padding:6px 12px'>Edit</button> "
+                    "<button type='button' onclick='testSensor(%d)' style='background:#007bff;color:white;margin:2px;padding:6px 12px'>Test RS485</button> "
+                    "<button type='button' onclick='deleteSensor(%d)' style='background:#dc3545;color:white;margin:2px;padding:6px 12px'>Delete</button>"
+                    "<div id='test-result-%d' class='test-result' style='display:none'></div>"
+                    "</div>",
+                    i, g_system_config.sensors[i].name, i + 1,
+                    g_system_config.sensors[i].unit_id, g_system_config.sensors[i].slave_id,
+                    g_system_config.sensors[i].register_address, g_system_config.sensors[i].register_address,
+                    g_system_config.sensors[i].baud_rate > 0 ? g_system_config.sensors[i].baud_rate : 9600,
+                    i, i, i, i);
+                SEND_OR_ABORT(req, chunk);
+                continue;
             } else {
                 snprintf(chunk, sizeof(chunk),
                     "<div class='sensor-card' id='sensor-card-%d'>"
@@ -2183,6 +2223,7 @@ static esp_err_t config_page_handler(httpd_req_t *req)
         "<button type='button' onclick='addAquadaxQualitySensor()' style='background:#0d6efd;color:white;padding:14px 30px;margin:8px;border:none;border-radius:8px;font-size:15px;font-weight:600;cursor:pointer'>Add Aquadax</button>"
         "<button type='button' onclick='addOprussAceSensor()' style='background:#e67e22;color:white;padding:14px 30px;margin:8px;border:none;border-radius:8px;font-size:15px;font-weight:600;cursor:pointer'>Add Opruss Ace</button>"
         "<button type='button' onclick='addAsterSensor()' style='background:#8e44ad;color:white;padding:14px 30px;margin:8px;border:none;border-radius:8px;font-size:15px;font-weight:600;cursor:pointer'>Add Aster</button>"
+        "<button type='button' onclick='addHardnessSensor()' style='background:#6f42c1;color:white;padding:14px 30px;margin:8px;border:none;border-radius:8px;font-size:15px;font-weight:600;cursor:pointer'>Add Hardness</button>"
         "</div>");
     
     httpd_resp_sendstr_chunk(req, "</div>");
@@ -2584,6 +2625,46 @@ static esp_err_t config_page_handler(httpd_req_t *req)
         "  div.innerHTML += h;"
         "  sensorCount++;"
         "}"
+        "function addHardnessSensor() {"
+        "  var div = document.getElementById('water-quality-sensors-list');"
+        "  if (!div) { alert('Container not found!'); return; }"
+        "  var s = sensorCount;"
+        "  var h = '<div class=\"sensor-card\" id=\"sensor-card-' + s + '\" style=\"border:2px solid #6f42c1;padding:20px;margin:15px 0\">';"
+        "  h += '<h4 style=\"color:#6f42c1\">New Hardness Sensor ' + (s+1) + '</h4>';"
+        "  h += '<input type=\"hidden\" name=\"sensor_' + s + '_sensor_type\" value=\"Hardness_Sensor\">';"
+        "  h += '<input type=\"hidden\" name=\"sensor_' + s + '_data_type\" value=\"HARDNESS_FIXED\">';"
+        "  h += '<input type=\"hidden\" name=\"sensor_' + s + '_byte_order\" value=\"BIG_ENDIAN\">';"
+        "  h += '<input type=\"hidden\" name=\"sensor_' + s + '_register_type\" value=\"HOLDING\">';"
+        "  h += '<input type=\"hidden\" name=\"sensor_' + s + '_quantity\" value=\"6\">';"
+        "  h += '<input type=\"hidden\" name=\"sensor_' + s + '_scale_factor\" value=\"1.0\">';"
+        "  h += '<input type=\"hidden\" name=\"sensor_' + s + '_sensor_height\" value=\"0\">';"
+        "  h += '<input type=\"hidden\" name=\"sensor_' + s + '_max_water_level\" value=\"0\">';"
+        "  h += '<p style=\"color:#6f42c1;font-weight:600;padding:8px;background:#f3eefb;border-radius:6px\">Hardness - Hardness (mg/L) + Temperature (&deg;C) (FLOAT32 CDAB, 6 regs from 230)</p>';"
+        "  h += '<div id=\"sensor-form-' + s + '\">';"
+        "  h += '<div style=\"display:grid;grid-template-columns:140px 1fr;gap:12px;margin-bottom:15px\">';"
+        "  h += '<label style=\"font-weight:600;padding-top:8px\">Name:</label>';"
+        "  h += '<input type=\"text\" name=\"sensor_' + s + '_name\" placeholder=\"Hardness 1\" style=\"padding:8px;border:1px solid #ccc;border-radius:4px\">';"
+        "  h += '<label style=\"font-weight:600;padding-top:8px\">Unit ID:</label>';"
+        "  h += '<input type=\"text\" name=\"sensor_' + s + '_unit_id\" placeholder=\"HARD-01\" style=\"padding:8px;border:1px solid #ccc;border-radius:4px\">';"
+        "  h += '<label style=\"font-weight:600;padding-top:8px\">Slave ID:</label>';"
+        "  h += '<input type=\"number\" name=\"sensor_' + s + '_slave_id\" value=\"1\" min=\"1\" max=\"247\" style=\"padding:8px;border:1px solid #ccc;border-radius:4px\">';"
+        "  h += '<label style=\"font-weight:600;padding-top:8px\">Register:</label>';"
+        "  h += '<input type=\"number\" name=\"sensor_' + s + '_register_address\" value=\"230\" style=\"padding:8px;border:1px solid #ccc;border-radius:4px\">';"
+        "  h += '<label style=\"font-weight:600;padding-top:8px\">Baud Rate:</label>';"
+        "  h += '<select name=\"sensor_' + s + '_baud_rate\" style=\"padding:8px;border:1px solid #ccc;border-radius:4px\">';"
+        "  h += '<option value=\"9600\">9600</option><option value=\"19200\">19200</option><option value=\"38400\">38400</option><option value=\"115200\">115200</option></select>';"
+        "  h += '<label style=\"font-weight:600;padding-top:8px\">Parity:</label>';"
+        "  h += '<select name=\"sensor_' + s + '_parity\" style=\"padding:8px;border:1px solid #ccc;border-radius:4px\">';"
+        "  h += '<option value=\"none\">None</option><option value=\"even\">Even</option><option value=\"odd\">Odd</option></select></div>';"
+        "  h += '<div style=\"text-align:center;margin-top:15px;padding-top:15px;border-top:1px solid #e0e0e0\">';"
+        "  h += '<button type=\"button\" onclick=\"testNewSensorRS485(' + s + ')\" style=\"background:#6f42c1;color:white;padding:10px 24px;border:none;border-radius:6px;font-weight:600;cursor:pointer;margin:4px\">Test RS485</button>';"
+        "  h += '<button type=\"button\" onclick=\"saveSingleSensor(' + s + ')\" style=\"background:#28a745;color:white;padding:10px 24px;border:none;border-radius:6px;font-weight:600;cursor:pointer;margin:4px\">Save</button>';"
+        "  h += '<button type=\"button\" onclick=\"removeSensorForm(' + s + ')\" style=\"background:#dc3545;color:white;padding:10px 24px;border:none;border-radius:6px;font-weight:600;cursor:pointer;margin:4px\">Cancel</button>';"
+        "  h += '<div id=\"test-result-new-' + s + '\" style=\"margin-top:10px;display:none\"></div>';"
+        "  h += '</div></div></div>';"
+        "  div.innerHTML += h;"
+        "  sensorCount++;"
+        "}"
         "var qualityParameterTypes = ["
         "  {key: 'pH', name: 'pH', units: 'pH', description: 'Acidity/Alkalinity measurement'},"
         "  {key: 'Temp', name: 'Temp', units: 'degC', description: 'Water temperature sensor'},"
@@ -2735,7 +2816,7 @@ static esp_err_t config_page_handler(httpd_req_t *req)
         "formHtml += '</select>';"
         "formHtml += '<small style=\"color:#888;display:block;margin-top:5px;font-size:13px\">Modbus register type</small></div>';"
         "formHtml += '</div>';"
-        "if (sensorType !== 'ZEST' && sensorType !== 'Clampon' && sensorType !== 'Dailian' && sensorType !== 'Dailian_EMF' && sensorType !== 'Panda_EMF' && sensorType !== 'Panda_Level' && sensorType !== 'Piezometer' && sensorType !== 'Panda_USM' && sensorType !== 'Aquadax_Quality' && sensorType !== 'Opruss_Ace') {"
+        "if (sensorType !== 'ZEST' && sensorType !== 'Clampon' && sensorType !== 'Dailian' && sensorType !== 'Dailian_EMF' && sensorType !== 'Panda_EMF' && sensorType !== 'Panda_Level' && sensorType !== 'Piezometer' && sensorType !== 'Panda_USM' && sensorType !== 'Aquadax_Quality' && sensorType !== 'Opruss_Ace' && sensorType !== 'Hardness_Sensor') {"
         "formHtml += '<div style=\"display:grid;grid-template-columns:180px 1fr;gap:20px;align-items:start;margin-top:20px\">';"
         "formHtml += '<label style=\"font-weight:600;padding-top:10px\">Data Type:</label>';"
         "formHtml += '<div><select name=\"sensor_' + sensorId + '_data_type\" style=\"width:100%;padding:10px;border:1px solid #e0e0e0;border-radius:6px;font-size:15px\" onchange=\"showDataTypeInfo(this, ' + sensorId + ')\">';"
@@ -2835,6 +2916,10 @@ static esp_err_t config_page_handler(httpd_req_t *req)
         "} else if (sensorType === 'Aster') {"
         "formHtml += '<input type=\"hidden\" name=\"sensor_' + sensorId + '_data_type\" value=\"ASTER_FIXED\">';"
         "formHtml += '<p style=\"color:#28a745;font-size:12px\"><b>Aster:</b> pH UINT16x0.01 (Reg 6) + TDS UINT16 (Slave 2, Reg 0)</p>';"
+        "} else if (sensorType === 'Hardness_Sensor') {"
+        "formHtml += '<input type=\"hidden\" name=\"sensor_' + sensorId + '_data_type\" value=\"HARDNESS_FIXED\">';"
+        "formHtml += '<p style=\"color:#28a745;font-size:12px;margin:10px 0\"><strong>Data Format:</strong> Fixed - 2x FLOAT32 CDAB (word-swap)</p>';"
+        "formHtml += '<p style=\"color:#007bff;font-size:11px;margin:5px 0\"><em>Hardness defaults: Address 230 (0x00E6), Qty 6 - Reads Hardness (mg/L) and Temperature (&deg;C)</em></p>';"
         "} else if (sensorType === 'Piezometer') {"
         "formHtml += '<input type=\"hidden\" name=\"sensor_' + sensorId + '_data_type\" value=\"UINT16_HI\">';"
         "formHtml += '<p style=\"color:#28a745;font-size:12px;margin:10px 0\"><strong>Data Format:</strong> Fixed - UINT16_HI (16-bit unsigned integer)</p>';"
@@ -3021,6 +3106,13 @@ static esp_err_t config_page_handler(httpd_req_t *req)
         "if (quantityInput) quantityInput.value = '4';"
         "if (regAddrInput) regAddrInput.value = '6';"
         "if (scaleInput) scaleInput.value = '0.01';"
+        "} else if (sensorType === 'Hardness_Sensor') {"
+        "const quantityInput = document.querySelector('input[name=\"sensor_' + sensorId + '_quantity\"]');"
+        "const regAddrInput = document.querySelector('input[name=\"sensor_' + sensorId + '_register_address\"]');"
+        "const scaleInput = document.querySelector('input[name=\"sensor_' + sensorId + '_scale_factor\"]');"
+        "if (quantityInput) quantityInput.value = '6';"
+        "if (regAddrInput) regAddrInput.value = '230';"
+        "if (scaleInput) scaleInput.value = '1.0';"
         "}"
         "}");
 
@@ -3491,6 +3583,25 @@ static esp_err_t config_page_handler(httpd_req_t *req)
         "resultDiv.style.backgroundColor='#d1ecf1';"
         "resultDiv.style.borderColor='#bee5eb';"
         "resultDiv.style.color='#0c5460';"
+        "let wifiPoll=0;"
+        "const wifiTimer=setInterval(function(){"
+        "wifiPoll++;"
+        "fetch('/api/system_status').then(r=>r.json()).then(s=>{"
+        "if(s.wifi&&s.wifi.status==='connected'){"
+        "clearInterval(wifiTimer);"
+        "resultDiv.innerHTML='<span style=\"color:#28a745\">✅ Connected to '+s.wifi.ssid+' ('+s.wifi.rssi+' dBm)</span>';"
+        "resultDiv.style.backgroundColor='#d4edda';"
+        "resultDiv.style.borderColor='#c3e6cb';"
+        "resultDiv.style.color='#155724';"
+        "}else if(wifiPoll>=15){"
+        "clearInterval(wifiTimer);"
+        "resultDiv.innerHTML='<span style=\"color:#856404\">⚠️ Saved. Refresh page to verify connection.</span>';"
+        "resultDiv.style.backgroundColor='#fff3cd';"
+        "resultDiv.style.borderColor='#ffeaa7';"
+        "resultDiv.style.color='#856404';"
+        "}"
+        "}).catch(()=>{});"
+        "},2000);"
         "}else{"
         "resultDiv.innerHTML='<span style=\"color:#dc3545\">❌ '+data.message+'</span>';"
         "resultDiv.style.backgroundColor='#f8d7da';"
@@ -6089,6 +6200,79 @@ static esp_err_t test_sensor_handler(httpd_req_t *req)
             return ESP_OK;
         }
 
+        // For Hardness sensors, do bulk read and show water quality table (2 params)
+        if (strcmp(sensor->sensor_type, "Hardness_Sensor") == 0) {
+            int hard_reg = sensor->register_address > 0 ? sensor->register_address : 230;
+            result = modbus_read_holding_registers(sensor->slave_id, hard_reg, 6);
+
+            if (result != MODBUS_SUCCESS) {
+                snprintf(format_table, 6000,
+                    "<div class='test-result'>"
+                    "<h4 style='color:#dc3545'>&#10007; RS485 Failed - Hardness Sensor</h4>"
+                    "<p>Modbus read failed for slave %d, register %d</p>"
+                    "</div>", sensor->slave_id, hard_reg);
+                httpd_resp_set_type(req, "text/html");
+                httpd_resp_send(req, format_table, strlen(format_table));
+                free(format_table);
+                return ESP_OK;
+            }
+
+            int reg_count = modbus_get_response_length();
+            uint16_t registers[6] = {0};
+            for (int i = 0; i < reg_count && i < 6; i++) {
+                registers[i] = modbus_get_response_buffer(i);
+            }
+
+            if (reg_count < 6) {
+                snprintf(format_table, 6000,
+                    "<div class='test-result'>"
+                    "<h4 style='color:#dc3545'>&#10007; Insufficient registers (%d, need 6)</h4>"
+                    "</div>", reg_count);
+                httpd_resp_set_type(req, "text/html");
+                httpd_resp_send(req, format_table, strlen(format_table));
+                free(format_table);
+                return ESP_OK;
+            }
+
+            uint32_t h_bits = ((uint32_t)registers[1] << 16) | registers[0];
+            float h_fv;
+            memcpy(&h_fv, &h_bits, sizeof(float));
+            uint32_t t_bits = ((uint32_t)registers[5] << 16) | registers[4];
+            float t_fv;
+            memcpy(&t_fv, &t_bits, sizeof(float));
+
+            snprintf(format_table, 6000,
+                "<div class='test-result'>"
+                "<h4 style='color:#6f42c1'>&#10003; Hardness Sensor - 2 Parameters</h4>"
+                "<table style='width:100%%;border-collapse:collapse;margin:10px 0'>"
+                "<tr style='background:#6f42c1;color:white'>"
+                "<th style='padding:10px;text-align:left'>PARAMETER</th>"
+                "<th style='padding:10px;text-align:left'>RAW REGISTERS</th>"
+                "<th style='padding:10px;text-align:left'>VALUE</th>"
+                "<th style='padding:10px;text-align:left'>DATA TYPE</th></tr>"
+                "<tr style='border-bottom:1px solid #e0e0e0'>"
+                "<td style='padding:8px;font-weight:bold'>Hardness</td>"
+                "<td style='padding:8px'>%04X %04X</td>"
+                "<td style='padding:8px;color:#6f42c1;font-weight:bold'>%.2f mg/L</td>"
+                "<td style='padding:8px;font-size:12px'>FLOAT32 CDAB</td></tr>"
+                "<tr style='border-bottom:1px solid #e0e0e0'>"
+                "<td style='padding:8px;font-weight:bold'>Temperature</td>"
+                "<td style='padding:8px'>%04X %04X</td>"
+                "<td style='padding:8px;color:#0d6efd;font-weight:bold'>%.2f &deg;C</td>"
+                "<td style='padding:8px;font-size:12px'>FLOAT32 CDAB</td></tr>"
+                "</table>"
+                "<div style='margin-top:10px'><b>Raw Hex:</b> <span class='hex-display'>%04X %04X %04X %04X %04X %04X</span></div>"
+                "</div>",
+                registers[0], registers[1], (double)h_fv,
+                registers[4], registers[5], (double)t_fv,
+                registers[0], registers[1], registers[2], registers[3], registers[4], registers[5]);
+
+            httpd_resp_set_type(req, "text/html");
+            httpd_resp_send(req, format_table, strlen(format_table));
+            free(format_table);
+            return ESP_OK;
+        }
+
         // For non-QUALITY sensors, use normal test logic
         int test_slave_id = sensor->slave_id;
         int test_register = sensor->register_address;
@@ -7343,6 +7527,7 @@ static esp_err_t test_rs485_handler(httpd_req_t *req)
     if (strstr(data_type, "AQUADAX_QUALITY_FIXED")) max_qty = 12;
     else if (strstr(data_type, "OPRUSS_ACE_FIXED")) max_qty = 22;
     else if (strstr(data_type, "ASTER_FIXED")) max_qty = 4;
+    else if (strstr(data_type, "HARDNESS_FIXED")) max_qty = 6;
     if (quantity < 1 || quantity > max_qty) {
         snprintf(response, 1500,
                  "{\"status\":\"error\",\"message\":\"Invalid Quantity: %d. Must be 1-%d registers.\"}",
@@ -7636,11 +7821,25 @@ static esp_err_t test_rs485_handler(httpd_req_t *req)
             primary_value = ph_value; // Use pH as primary
             ESP_LOGI(TAG, "Aster Test pH = %.2f (reg[2]=0x%04X), TDS = %.0f (reg[1]=0x%04X)",
                      ph_value, registers[2], tds_value, registers[1]);
+        } else if (reg_count >= 6 && strstr(data_type, "HARDNESS_FIXED")) {
+            // HARDNESS_FIXED: 2x FLOAT32 CDAB (word-swap)
+            // Register layout: Hardness(0-1), Unused(2-3), Temperature(4-5)
+            // Verified: reg[0]=0xCCCC reg[1]=0x406C -> 0x406CCCCC = 3.72 mg/L
+            uint32_t h_bits = ((uint32_t)registers[1] << 16) | registers[0];
+            float hardness_value;
+            memcpy(&hardness_value, &h_bits, sizeof(float));
+            primary_value = (double)hardness_value;
+            uint32_t t_bits = ((uint32_t)registers[5] << 16) | registers[4];
+            float temp_value;
+            memcpy(&temp_value, &t_bits, sizeof(float));
+            ESP_LOGI(TAG, "Hardness Test: Hardness = %.2f mg/L (reg[0]=0x%04X reg[1]=0x%04X), Temp = %.2f C (reg[4]=0x%04X reg[5]=0x%04X)",
+                     (double)hardness_value, registers[0], registers[1],
+                     (double)temp_value, registers[4], registers[5]);
         } else if (reg_count >= 1) {
             primary_value = (double)registers[0] * scale_factor;
         }
 
-        char temp_str[1000];
+        char temp_str[2048];
         
         // Calculate the final test value based on sensor type
         double test_display_value = primary_value;
@@ -7748,6 +7947,51 @@ static esp_err_t test_rs485_handler(httpd_req_t *req)
             strcat(format_table, "</span></div>");
             // Skip the normal ScadaCore table
             strcat(format_table, "</div>");
+            httpd_resp_sendstr_chunk(req, format_table);
+            free(format_table);
+            httpd_resp_sendstr_chunk(req, NULL);
+            return ESP_OK;
+        }
+
+        // Special water quality table for Hardness_Sensor
+        if (strstr(data_type, "HARDNESS_FIXED") && reg_count >= 6) {
+            uint32_t h_bits = ((uint32_t)registers[1] << 16) | registers[0];
+            float h_fv;
+            memcpy(&h_fv, &h_bits, sizeof(float));
+            uint32_t t_bits = ((uint32_t)registers[5] << 16) | registers[4];
+            float t_fv;
+            memcpy(&t_fv, &t_bits, sizeof(float));
+            strcat(format_table,
+                "<h4 style='color:#6f42c1'>&#10003; Hardness Sensor - 2 Parameters</h4>"
+                "<table style='width:100%;border-collapse:collapse;margin:10px 0'>"
+                "<tr style='background:#6f42c1;color:white'>"
+                "<th style='padding:10px;text-align:left'>PARAMETER</th>"
+                "<th style='padding:10px;text-align:left'>RAW REGISTERS</th>"
+                "<th style='padding:10px;text-align:left'>VALUE</th>"
+                "<th style='padding:10px;text-align:left'>DATA TYPE</th></tr>");
+            snprintf(temp_str, sizeof(temp_str),
+                "<tr style='border-bottom:1px solid #e0e0e0'>"
+                "<td style='padding:8px;font-weight:bold'>Hardness</td>"
+                "<td style='padding:8px'>%04X %04X</td>"
+                "<td style='padding:8px;color:#6f42c1;font-weight:bold'>%.2f mg/L</td>"
+                "<td style='padding:8px;font-size:12px'>FLOAT32 CDAB</td></tr>",
+                registers[0], registers[1], (double)h_fv);
+            strcat(format_table, temp_str);
+            snprintf(temp_str, sizeof(temp_str),
+                "<tr style='border-bottom:1px solid #e0e0e0'>"
+                "<td style='padding:8px;font-weight:bold'>Temperature</td>"
+                "<td style='padding:8px'>%04X %04X</td>"
+                "<td style='padding:8px;color:#0d6efd;font-weight:bold'>%.2f &deg;C</td>"
+                "<td style='padding:8px;font-size:12px'>FLOAT32 CDAB</td></tr>",
+                registers[4], registers[5], (double)t_fv);
+            strcat(format_table, temp_str);
+            strcat(format_table, "</table>");
+            strcat(format_table, "<div><b>Raw Hex:</b> <span class='hex-display'>");
+            for (int i = 0; i < 6; i++) {
+                snprintf(temp_str, sizeof(temp_str), "%04X ", registers[i]);
+                strcat(format_table, temp_str);
+            }
+            strcat(format_table, "</span></div></div>");
             httpd_resp_sendstr_chunk(req, format_table);
             free(format_table);
             httpd_resp_sendstr_chunk(req, NULL);
@@ -9228,6 +9472,7 @@ static esp_err_t start_webserver(void)
     config.keep_alive_idle = 5;       // Start keep-alive probes after 5 seconds idle
     config.keep_alive_interval = 3;   // Keep-alive probe interval (3 seconds)
     config.keep_alive_count = 3;      // Allow 3 probes before closing
+    config.open_fn = web_wake_session_open;  // reset idle timer on every TCP session
 
     if (httpd_start(&g_server, &config) == ESP_OK) {
         // Main configuration page

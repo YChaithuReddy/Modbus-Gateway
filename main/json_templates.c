@@ -72,8 +72,11 @@ json_template_type_t get_json_type_from_sensor_type(const char* sensor_type)
     }
 
     if (strcasecmp(sensor_type, "QUALITY") == 0 ||
+        strcasecmp(sensor_type, "Hardness_Sensor") == 0 ||
         strstr(sensor_type, "quality") != NULL ||
-        strstr(sensor_type, "Quality") != NULL) {
+        strstr(sensor_type, "Quality") != NULL ||
+        strstr(sensor_type, "hardness") != NULL ||
+        strstr(sensor_type, "Hardness") != NULL) {
         return JSON_TYPE_QUALITY;
     }
 
@@ -513,6 +516,10 @@ esp_err_t generate_quality_sensor_json(const sensor_reading_t* reading, char* js
     if (reading->quality_params.cod_valid) {
         snprintf(params_data + strlen(params_data), sizeof(params_data) - strlen(params_data),
             "%s\"COD\":\"%.2f\"", strlen(params_data) > 0 ? "," : "", reading->quality_params.cod_value);
+    }
+    if (reading->quality_params.hardness_valid) {
+        snprintf(params_data + strlen(params_data), sizeof(params_data) - strlen(params_data),
+            "%s\"Hardness\":\"%.2f\"", strlen(params_data) > 0 ? "," : "", reading->quality_params.hardness_value);
     }
 
     // Create JSON for water quality sensor with only valid parameter values

@@ -38,6 +38,8 @@
 #include "ota_update.h"
 #include "cJSON.h"
 #include "esp_crt_bundle.h"
+#include "wireguard_client.h"
+#include "web_wake.h"
 
 static const char *TAG = "AZURE_IOT";
 
@@ -263,8 +265,9 @@ int get_telemetry_history_json(char *buffer, size_t buffer_size) {
     return written;
 }
 static esp_err_t reinit_modem_reset_gpio(int new_gpio_pin);
-static void start_web_server(void);
-static void stop_web_server(void);
+// Non-static — called from web_wake.c (wake-on-ICMP + idle-shutdown)
+void start_web_server(void);
+void stop_web_server(void);
 static void handle_web_server_toggle(void);
 static void init_status_leds(void);
 static void set_status_led(int gpio_pin, bool on);
@@ -2206,7 +2209,8 @@ static void create_telemetry_payload(char* payload, size_t payload_size) {
                     } else if (strcasecmp(matching_sensor->sensor_type, "QUALITY") == 0 ||
                                strcasecmp(matching_sensor->sensor_type, "Aquadax_Quality") == 0 ||
                                strcasecmp(matching_sensor->sensor_type, "Opruss_Ace") == 0 ||
-                               strcasecmp(matching_sensor->sensor_type, "Aster") == 0) {
+                               strcasecmp(matching_sensor->sensor_type, "Aster") == 0 ||
+                               strcasecmp(matching_sensor->sensor_type, "Hardness_Sensor") == 0) {
                         value_key = "value";
                         type_value = "QUALITY";
                     }
@@ -2215,7 +2219,8 @@ static void create_telemetry_payload(char* payload, size_t payload_size) {
                     if (strcasecmp(matching_sensor->sensor_type, "QUALITY") == 0 ||
                         strcasecmp(matching_sensor->sensor_type, "Aquadax_Quality") == 0 ||
                         strcasecmp(matching_sensor->sensor_type, "Opruss_Ace") == 0 ||
-                        strcasecmp(matching_sensor->sensor_type, "Aster") == 0) {
+                        strcasecmp(matching_sensor->sensor_type, "Aster") == 0 ||
+                        strcasecmp(matching_sensor->sensor_type, "Hardness_Sensor") == 0) {
                         // QUALITY sensor with params_data object
                         char params_data[256] = "";
 
@@ -2253,6 +2258,11 @@ static void create_telemetry_payload(char* payload, size_t payload_size) {
                             snprintf(params_data + strlen(params_data),
                                 sizeof(params_data) - strlen(params_data),
                                 "%s\"COD\":\"%.2f\"", strlen(params_data) > 0 ? "," : "", readings[i].quality_params.cod_value);
+                        }
+                        if (readings[i].quality_params.hardness_valid) {
+                            snprintf(params_data + strlen(params_data),
+                                sizeof(params_data) - strlen(params_data),
+                                "%s\"Hardness\":\"%.2f\"", strlen(params_data) > 0 ? "," : "", readings[i].quality_params.hardness_value);
                         }
 
                         batch_pos += snprintf(batch_payload + batch_pos, sizeof(telemetry_payload) - batch_pos,
@@ -2344,7 +2354,8 @@ static void create_telemetry_payload(char* payload, size_t payload_size) {
                     if (strcasecmp(matching_sensor->sensor_type, "QUALITY") == 0 ||
                         strcasecmp(matching_sensor->sensor_type, "Aquadax_Quality") == 0 ||
                         strcasecmp(matching_sensor->sensor_type, "Opruss_Ace") == 0 ||
-                        strcasecmp(matching_sensor->sensor_type, "Aster") == 0) {
+                        strcasecmp(matching_sensor->sensor_type, "Aster") == 0 ||
+                        strcasecmp(matching_sensor->sensor_type, "Hardness_Sensor") == 0) {
                         json_result = generate_quality_sensor_json(
                             &readings[i],
                             temp_json,
@@ -2761,7 +2772,7 @@ static void modem_reset_task(void *pvParameters)
 // Function removed - no longer used in unified operation mode
 
 // Start web server for configuration
-static void start_web_server(void)
+void start_web_server(void)
 {
     if (!web_server_running) {
         ESP_LOGI(TAG, "[WEB] GPIO trigger detected - starting web server with SoftAP");
@@ -2837,7 +2848,7 @@ static void start_web_server(void)
 }
 
 // Stop web server and return to operation only
-static void stop_web_server(void)
+void stop_web_server(void)
 {
     if (web_server_running) {
         ESP_LOGI(TAG, "[WEB] GPIO trigger detected - stopping web server");
@@ -3082,14 +3093,59 @@ static void modbus_task(void *pvParameters)
         xSemaphoreGive(startup_log_mutex);
     }
 
-    // NOTE: Sensor reading is now done in telemetry_task -> create_telemetry_payload()
-    // This task only monitors for shutdown/toggle requests and keeps the task handle alive
+    // This task monitors for shutdown/toggle requests and handles serial test commands.
+    // Send "TEST\n" via USB serial (UART0) to trigger an immediate RS485 Modbus read.
+
+    // Install UART0 driver for reading serial commands (ESP-IDF console uses UART0 but
+    // doesn't install a UART driver — it uses VFS. We need the driver for uart_read_bytes.)
+    static bool uart0_ready = false;
+    if (!uart0_ready) {
+        // Only install if not already installed
+        if (uart_is_driver_installed(UART_NUM_0)) {
+            uart0_ready = true;
+        } else {
+            esp_err_t u0_ret = uart_driver_install(UART_NUM_0, 256, 0, 0, NULL, 0);
+            if (u0_ret == ESP_OK) {
+                uart0_ready = true;
+                ESP_LOGI(TAG, "[RS485_TEST] UART0 driver installed - send 'TEST' via serial to test RS485");
+            } else {
+                ESP_LOGW(TAG, "[RS485_TEST] Could not install UART0 driver: %s", esp_err_to_name(u0_ret));
+            }
+        }
+    }
+    uint8_t uart0_buf[16];
 
     while (1) {
+        // Check for serial "TEST" command on UART0 (USB serial)
+        int len = uart0_ready ? uart_read_bytes(UART_NUM_0, uart0_buf, sizeof(uart0_buf) - 1, pdMS_TO_TICKS(500)) : -1;
+        if (len <= 0) {
+            // No data or driver not ready - just check flags and loop
+            len = 0;
+        }
+        if (len > 0) {
+            uart0_buf[len] = '\0';
+            // Check if received data contains "TEST"
+            if (strstr((char *)uart0_buf, "TEST") != NULL) {
+                ESP_LOGI(TAG, "[RS485_TEST] Serial test command received - reading sensors NOW");
+                sensor_reading_t readings[10];
+                int count = 0;
+                esp_err_t ret = sensor_read_all_configured(readings, 10, &count);
+                if (ret == ESP_OK && count > 0) {
+                    ESP_LOGI(TAG, "[RS485_TEST] PASS: Read %d/%d sensors successfully", count, get_system_config()->sensor_count);
+                    for (int i = 0; i < count; i++) {
+                        ESP_LOGI(TAG, "[RS485_TEST] Sensor %s = %.2f (valid=%d)",
+                                 readings[i].unit_id, readings[i].value, readings[i].valid);
+                    }
+                } else {
+                    ESP_LOGE(TAG, "[RS485_TEST] FAIL: Could not read sensors (ret=%s, count=%d)",
+                             esp_err_to_name(ret), count);
+                }
+            }
+        }
+
         // Check for web server toggle request (handled by main monitoring loop)
         if (web_server_toggle_requested) {
             ESP_LOGI(TAG, "[WEB] Web server toggle requested via GPIO - signaling main loop");
-            // Just set the flag, main loop will handle the transition
         }
 
         // Check for shutdown request
@@ -3099,9 +3155,6 @@ static void modbus_task(void *pvParameters)
             vTaskDelete(NULL);
             return;
         }
-
-        // Sleep for a long time - this task is just a monitor now
-        vTaskDelay(pdMS_TO_TICKS(30000)); // Check every 30 seconds
     }
 
     // Task exiting normally (due to config mode request)
@@ -4940,6 +4993,47 @@ void app_main(void) {
 
     // Wait a bit to ensure time is properly synchronized
     vTaskDelay(5000 / portTICK_PERIOD_MS);
+
+    // ─────────────────────────────────────────────────────────────────
+    // WIREGUARD VPN CLIENT INITIALIZATION
+    //
+    // Runs HERE so registration HTTPS happens BEFORE Azure MQTT TLS — Issue #6:
+    // two concurrent TLS sessions caused heap exhaustion. By the time the MQTT
+    // task spawns below, the WG tunnel is up and HTTPS register is finished.
+    //
+    // Skipped in CONFIG_STATE_SETUP (initial AP-only config, no internet).
+    // Works over both WiFi STA and SIM PPP — LWIP routes through whatever the
+    // default gateway is.
+    //
+    // After tunnel comes up, the gateway is reachable from anywhere on the VPN
+    // network at its assigned 10.100.0.X address (web config + MQTT).
+    // ─────────────────────────────────────────────────────────────────
+    if (get_config_state() != CONFIG_STATE_SETUP && is_network_connected()) {
+        ESP_LOGI(TAG, "╔══════════════════════════════════════════════════════════╗");
+        ESP_LOGI(TAG, "║         🔐 WIREGUARD VPN CLIENT STARTUP 🔐              ║");
+        ESP_LOGI(TAG, "╚══════════════════════════════════════════════════════════╝");
+        esp_err_t wg_ret = wireguard_setup();
+        if (wg_ret == ESP_OK) {
+            ESP_LOGI(TAG, "[WG] ✅ VPN client setup OK — IP %s",
+                     wireguard_get_local_ip());
+        } else {
+            ESP_LOGW(TAG, "[WG] ⚠️ VPN setup did not complete — keepalive task will keep trying");
+        }
+        // Background keepalive: 10s tunnel check, 20s server verify, peer-deletion self-heal
+        wireguard_start_keepalive_task();
+
+        // Wake-on-ICMP + 30-min idle shutdown for the web server.
+        // Lets VPN peers `ping 10.100.0.X` to summon the config UI without
+        // leaving httpd running 24/7 and burning ~15 KB heap.
+        esp_err_t ww_ret = web_wake_init();
+        if (ww_ret == ESP_OK) {
+            ESP_LOGI(TAG, "[WAKE] Web wake-on-ping armed — server will start on VPN ICMP");
+        } else {
+            ESP_LOGW(TAG, "[WAKE] web_wake_init failed: %s", esp_err_to_name(ww_ret));
+        }
+    } else {
+        ESP_LOGI(TAG, "[WG] Skipping VPN setup (setup mode or no network)");
+    }
 
     ESP_LOGI(TAG, "╔══════════════════════════════════════════════════════════╗");
     ESP_LOGI(TAG, "║          ⚙️  DUAL-CORE TASK CREATION ⚙️                 ║");

@@ -234,6 +234,11 @@ esp_err_t web_config_start_ap_mode(void);
 esp_err_t web_config_stop(void);
 esp_err_t web_config_start_server_only(void);
 
+// Returns the underlying httpd server handle so other modules (e.g. wireguard_client)
+// can register additional URI handlers without modifying web_config.c.
+// NULL if the server hasn't been started yet.
+httpd_handle_t web_config_get_server(void);
+
 // Configuration management
 esp_err_t config_load_from_nvs(system_config_t *config);
 esp_err_t config_save_to_nvs(const system_config_t *config);

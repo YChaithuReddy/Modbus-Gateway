@@ -283,6 +283,9 @@ esp_err_t sensor_test_live(const sensor_config_t *sensor, sensor_test_result_t *
     } else if (strcmp(sensor->sensor_type, "Panda_USM") == 0) {
         quantity_to_read = 4;
         ESP_LOGI(TAG, "Panda USM sensor detected, reading 4 registers for DOUBLE64 (Net Volume)");
+    } else if (strcmp(sensor->sensor_type, "Hardness_Sensor") == 0) {
+        quantity_to_read = 6;
+        ESP_LOGI(TAG, "Hardness sensor detected, reading 6 registers for 3x FLOAT32 CDAB (Hardness, _, Temp)");
     }
     
     // Set the baud rate for this sensor
@@ -649,6 +652,11 @@ esp_err_t sensor_read_single(const sensor_config_t *sensor, sensor_reading_t *re
     // For Opruss Ace sensors, use single bulk read for 3 FLOAT32 CDAB parameters
     if (strcmp(sensor->sensor_type, "Opruss_Ace") == 0) {
         return sensor_read_opruss_ace(sensor, reading);
+    }
+
+    // For Hardness sensors, use single bulk read for 3 FLOAT32 ABCD parameters
+    if (strcmp(sensor->sensor_type, "Hardness_Sensor") == 0) {
+        return sensor_read_hardness(sensor, reading);
     }
 
     // Clear reading
@@ -1154,6 +1162,108 @@ esp_err_t sensor_read_opruss_ace(const sensor_config_t *sensor, sensor_reading_t
              reading->unit_id,
              reading->quality_params.cod_value, reading->quality_params.bod_value,
              reading->quality_params.tss_value, reading->quality_params.tds_value,
+             reading->quality_params.temp_value);
+
+    return ESP_OK;
+}
+
+// Read Hardness sensor - single bulk read of 6 registers for 3 FLOAT32 ABCD parameters
+// Register layout: Hardness (mg/L) at 0-1, unused at 2-3, Temperature (degC) at 4-5
+// Defaults: slave 1, baud 9600, holding register 230 (0x00E6), qty 6, FLOAT32 ABCD (no swap)
+esp_err_t sensor_read_hardness(const sensor_config_t *sensor, sensor_reading_t *reading)
+{
+    if (!sensor || !reading) {
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    if (strcmp(sensor->sensor_type, "Hardness_Sensor") != 0) {
+        ESP_LOGE(TAG, "Sensor %s is not a Hardness_Sensor", sensor->name);
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    memset(reading, 0, sizeof(sensor_reading_t));
+
+    strncpy(reading->unit_id, sensor->unit_id, sizeof(reading->unit_id) - 1);
+    strncpy(reading->sensor_name, sensor->name, sizeof(reading->sensor_name) - 1);
+
+    time_t now;
+    struct tm timeinfo;
+    time(&now);
+    gmtime_r(&now, &timeinfo);
+    strftime(reading->timestamp, sizeof(reading->timestamp), "%Y-%m-%dT%H:%M:%SZ", &timeinfo);
+
+    int baud_rate = sensor->baud_rate > 0 ? sensor->baud_rate : 9600;
+    modbus_set_baud_rate(baud_rate);
+
+    system_config_t *sys_config = get_system_config();
+    int retry_count = sys_config ? sys_config->modbus_retry_count : 1;
+    int retry_delay_ms = sys_config ? sys_config->modbus_retry_delay : 50;
+
+    int reg_addr = sensor->register_address > 0 ? sensor->register_address : 230;
+
+    modbus_result_t modbus_result;
+    int attempt = 0;
+    do {
+        if (attempt > 0) {
+            ESP_LOGW(TAG, "Retry %d/%d for Hardness_Sensor '%s'",
+                     attempt, retry_count, sensor->name);
+            vTaskDelay(pdMS_TO_TICKS(retry_delay_ms));
+        }
+        modbus_result = modbus_read_holding_registers(sensor->slave_id, reg_addr, 6);
+        attempt++;
+    } while (modbus_result != MODBUS_SUCCESS && attempt <= retry_count);
+
+    if (modbus_result != MODBUS_SUCCESS) {
+        reading->valid = false;
+        strncpy(reading->data_source, "error", sizeof(reading->data_source) - 1);
+        ESP_LOGE(TAG, "Hardness_Sensor: Modbus read failed after %d attempts", attempt);
+        return ESP_FAIL;
+    }
+
+    int reg_count = modbus_get_response_length();
+    if (reg_count < 6) {
+        reading->valid = false;
+        strncpy(reading->data_source, "error", sizeof(reading->data_source) - 1);
+        ESP_LOGE(TAG, "Hardness_Sensor: Insufficient registers (got %d, need 6)", reg_count);
+        return ESP_FAIL;
+    }
+
+    uint16_t registers[6];
+    for (int i = 0; i < 6; i++) {
+        registers[i] = modbus_get_response_buffer(i);
+    }
+
+    // Parse 2 FLOAT32 CDAB (word-swap) values: hardness@0-1, temp@4-5
+    // CDAB: float_bits = (reg[off+1] << 16) | reg[off]
+    // Verified on field unit (slave 1): reg[0]=0xCCCC reg[1]=0x406C -> 0x406CCCCC = 3.72 mg/L
+    //                                   reg[4]=0x3333 reg[5]=0x41B7 -> 0x41B73333 = 22.90 C
+    int hardness_offsets[] = {0, 4};
+    const char *param_names[] = {"Hardness", "Temp"};
+    double params[2];
+    for (int p = 0; p < 2; p++) {
+        int off = hardness_offsets[p];
+        uint32_t float_bits = ((uint32_t)registers[off + 1] << 16) | registers[off];
+        float fv;
+        memcpy(&fv, &float_bits, sizeof(float));
+        params[p] = (double)fv;
+        ESP_LOGI(TAG, "Hardness_Sensor %s: reg[%d]=0x%04X reg[%d]=0x%04X -> FLOAT32_CDAB=%.2f",
+                 param_names[p], off, registers[off], off + 1, registers[off + 1], params[p]);
+    }
+
+    reading->quality_params.hardness_value = params[0];
+    reading->quality_params.hardness_valid = true;
+    reading->quality_params.temp_value = params[1];
+    reading->quality_params.temp_valid = true;
+
+    // Primary value = hardness
+    reading->value = reading->quality_params.hardness_value;
+    reading->valid = true;
+    strncpy(reading->data_source, "modbus_rs485_multi", sizeof(reading->data_source) - 1);
+    reading->data_source[sizeof(reading->data_source) - 1] = '\0';
+
+    ESP_LOGI(TAG, "Hardness_Sensor %s: Hardness=%.2f mg/L, Temp=%.2f C",
+             reading->unit_id,
+             reading->quality_params.hardness_value,
              reading->quality_params.temp_value);
 
     return ESP_OK;

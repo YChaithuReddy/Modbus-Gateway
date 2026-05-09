@@ -25,6 +25,7 @@ typedef struct {
     double tss_value;       // Total Suspended Solids (mg/L)
     double bod_value;       // Biochemical Oxygen Demand (mg/L)
     double cod_value;       // Chemical Oxygen Demand (mg/L)
+    double hardness_value;  // Total Hardness (mg/L as CaCO3)
     // Validity flags - true if parameter was actually read from sensor
     bool ph_valid;
     bool tds_valid;
@@ -33,6 +34,7 @@ typedef struct {
     bool tss_valid;
     bool bod_valid;
     bool cod_valid;
+    bool hardness_valid;
 } quality_params_t;
 
 // Multi-sensor reading result
@@ -56,6 +58,7 @@ esp_err_t sensor_read_single(const sensor_config_t *sensor, sensor_reading_t *re
 esp_err_t sensor_read_quality(const sensor_config_t *sensor, sensor_reading_t *reading);
 esp_err_t sensor_read_aquadax_quality(const sensor_config_t *sensor, sensor_reading_t *reading);
 esp_err_t sensor_read_opruss_ace(const sensor_config_t *sensor, sensor_reading_t *reading);
+esp_err_t sensor_read_hardness(const sensor_config_t *sensor, sensor_reading_t *reading);
 
 // Utility functions
 const char* get_register_type_description(const char* reg_type);

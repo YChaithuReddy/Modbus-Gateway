@@ -1,0 +1,3 @@
+dependencies:
+  trombik/esp_wireguard: ">=0.9.0"
+  idf: ">=5.0.0"

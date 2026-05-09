@@ -1,4 +1,4 @@
-# Production Deployment Guide - ESP32 Modbus IoT Gateway v1.0.0
+# Production Deployment Guide - ESP32 Modbus IoT Gateway v1.3.8
 
 ## 🏭 Production Ready Features
 
@@ -27,40 +27,96 @@
 - **ESP32-WROOM-32** or compatible module
 - **4MB Flash Memory** (minimum required)
 - **RS485 transceiver** (MAX485, SP485, or similar)
+- **A7670C SIM module** (for cellular connectivity, optional if using WiFi only)
+- **SD Card module** (SPI mode, for offline data caching)
+- **DS3231 RTC module** (for accurate timestamps when offline)
 - **Power supply**: 3.3V regulated, minimum 500mA
 
-### Recommended Hardware Configuration
+### Complete Hardware Pin Map (v1.3.8)
 ```
-ESP32 Pin Connections:
-├── GPIO 16 (RX2) → RS485 B- (Differential Low)
-├── GPIO 17 (TX2) → RS485 A+ (Differential High)  
-├── GPIO 4  (RTS) → RS485 Direction Control
-├── GPIO 2  (LED) → Status LED (optional)
-└── GND         → Common Ground (critical)
+╔══════════════════════════════════════════════════════════════╗
+║              ESP32 GPIO Pin Assignments                      ║
+╠══════════════════════════════════════════════════════════════╣
+║                                                              ║
+║  RS485 Modbus (UART2)                                        ║
+║  ├── GPIO 16  → RS485 RX (RXD2)                             ║
+║  ├── GPIO 17  → RS485 TX (TXD2)                             ║
+║  └── GPIO 18  → RS485 RTS (Direction Control)               ║
+║                                                              ║
+║  SIM Module - A7670C (UART1, configurable via web UI)        ║
+║  ├── GPIO 33  → SIM TX (ESP32 TX → A7670C RX)               ║
+║  ├── GPIO 32  → SIM RX (ESP32 RX ← A7670C TX)              ║
+║  ├── GPIO 4   → SIM Power Key (PWR)                         ║
+║  └── Reset    → Disabled by default (GPIO 15 conflict w/SD) ║
+║                                                              ║
+║  SD Card (SPI3)                                              ║
+║  ├── GPIO 23  → MOSI                                        ║
+║  ├── GPIO 19  → MISO                                        ║
+║  ├── GPIO 5   → CLK                                         ║
+║  └── GPIO 15  → CS (Chip Select)                            ║
+║                                                              ║
+║  DS3231 RTC (I2C0)                                           ║
+║  ├── GPIO 21  → SDA                                         ║
+║  └── GPIO 22  → SCL                                         ║
+║                                                              ║
+║  Status LEDs                                                 ║
+║  ├── GPIO 25  → Web Server Active (ON when AP running)      ║
+║  ├── GPIO 26  → MQTT Connected (ON when Azure connected)    ║
+║  └── GPIO 27  → Sensor Response (blinks on Modbus read)     ║
+║                                                              ║
+║  Control Buttons                                             ║
+║  ├── GPIO 34  → Config Button (rising edge trigger)         ║
+║  └── GPIO 0   → Boot Button (falling edge trigger)          ║
+║                                                              ║
+║  Modem Reset                                                 ║
+║  └── GPIO 2   → Modem hardware reset (configurable via web) ║
+║                                                              ║
+╚══════════════════════════════════════════════════════════════╝
 
 Power Requirements:
 ├── Input: 5V DC or 3.3V regulated
-├── Current: 500mA minimum (1A recommended)
-└── Backup: Optional battery for configuration retention
+├── Current: 1A minimum (A7670C module draws 2A peak during TX)
+└── Backup: Optional battery for RTC time retention
+```
+
+### GPIO Conflict Notes
+```
+⚠️  Known Conflicts:
+├── GPIO 15 is shared between SD Card CS and SIM Reset
+│   → SIM Reset is DISABLED by default to avoid conflict
+│   → If SD card is not used, SIM Reset can be enabled via web UI
+├── GPIO 18 was changed from GPIO 32 for RS485 RTS
+│   → GPIO 32 is used by SIM RX, so RTS moved to GPIO 18
+└── GPIO 2 is used for Modem Reset AND has onboard LED on some boards
+    → Be aware of LED blinking during modem reset cycles
 ```
 
 ### RS485 Network Setup
 ```
-Recommended RS485 Network:
+RS485 Bus Topology:
 ┌─────────────┐    ┌──────────────┐    ┌──────────────┐
 │   ESP32     │    │   Sensor 1   │    │   Sensor 2   │
 │  Gateway    │────│  (Slave 1)   │────│  (Slave 2)   │
-│             │    │              │    │              │
+│  GPIO16/17  │    │  e.g. Flow   │    │  e.g. Opruss │
 └─────────────┘    └──────────────┘    └──────────────┘
       │                    │                    │
    120Ω Term          (Optional)           120Ω Term
-   
+
 Network Specifications:
 ├── Max Distance: 1200 meters (4000 feet)
 ├── Max Devices: 247 (practical limit ~32)
-├── Termination: 120Ω resistors at line ends
-├── Baud Rates: 9600, 19200, 38400, 115200 bps
-└── Topology: Linear (no stars or branches)
+├── Max Sensors per Gateway: 10 (reduced from 15 for heap savings)
+├── Termination: 120Ω resistors at both line ends
+├── Default Baud Rate: 9600 bps (configurable per sensor)
+├── Supported Baud Rates: 9600, 19200, 38400, 115200 bps
+└── Topology: Linear daisy-chain (no stars or branches)
+
+Supported Sensor Types:
+├── Flow Meters (UINT16/32, INT16/32, FLOAT32 with byte order variants)
+├── Aquadax Quality (COD, BOD, TSS, pH, Temp - 12 registers, CDAB+byteswap)
+├── Opruss Ace Quality (COD, BOD, TSS - 22 registers, FLOAT32 CDAB)
+├── Opruss Ace TDS (TDS + Temp - input registers 0x04, FLOAT32 DCBA)
+└── Generic Modbus sensors (configurable data type and byte order)
 ```
 
 ## 🚀 Production Deployment Steps
@@ -218,11 +274,13 @@ Quarterly:
 ## 📈 Scalability and Performance
 
 ### Production Capacity
-- **Maximum sensors**: 8 per ESP32 gateway
-- **Update frequency**: Configurable (30-3600 seconds)
-- **Concurrent connections**: 4 web interface users
+- **Maximum sensors**: 10 per ESP32 gateway (reduced from 15 for heap savings)
+- **Update frequency**: Configurable (30-3600 seconds, default 300s/5min)
+- **Concurrent connections**: 7 web interface sockets (LRU purge disabled)
 - **Data throughput**: Up to 1000 Modbus requests/minute
 - **Network capacity**: 32 devices per RS485 network (practical limit)
+- **Offline caching**: SD card stores telemetry when MQTT disconnected
+- **OTA updates**: Firmware updates via Azure Device Twin or GitHub releases
 
 ### Multi-Gateway Deployment
 ```
@@ -302,6 +360,8 @@ Issue Level 3 - System Integration:
 - [ ] Team trained on operation and maintenance
 - [ ] Emergency procedures tested and documented
 
-**🎉 System Status: PRODUCTION READY - Version 1.0.0**
+**System Status: PRODUCTION READY - Version 1.3.8**
 
 *This system has been rigorously tested and is ready for industrial deployment with comprehensive monitoring, diagnostics, and support capabilities.*
+
+**Partition Table**: FROZEN as of v1.3.7 - DO NOT modify `partitions_4mb.csv`
