@@ -1,0 +1,1047 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<title>FLUXGEN IoT Gateway — Offline Demo</title>
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;500;600;700;800;900&family=Rajdhani:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+/* ===== DESIGN SYSTEM: CSS VARIABLES ===== */
+:root{
+--primary-900:#0c2d5e;--primary-800:#1e40af;--primary-700:#1d4ed8;--primary-600:#2563eb;--primary-500:#3b82f6;--primary-400:#60a5fa;--primary-300:#93c5fd;--primary-200:#bfdbfe;--primary-100:#dbeafe;
+--accent-600:#0891b2;--accent-500:#06b6d4;--accent-400:#22d3ee;--accent-300:#67e8f9;
+--success-600:#059669;--success-500:#10b981;--success-400:#34d399;
+--warning-600:#d97706;--warning-500:#f59e0b;--warning-400:#fbbf24;
+--error-600:#dc2626;--error-500:#ef4444;--error-400:#f87171;
+--gray-900:#0f172a;--gray-800:#1e293b;--gray-700:#334155;--gray-600:#475569;--gray-500:#64748b;--gray-400:#94a3b8;--gray-300:#cbd5e1;--gray-200:#e2e8f0;--gray-100:#f1f5f9;--gray-50:#f8fafc;
+--color-primary:var(--primary-600);--color-primary-hover:var(--primary-700);--color-primary-light:var(--primary-100);
+--color-accent:var(--accent-500);--color-accent-hover:var(--accent-600);
+--color-success:var(--success-500);--color-warning:var(--warning-500);--color-error:var(--error-500);--color-danger:#dc2626;
+--color-text-primary:var(--gray-900);--color-text-secondary:var(--gray-700);--color-text-tertiary:var(--gray-500);--color-text-disabled:var(--gray-400);
+--color-bg-primary:#ffffff;--color-bg-secondary:var(--gray-50);--color-bg-tertiary:var(--gray-100);
+--color-border-light:var(--gray-200);--color-border-medium:var(--gray-300);--color-border-dark:var(--gray-400);
+--glass-white:rgba(255,255,255,0.85);--glass-white-light:rgba(255,255,255,0.6);--glass-dark:rgba(15,23,42,0.6);
+--shadow-xs:0 1px 2px rgba(0,0,0,0.05);--shadow-sm:0 2px 8px rgba(0,0,0,0.08);--shadow-md:0 4px 16px rgba(0,0,0,0.12);--shadow-lg:0 8px 32px rgba(0,0,0,0.16);--shadow-xl:0 20px 60px rgba(0,0,0,0.24);
+--glow-primary:rgba(37,99,235,0.4);--glow-accent:rgba(6,182,212,0.4);--glow-success:rgba(16,185,129,0.4);
+--space-xs:4px;--space-sm:8px;--space-md:16px;--space-lg:24px;--space-xl:32px;--space-2xl:48px;--space-3xl:64px;
+--radius-sm:6px;--radius-md:12px;--radius-lg:16px;--radius-xl:20px;--radius-2xl:24px;--radius-full:9999px;
+--text-xs:0.75rem;--text-sm:0.875rem;--text-base:1rem;--text-lg:1.125rem;--text-xl:1.25rem;--text-2xl:1.5rem;--text-3xl:1.875rem;--text-4xl:2.25rem;
+--weight-normal:400;--weight-medium:500;--weight-semibold:600;--weight-bold:700;--weight-extrabold:800;--weight-black:900;
+--leading-tight:1.25;--leading-normal:1.5;--leading-relaxed:1.625;
+--z-base:0;--z-dropdown:100;--z-sticky:200;--z-modal-backdrop:1000;--z-modal:1001;--z-tooltip:1200;
+--transition-fast:150ms cubic-bezier(0.4,0,0.2,1);--transition-base:300ms cubic-bezier(0.4,0,0.2,1);--transition-slow:500ms cubic-bezier(0.4,0,0.2,1);
+}
+/* ===== RESET & BASE STYLES ===== */
+*,*::before,*::after{margin:0;padding:0;box-sizing:border-box}
+html{font-size:16px;-webkit-font-smoothing:antialiased;-moz-osx-font-smoothing:grayscale;scroll-behavior:smooth;overflow-x:hidden;width:100%;max-width:100vw}
+body{font-family:Rajdhani,sans-serif;font-weight:var(--weight-normal);line-height:var(--leading-normal);color:var(--color-text-primary);background:linear-gradient(135deg,#667eea 0%,#764ba2 100%);min-height:100vh;overflow-x:hidden;position:relative;width:100%;max-width:100vw}
+/* ===== TYPOGRAPHY ===== */
+h1,h2,h3,h4,h5,h6{font-family:Orbitron,monospace;font-weight:var(--weight-bold);line-height:var(--leading-tight);color:var(--color-primary);margin-bottom:var(--space-md)}
+h1{font-size:var(--text-4xl);font-weight:var(--weight-black);letter-spacing:-0.02em}
+h2{font-size:var(--text-3xl);font-weight:var(--weight-extrabold)}
+h3{font-size:var(--text-2xl);font-weight:var(--weight-bold)}
+h4{font-size:var(--text-xl);font-weight:var(--weight-semibold)}
+p{margin-bottom:var(--space-md);line-height:var(--leading-relaxed)}
+strong,b{font-weight:var(--weight-semibold);color:var(--color-text-primary)}
+small{font-size:var(--text-sm);color:var(--color-text-tertiary)}
+/* ===== FORM ELEMENTS ===== */
+input,select,textarea{width:100%;padding:var(--space-md);border:2px solid var(--color-border-light);border-radius:var(--radius-md);background:var(--color-bg-primary);color:var(--color-text-primary);font-family:Rajdhani,sans-serif;font-size:var(--text-base);transition:all var(--transition-base);box-shadow:var(--shadow-xs)}
+input:hover,select:hover,textarea:hover{border-color:var(--color-border-medium)}
+input:focus,select:focus,textarea:focus{outline:0;border-color:var(--color-primary);box-shadow:0 0 0 4px var(--color-primary-light),var(--shadow-sm);background:var(--color-bg-primary)}
+input:disabled,select:disabled,textarea:disabled{background:var(--color-bg-tertiary);color:var(--color-text-disabled);cursor:not-allowed;opacity:0.6}
+input::placeholder,textarea::placeholder{color:var(--color-text-tertiary)}
+/* ===== BUTTONS ===== */
+button,.btn{display:inline-flex;align-items:center;justify-content:center;gap:var(--space-sm);padding:var(--space-md) var(--space-xl);border:none;border-radius:var(--radius-md);font-family:Orbitron,monospace;font-size:var(--text-sm);font-weight:var(--weight-semibold);text-transform:uppercase;letter-spacing:0.05em;cursor:pointer;transition:transform var(--transition-fast),box-shadow var(--transition-fast);position:relative;overflow:hidden;box-shadow:var(--shadow-sm);will-change:transform;transform:translateZ(0)}
+.btn-primary,button{background:linear-gradient(135deg,var(--color-primary),var(--color-accent));color:#fff}
+.btn-primary:hover,button:hover{transform:translateY(-2px);box-shadow:0 8px 16px rgba(37,99,235,0.3)}
+.btn-primary:active,button:active{transform:translateY(0) scale(0.98)}
+.btn-secondary{background:var(--color-bg-primary);color:var(--color-primary);border:2px solid var(--color-primary)}
+.btn-secondary:hover{background:var(--color-primary);color:#fff;border-color:var(--color-primary);box-shadow:0 8px 24px var(--glow-primary)}
+.btn-success{background:linear-gradient(135deg,var(--color-success),var(--success-400));color:#fff}
+.btn-success:hover{box-shadow:0 12px 32px var(--glow-success)}
+.btn-danger{background:linear-gradient(135deg,var(--error-600),var(--color-error));color:#fff}
+.btn-ghost{background:transparent;color:var(--color-primary);border:1px solid transparent}
+.btn-ghost:hover{background:var(--color-primary-light);border-color:var(--color-primary)}
+.btn-small{padding:var(--space-sm) var(--space-md);font-size:var(--text-xs)}
+.btn-large{padding:var(--space-lg) var(--space-2xl);font-size:var(--text-base)}
+button:disabled,.btn:disabled{opacity:0.5;cursor:not-allowed;transform:none!important}
+/* ===== TABLES ===== */
+table{width:100%;border-collapse:separate;border-spacing:0;background:var(--color-bg-primary);border-radius:var(--radius-lg);overflow:hidden;box-shadow:var(--shadow-md);margin:var(--space-lg) 0}
+thead{background:linear-gradient(135deg,var(--color-primary),var(--color-accent))}
+th{padding:var(--space-md) var(--space-lg);text-align:left;font-family:Orbitron,monospace;font-weight:var(--weight-bold);font-size:var(--text-sm);color:#fff;text-transform:uppercase;letter-spacing:0.05em;border-bottom:2px solid rgba(255,255,255,0.2)}
+td{padding:var(--space-md) var(--space-lg);color:var(--color-text-secondary);border-bottom:1px solid var(--color-border-light);font-size:var(--text-sm)}
+tbody tr{transition:background-color var(--transition-fast)}
+tbody tr:hover{background:var(--color-bg-secondary)}
+tbody tr:last-child td{border-bottom:none}
+/* ===== STATUS BADGES ===== */
+.badge{display:inline-flex;align-items:center;gap:var(--space-xs);padding:var(--space-xs) var(--space-md);border-radius:var(--radius-full);font-size:var(--text-xs);font-weight:var(--weight-semibold);text-transform:uppercase;letter-spacing:0.05em}
+.badge-success,.status-good{background:rgba(16,185,129,0.1);color:var(--color-success);border:1px solid var(--color-success)}
+.badge-warning,.status-warning{background:rgba(245,158,11,0.1);color:var(--warning-600);border:1px solid var(--color-warning)}
+.badge-error,.status-error{background:rgba(239,68,68,0.1);color:var(--error-600);border:1px solid var(--color-error)}
+.badge-info{background:rgba(59,130,246,0.1);color:var(--color-primary);border:1px solid var(--color-primary)}
+.badge::before{content:'';width:6px;height:6px;border-radius:50%}
+.badge-success::before{background:var(--color-success)}
+.badge-warning::before{background:var(--color-warning)}
+.badge-error::before{background:var(--color-error)}
+.badge-info::before{background:var(--color-primary)}
+/* ===== ALERT/RESULT BOXES ===== */
+.test-result,.alert{padding:var(--space-lg);margin:var(--space-lg) 0;border-radius:var(--radius-lg);border:1px solid;box-shadow:var(--shadow-md);animation:slideIn 0.3s;background:white;overflow:hidden;max-width:100%;box-sizing:border-box}
+.test-result{border-color:var(--color-success);background:linear-gradient(135deg,rgba(16,185,129,0.05),rgba(16,185,129,0.02))}
+.test-result h4{color:var(--color-success);margin:0 0 var(--space-md) 0;font-family:Orbitron,monospace;font-size:var(--text-lg);display:flex;align-items:center;gap:var(--space-sm)}
+.alert-success{background:rgba(16,185,129,0.05);border-color:var(--color-success);color:var(--success-600)}
+.alert-warning{background:rgba(245,158,11,0.05);border-color:var(--color-warning);color:var(--warning-600)}
+.alert-error{background:rgba(239,68,68,0.05);border-color:var(--color-error);color:var(--error-600)}
+.scada-table{width:100%;border-collapse:collapse;margin-top:var(--space-md);font-size:var(--text-sm);box-shadow:var(--shadow-sm);border-radius:var(--radius-md);overflow:hidden;table-layout:fixed}
+.scada-table th{padding:var(--space-md);font-weight:var(--weight-bold);text-align:center;color:white;font-family:Orbitron,monospace;word-wrap:break-word}
+.scada-table td{padding:var(--space-sm) var(--space-md);border-bottom:1px solid var(--color-border-light);text-align:left;word-wrap:break-word;overflow-wrap:break-word;white-space:normal}
+.value-box{background:var(--color-bg-tertiary);padding:var(--space-sm);border-radius:var(--radius-sm);font-family:monospace;margin:var(--space-xs) 0}
+.hex-display{font-family:monospace;color:var(--color-accent);font-weight:var(--weight-semibold);letter-spacing:1px}
+.alert-info{background:rgba(59,130,246,0.05);border-color:var(--color-primary);color:var(--primary-700)}
+@keyframes slideIn{from{opacity:0;transform:translateX(-20px)}to{opacity:1;transform:translateX(0)}}
+/* ===== HEADER ===== */
+.header{display:flex;align-items:center;gap:var(--space-lg);padding:var(--space-xl);background:rgba(255,255,255,0.95);border:1px solid rgba(255,255,255,0.3);border-radius:var(--radius-xl);box-shadow:var(--shadow-lg);margin-bottom:var(--space-xl);position:relative;overflow:hidden}
+.header::before{content:'';position:absolute;top:0;left:0;right:0;height:4px;background:linear-gradient(90deg,var(--color-primary) 0%,var(--color-accent) 50%,var(--color-success) 100%);box-shadow:0 2px 8px var(--glow-primary)}
+/* ===== CARDS ===== */
+.card,.sensor-card{background:rgba(255,255,255,0.95);border:1px solid rgba(255,255,255,0.4);border-radius:var(--radius-xl);padding:var(--space-xl);margin:var(--space-lg) 0;box-shadow:var(--shadow-lg);position:relative;transition:transform var(--transition-base),box-shadow var(--transition-base);overflow:visible;min-height:100px;display:flex;flex-direction:column;justify-content:center;will-change:transform;transform:translateZ(0);width:100%;box-sizing:border-box}
+.card::before,.sensor-card::before{content:'';position:absolute;top:0;left:0;right:0;height:4px;background:linear-gradient(90deg,var(--color-primary) 0%,var(--color-accent) 50%,var(--color-success) 100%);opacity:0.9}
+.card:hover,.sensor-card:hover{transform:translateY(-4px);box-shadow:0 12px 40px rgba(0,0,0,0.2);border-color:rgba(255,255,255,0.7)}
+.card h3,.sensor-card h3{margin:0 0 var(--space-md);font-size:var(--text-xl);font-weight:var(--weight-bold);color:var(--color-primary);font-family:Orbitron,monospace}
+.card p strong,.sensor-card p strong{display:inline;color:var(--color-text-primary);font-weight:var(--weight-semibold)}
+.card p:has(strong),.sensor-card p:has(strong){color:var(--color-text-secondary);line-height:var(--leading-relaxed);margin-bottom:var(--space-sm);display:grid;grid-template-columns:minmax(140px,auto) 1fr;gap:var(--space-md);align-items:baseline}
+.card p:has(strong) strong,.sensor-card p:has(strong) strong{text-align:left}
+.card p:has(strong) span,.sensor-card p:has(strong) span{text-align:right;color:var(--color-text-secondary);word-break:break-word}
+.card p:not(:has(strong)),.sensor-card p:not(:has(strong)){color:var(--color-text-secondary);line-height:1.4;margin-bottom:var(--space-sm);display:block;word-wrap:break-word;overflow-wrap:break-word;letter-spacing:normal}
+.card-header{display:flex;align-items:center;justify-content:space-between;margin-bottom:var(--space-lg);padding-bottom:var(--space-md);border-bottom:2px solid var(--color-border-light)}
+.card-footer{margin-top:var(--space-lg);padding-top:var(--space-md);border-top:1px solid var(--color-border-light);display:flex;gap:var(--space-md);flex-wrap:wrap}
+.card-metric{display:flex;flex-direction:column;gap:var(--space-xs);align-items:center;text-align:center}
+.card-metric-label{font-size:var(--text-xs);color:var(--color-text-tertiary);text-transform:uppercase;letter-spacing:0.05em;font-weight:var(--weight-semibold);text-align:center}
+.card-metric-value{font-size:var(--text-2xl);font-weight:var(--weight-bold);color:var(--color-primary);font-family:Orbitron,monospace;text-align:center;line-height:1.2}
+.status-item{display:flex;flex-direction:column;align-items:center;text-align:center;padding:var(--space-md);gap:var(--space-xs)}
+.status-item strong{display:block;font-size:var(--text-sm);color:var(--color-text-primary);margin-bottom:var(--space-xs);font-weight:var(--weight-semibold)}
+.status-item span{font-size:var(--text-base);color:var(--color-text-secondary)}
+/* ===== FORM LAYOUTS ===== */
+.form-grid{display:grid;grid-template-columns:180px 1fr;gap:var(--space-md);align-items:center;margin:var(--space-md) 0;width:100%}
+.form-grid label{font-weight:var(--weight-semibold);color:var(--color-text-primary);text-align:left}
+.form-grid input,.form-grid select,.form-grid textarea{width:100%;max-width:100%;padding:var(--space-sm);border:1px solid var(--color-border-medium);border-radius:var(--radius-sm);font-size:var(--text-base)}
+/* ===== HEAP USAGE BAR ===== */
+.heap-bar{width:100%;height:24px;background:var(--color-bg-tertiary);border-radius:var(--radius-sm);position:relative;overflow:hidden;margin-top:var(--space-xs)}
+.heap-bar-fill{height:100%;background:var(--color-success);transition:width 0.3s ease,background-color 0.3s ease;display:flex;align-items:center;justify-content:flex-end;padding-right:var(--space-sm);color:white;font-weight:var(--weight-semibold);font-size:var(--text-sm)}
+.heap-bar-fill.warning{background:var(--color-warning)}
+.heap-bar-fill.critical{background:var(--color-error)}
+/* ===== SECTION SPACING ===== */
+.section-title{padding:var(--space-lg) 0;margin-bottom:var(--space-xl);border-bottom:3px solid var(--color-primary);display:flex;align-items:center;gap:var(--space-md)}
+.sensor-card{margin-bottom:var(--space-xl)}
+.sensor-card h3{margin-top:0;margin-bottom:var(--space-md);padding-bottom:var(--space-sm);border-bottom:2px solid var(--color-border-light)}
+.sensor-card p:last-child{margin-bottom:0}
+.config-row{display:flex;justify-content:space-between;padding:var(--space-md);background:var(--color-bg-secondary);border-radius:var(--radius-md);color:var(--color-text-secondary)}
+.config-row strong{color:var(--color-primary);font-weight:var(--weight-semibold)}
+.status-box{border-radius:var(--radius-md);padding:var(--space-lg);margin-bottom:var(--space-md)}
+.status-box.success{background:rgba(16,185,129,0.1);border:2px solid var(--color-success)}
+.status-box.warning{background:rgba(245,158,11,0.1);border:2px solid var(--color-warning)}
+.status-title{font-weight:var(--weight-bold);font-size:var(--text-lg);margin-bottom:var(--space-sm)}
+.status-title.success{color:var(--color-success)}
+.status-title.warning{color:var(--color-warning)}
+.info-box{background:var(--color-bg-secondary);border-radius:var(--radius-md);padding:var(--space-md)}
+.hint{color:var(--color-text-tertiary);font-size:var(--text-sm)}
+/* ===== LAYOUT ===== */
+.container{display:flex;min-height:100vh;position:relative;z-index:1}
+/* ===== SIDEBAR ===== */
+.sidebar{width:320px;background:rgba(255,255,255,0.95);padding:0;position:fixed;height:100vh;overflow-y:auto;overflow-x:hidden;border-right:1px solid rgba(255,255,255,0.3);box-shadow:8px 0 40px rgba(0,0,0,0.12);z-index:var(--z-sticky);scrollbar-width:thin;scrollbar-color:var(--color-border-medium) transparent;-webkit-overflow-scrolling:touch;display:flex;flex-direction:column}
+.sidebar .header{flex-shrink:0}
+.sidebar-nav{display:flex;flex-direction:column;flex:1;justify-content:space-evenly;padding:10px 0}
+.sidebar::-webkit-scrollbar{width:6px}
+.sidebar::-webkit-scrollbar-track{background:transparent}
+.sidebar::-webkit-scrollbar-thumb{background:var(--color-border-medium);border-radius:var(--radius-full)}
+.sidebar::-webkit-scrollbar-thumb:hover{background:var(--color-border-dark)}
+.main-content{margin-left:320px;padding:var(--space-2xl);flex:1;max-width:calc(100% - 320px)}
+/* ===== NAVIGATION MENU ===== */
+.menu-item{display:flex;align-items:center;gap:16px;width:100%;padding:16px 24px;color:var(--color-text-primary);text-decoration:none;border:none;background:transparent;cursor:pointer;text-align:left;font-size:13px;font-family:Orbitron,monospace;font-weight:var(--weight-semibold);text-transform:uppercase;letter-spacing:0.08em;transition:background-color var(--transition-fast),color var(--transition-fast);position:relative;overflow:hidden;box-sizing:border-box;border-radius:8px;margin:4px 12px}
+.menu-item::before{content:'';position:absolute;left:0;top:0;bottom:0;width:0;background:linear-gradient(180deg,var(--color-primary),var(--color-accent));transition:width var(--transition-fast)}
+.menu-item:hover{background:var(--color-primary-light);color:var(--color-primary)}
+.menu-item:hover::before{width:4px}
+.menu-item.active{background:linear-gradient(135deg,var(--color-primary),var(--color-accent));color:#fff;box-shadow:0 4px 16px var(--glow-primary),inset 0 1px 0 rgba(255,255,255,0.2);font-weight:var(--weight-bold)}
+.menu-item.active::before{width:4px;background:var(--color-success)}
+.menu-item.active .menu-icon{transform:scale(1.1);filter:drop-shadow(0 0 8px rgba(255,255,255,0.5))}
+.menu-icon{width:24px;height:24px;min-width:24px;display:inline-flex;align-items:center;justify-content:center;transition:all var(--transition-base);flex-shrink:0}
+svg.menu-icon{stroke:currentColor;fill:none}
+/* ===== SECTIONS ===== */
+.section{display:none;background:rgba(255,255,255,0.95);border:1px solid rgba(255,255,255,0.4);border-radius:var(--radius-2xl);padding:var(--space-2xl);margin-bottom:var(--space-2xl);box-shadow:var(--shadow-lg);position:relative;overflow:hidden;animation:fadeInUp 0.3s ease-out;width:100%;box-sizing:border-box}
+.section.active{display:block}
+.section::before{content:'';position:absolute;top:0;left:0;right:0;height:4px;background:linear-gradient(90deg,var(--color-primary) 0%,var(--color-accent) 50%,var(--color-success) 100%);box-shadow:0 2px 8px var(--glow-primary)}
+@keyframes fadeInUp{from{opacity:0;transform:translateY(30px)}to{opacity:1;transform:translateY(0)}}
+.section-title{font-size:var(--text-3xl);font-weight:var(--weight-extrabold);color:var(--color-primary);font-family:Orbitron,monospace;margin-bottom:var(--space-2xl);display:flex;align-items:center;gap:var(--space-md);padding-bottom:var(--space-lg);border-bottom:3px solid var(--color-border-light);position:relative}
+.section-title::after{content:'';position:absolute;bottom:-3px;left:0;width:80px;height:3px;background:linear-gradient(90deg,var(--color-primary),var(--color-accent));border-radius:var(--radius-full)}
+.section-title i{width:48px;height:48px;display:flex;align-items:center;justify-content:center;background:linear-gradient(135deg,var(--color-primary),var(--color-accent));border-radius:var(--radius-md);color:#fff;font-size:var(--text-xl);box-shadow:var(--shadow-md)}
+/* ===== SIDEBAR HEADER ===== */
+.sidebar .header{background:rgba(255,255,255,0.98);border-bottom:1px solid rgba(255,255,255,0.4);padding:var(--space-lg) var(--space-md);margin:0;border-radius:0;box-shadow:0 2px 10px rgba(0,0,0,0.05);position:relative;overflow:visible;display:flex;justify-content:center;align-items:center}
+.sidebar .header::before{content:'';position:absolute;top:0;left:0;right:0;height:3px;background:linear-gradient(90deg,#0066cc 0%,#00aaff 100%);box-shadow:0 1px 4px rgba(0,102,204,0.3)}
+/* ===== STATUS INDICATORS ===== */
+.status-good{color:var(--color-success);font-weight:var(--weight-bold)}
+.status-warning{color:var(--warning-600);font-weight:var(--weight-bold)}
+.status-error{color:var(--color-error);font-weight:var(--weight-bold)}
+#heap_usage{color:var(--color-success);font-weight:var(--weight-bold)}
+#wifi_status{color:var(--color-success);font-weight:var(--weight-bold)}
+#uptime{color:var(--color-accent);font-weight:var(--weight-bold)}
+.wifi-grid{display:grid;grid-template-columns:120px 1fr;gap:15px;align-items:center;margin:20px 0}
+.wifi-grid label{text-align:left;font-weight:var(--weight-semibold);color:var(--color-text-primary)}
+.wifi-grid input,.wifi-grid select{width:100%;max-width:100%}
+.scan-button{background:linear-gradient(135deg,var(--color-accent),var(--color-success));transition:all .3s;box-shadow:0 2px 8px rgba(56,178,172,.3);border:none;color:white;font-family:Orbitron,monospace;font-weight:600;padding:var(--space-md) var(--space-lg)}.scan-button:hover{transform:translateY(-1px);box-shadow:0 4px 12px rgba(56,178,172,.4)}
+/* ===== UTILITY CLASSES ===== */
+.grid{display:grid;gap:var(--space-lg)}
+.grid-2{grid-template-columns:repeat(auto-fit,minmax(300px,1fr))}
+.grid-3{grid-template-columns:repeat(auto-fit,minmax(250px,1fr))}
+.grid-4{grid-template-columns:repeat(auto-fit,minmax(200px,1fr))}
+.flex{display:flex;gap:var(--space-md)}
+.flex-center{display:flex;align-items:center;justify-content:center}
+.flex-between{display:flex;align-items:center;justify-content:space-between}
+.flex-col{flex-direction:column}
+.gap-sm{gap:var(--space-sm)}.gap-md{gap:var(--space-md)}.gap-lg{gap:var(--space-lg)}
+.text-center{text-align:center}.text-right{text-align:right}
+.mt-0{margin-top:0}.mt-sm{margin-top:var(--space-sm)}.mt-md{margin-top:var(--space-md)}.mt-lg{margin-top:var(--space-lg)}
+.mb-0{margin-bottom:0}.mb-sm{margin-bottom:var(--space-sm)}.mb-md{margin-bottom:var(--space-md)}.mb-lg{margin-bottom:var(--space-lg)}
+.p-sm{padding:var(--space-sm)}.p-md{padding:var(--space-md)}.p-lg{padding:var(--space-lg)}
+.hidden{display:none}.visible{display:block}
+/* ===== LOGO TEXT ===== */
+.logo-text{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px;padding:4px 0}
+.logo-text .brand{font-family:Orbitron,monospace;font-size:28px;font-weight:900;letter-spacing:0.12em;background:linear-gradient(135deg,#0066cc 0%,#00aaff 50%,#00ccdd 100%);-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text;line-height:1}
+.logo-text .tagline{font-family:Rajdhani,sans-serif;font-size:10px;font-weight:600;color:var(--gray-500);letter-spacing:0.25em;text-transform:uppercase}
+/* ===== DEMO BANNER ===== */
+.demo-banner{background:linear-gradient(135deg,rgba(245,158,11,0.15),rgba(245,158,11,0.05));border:1px solid var(--color-warning);border-radius:var(--radius-md);padding:var(--space-sm) var(--space-lg);margin-bottom:var(--space-lg);display:flex;align-items:center;gap:var(--space-sm);font-size:var(--text-sm);color:var(--warning-600);font-weight:var(--weight-semibold)}
+/* ===== RESPONSIVE ===== */
+@media (max-width:480px){
+*{box-sizing:border-box}
+body{overflow-x:hidden;width:100%;max-width:100vw}
+.container{display:block;width:100%;max-width:100vw;overflow-x:hidden}
+.sidebar{width:100%!important;height:auto;position:static;overflow:visible;border-right:none;border-bottom:1px solid rgba(255,255,255,0.3);box-shadow:none}
+.main-content{margin-left:0!important;padding:var(--space-md);width:100%;max-width:100vw;box-sizing:border-box}
+.menu-item{flex:0 0 auto;padding:var(--space-sm) var(--space-md);font-size:11px;white-space:nowrap;margin:2px;border-radius:var(--radius-sm)}
+.menu-item span{display:none}
+.menu-icon{width:20px;height:20px;min-width:20px;margin:0}
+.section{padding:var(--space-md);margin-bottom:var(--space-md);border-radius:var(--radius-md);width:100%;box-sizing:border-box}
+.card,.sensor-card{padding:var(--space-md);margin:var(--space-sm) 0;border-radius:var(--radius-md);width:100%;box-sizing:border-box;min-height:auto}
+.grid,.grid-2,.grid-3,.grid-4{display:block;width:100%}
+.grid>*,.grid-2>*,.grid-3>*,.grid-4>*{width:100%;margin-bottom:var(--space-md)}
+}
+@media (min-width:769px) and (max-width:1024px){
+.sidebar{width:280px}
+.main-content{margin-left:280px;padding:var(--space-xl)}
+.grid-4{grid-template-columns:repeat(2,1fr)}
+}
+@media (min-width:1025px){
+.sidebar{width:320px}
+.main-content{margin-left:320px;padding:var(--space-2xl)}
+}
+/* ===== MODBUS EXPLORER ===== */
+.explorer-form{display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:var(--space-md);margin-bottom:var(--space-lg)}
+.sub-section{margin-top:var(--space-2xl);padding-top:var(--space-xl);border-top:2px dashed var(--color-border-light)}
+.sub-section-title{font-family:Orbitron,monospace;font-size:var(--text-lg);font-weight:var(--weight-bold);color:var(--color-primary);margin-bottom:var(--space-lg);display:flex;align-items:center;gap:var(--space-sm)}
+/* ===== SENSOR ACTIONS ===== */
+.sensor-actions{display:flex;flex-direction:row;flex-wrap:wrap;gap:var(--space-sm);margin-top:var(--space-md)}
+.sensor-actions button{flex:1 1 auto;min-width:90px}
+/* ===== OTA PROGRESS ===== */
+.ota-status-badge{display:inline-flex;align-items:center;gap:var(--space-xs);padding:var(--space-sm) var(--space-lg);border-radius:var(--radius-full);font-family:Orbitron,monospace;font-size:var(--text-sm);font-weight:var(--weight-bold);background:rgba(16,185,129,0.1);color:var(--color-success);border:2px solid var(--color-success)}
+/* ===== WRITE OPS ===== */
+.write-form{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:var(--space-md);margin-bottom:var(--space-lg)}
+/* ===== RADIO GROUP ===== */
+.radio-group{display:flex;gap:var(--space-xl);margin:var(--space-md) 0}
+.radio-group label{display:flex;align-items:center;gap:var(--space-sm);cursor:pointer;font-weight:var(--weight-semibold);color:var(--color-text-primary)}
+.radio-group input[type=radio]{width:auto;cursor:pointer}
+/* ===== CHECKBOX ===== */
+.check-row{display:flex;align-items:center;gap:var(--space-md);padding:var(--space-md) 0}
+.check-row input[type=checkbox]{width:auto;cursor:pointer;width:18px;height:18px}
+.check-row label{cursor:pointer;font-weight:var(--weight-medium)}
+/* ===== NETWORK PANEL ===== */
+.network-panel{background:var(--color-bg-secondary);border-radius:var(--radius-lg);padding:var(--space-xl);margin-top:var(--space-lg);border:1px solid var(--color-border-light)}
+/* ===== LIVE PULSE ANIMATION ===== */
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:0.5}}
+.live-dot{display:inline-block;width:8px;height:8px;border-radius:50%;background:var(--color-success);animation:pulse 2s infinite;margin-right:4px}
+/* ===== METRIC GRID ===== */
+.metrics-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:var(--space-md);margin:var(--space-lg) 0}
+.metric-card{background:linear-gradient(135deg,rgba(37,99,235,0.05),rgba(6,182,212,0.03));border:1px solid var(--color-border-light);border-radius:var(--radius-lg);padding:var(--space-lg);text-align:center;transition:transform var(--transition-fast)}
+.metric-card:hover{transform:translateY(-2px)}
+.metric-card .val{font-family:Orbitron,monospace;font-size:var(--text-2xl);font-weight:var(--weight-black);color:var(--color-primary);line-height:1.1;margin-bottom:4px}
+.metric-card .lbl{font-size:var(--text-xs);text-transform:uppercase;letter-spacing:0.08em;color:var(--color-text-tertiary);font-weight:var(--weight-semibold)}
+</style>
+<script>
+function showSection(sectionId){
+  var sections=document.querySelectorAll('.section');
+  var menuItems=document.querySelectorAll('.menu-item');
+  sections.forEach(function(s){s.classList.remove('active');});
+  menuItems.forEach(function(m){m.classList.remove('active');});
+  var el=document.getElementById(sectionId);if(el)el.classList.add('active');
+  var activeBtn=document.querySelector('[data-section="'+sectionId+'"]');
+  if(activeBtn)activeBtn.classList.add('active');
+}
+function showAzureSection(){
+  var password=prompt('Azure IoT Configuration Access\n\nPlease enter the admin password to access Azure IoT Hub settings:');
+  if(password===null)return;
+  if(password==='admin123'){
+    showSection('azure');
+  }else{
+    alert('Access Denied\n\nIncorrect password. Azure IoT Hub configuration is protected for security reasons.\n\nContact your system administrator if you need access.');
+  }
+}
+function toggleNetworkMode(){
+  var w=document.getElementById('mode_wifi');
+  var s=document.getElementById('mode_sim');
+  if(!w||!s)return;
+  var wm=w.checked;var sm=s.checked;
+  var e=document.getElementById('wifi_panel');if(e)e.style.display=wm?'block':'none';
+  e=document.getElementById('sim_panel');if(e)e.style.display=sm?'block':'none';
+}
+function toggleAzurePassword(){
+  var input=document.getElementById('azure_device_key');if(!input)return;
+  if(input.type==='password'){input.type='text';event.target.textContent='HIDE';}
+  else{input.type='password';event.target.textContent='SHOW';}
+}
+function demoAlert(msg){
+  alert('[DEMO MODE]\n\n'+msg);
+}
+function startOtaUpdate(){
+  var url=document.getElementById('ota_url').value;
+  if(!url){demoAlert('Please enter a firmware URL.');return;}
+  demoAlert('OTA Update would start downloading firmware from:\n'+url+'\n\nThis is a demo — no real update will occur.');
+}
+function saveNetworkConfig(){
+  demoAlert('Network configuration saved successfully.\n\nIn production, the device would restart with the new settings.');
+}
+function saveAzureConfig(){
+  demoAlert('Azure IoT Hub configuration saved.\n\nDevice will attempt to connect to the hub.');
+}
+function scanWifi(){
+  var networks=document.getElementById('wifi-scan-results');
+  if(networks){
+    networks.innerHTML='<div style="padding:12px;border:1px solid var(--color-border-light);border-radius:8px;margin:4px 0;cursor:pointer;background:white;display:flex;justify-content:space-between;align-items:center"><span style="font-weight:600">FLUXGEN-2</span><span style="color:var(--color-success);font-size:12px">-53 dBm</span></div><div style="padding:12px;border:1px solid var(--color-border-light);border-radius:8px;margin:4px 0;cursor:pointer;background:white;display:flex;justify-content:space-between;align-items:center"><span style="font-weight:600">OfficeNet-5G</span><span style="color:var(--color-warning);font-size:12px">-68 dBm</span></div><div style="padding:12px;border:1px solid var(--color-border-light);border-radius:8px;margin:4px 0;cursor:pointer;background:white;display:flex;justify-content:space-between;align-items:center"><span style="font-weight:600">IoT-Lab</span><span style="color:var(--color-error);font-size:12px">-81 dBm</span></div>';
+    networks.style.display='block';
+  }
+}
+function writeRegister(){
+  var slave=document.getElementById('wr_slave').value;
+  var reg=document.getElementById('wr_register').value;
+  var val=document.getElementById('wr_value').value;
+  if(!slave||!reg||!val){demoAlert('Please fill all fields.');return;}
+  demoAlert('Write Single Register\n\nSlave ID: '+slave+'\nRegister: 0x'+parseInt(reg).toString(16).toUpperCase().padStart(4,'0')+'\nValue: '+val+'\n\nDemo mode — no actual write performed.');
+}
+function modbusExplore(){
+  var slave=document.getElementById('exp_slave').value;
+  var reg=document.getElementById('exp_register').value;
+  var qty=document.getElementById('exp_quantity').value;
+  var fc=document.getElementById('exp_fc').value;
+  if(!slave||!reg||!qty){demoAlert('Please fill slave ID, register, and quantity fields.');return;}
+  demoAlert('Modbus Explorer\n\nFunction Code: '+fc+'\nSlave ID: '+slave+'\nStart Register: 0x'+parseInt(reg).toString(16).toUpperCase().padStart(4,'0')+'\nQuantity: '+qty+' registers\n\nDemo mode — no actual read performed.');
+}
+window.onload=function(){
+  showSection('overview');
+  toggleNetworkMode();
+  // Simulate live uptime counter
+  var uptimeSeconds=714180; // 8d 6h 23m in seconds
+  setInterval(function(){
+    uptimeSeconds++;
+    var d=Math.floor(uptimeSeconds/86400);
+    var h=Math.floor((uptimeSeconds%86400)/3600);
+    var m=Math.floor((uptimeSeconds%3600)/60);
+    var s=uptimeSeconds%60;
+    var el=document.getElementById('uptime');
+    if(el)el.textContent=d+'d '+h+'h '+m+'m '+s+'s';
+  },1000);
+  // Simulate last telemetry counter
+  var telAgo=12;
+  setInterval(function(){
+    telAgo++;
+    if(telAgo>300)telAgo=0;
+    var el=document.getElementById('ov_azure_last_telemetry');
+    if(el)el.textContent=telAgo+'s ago';
+    el=document.getElementById('azure_last_telemetry');
+    if(el)el.textContent=telAgo+'s ago';
+  },1000);
+};
+</script>
+</head>
+<body>
+<div class="container">
+
+<!-- ===== SIDEBAR ===== -->
+<div class="sidebar">
+  <div class="header" style="padding:var(--space-2xl) var(--space-lg);flex-direction:column;gap:var(--space-md)">
+    <div class="logo-text">
+      <span class="brand">FLUXGEN</span>
+      <span class="tagline">Building a Water Positive Future</span>
+    </div>
+  </div>
+  <nav class="sidebar-nav">
+    <button class="menu-item active" data-section="overview" onclick="showSection('overview')">
+      <svg class="menu-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 3v18h18"/><path d="M18 9l-5 5-4-4-6 6"/></svg>OVERVIEW
+    </button>
+    <button class="menu-item" data-section="wifi" onclick="showSection('wifi')">
+      <svg class="menu-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="6" cy="6" r="3"/><circle cx="18" cy="6" r="3"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="18" r="3"/><path d="M6 9v6M18 9v6M9 6h6M9 18h6"/></svg>NETWORK CONFIG
+    </button>
+    <button class="menu-item" data-section="azure" onclick="showAzureSection()">
+      <svg class="menu-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 10h-1.26A8 8 0 109 20h9a5 5 0 000-10z"/></svg>AZURE IOT HUB
+    </button>
+    <button class="menu-item" data-section="sensors" onclick="showSection('sensors')">
+      <svg class="menu-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="4" y="4" width="16" height="16" rx="2"/><path d="M9 9h6v6H9z"/><path d="M9 2v2M15 2v2M9 20v2M15 20v2M2 9h2M2 15h2M20 9h2M20 15h2"/></svg>MODBUS SENSORS
+    </button>
+    <button class="menu-item" data-section="write_ops" onclick="showSection('write_ops')">
+      <svg class="menu-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 013 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>WRITE OPERATIONS
+    </button>
+    <button class="menu-item" data-section="ota" onclick="showSection('ota')">
+      <svg class="menu-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>OTA UPDATE
+    </button>
+  </nav>
+</div>
+
+<!-- ===== MAIN CONTENT ===== -->
+<div class="main-content">
+
+  <!-- DEMO BANNER -->
+  <div class="demo-banner">
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+    OFFLINE DEMO — Device: sssh_24 — FluxGen IoT Gateway v1.3.8 — Data is static for presentation purposes
+  </div>
+
+  <!-- ========== OVERVIEW SECTION ========== -->
+  <div id="overview" class="section active">
+    <div class="section-title">
+      <i><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 3v18h18"/><path d="M18 9l-5 5-4-4-6 6"/></svg></i>
+      System Overview
+    </div>
+
+    <!-- System Stats -->
+    <div class="card">
+      <div class="card-header">
+        <h3>System Status</h3>
+        <span class="badge badge-success"><span class="live-dot"></span>LIVE</span>
+      </div>
+      <div class="metrics-grid">
+        <div class="metric-card">
+          <div class="val" id="uptime">8d 6h 23m</div>
+          <div class="lbl">Uptime</div>
+        </div>
+        <div class="metric-card">
+          <div class="val" style="font-size:1rem">C0:CD:D6:84:AE:90</div>
+          <div class="lbl">MAC Address</div>
+        </div>
+        <div class="metric-card">
+          <div class="val">4.0 MB</div>
+          <div class="lbl">Flash Size</div>
+        </div>
+        <div class="metric-card">
+          <div class="val">12</div>
+          <div class="lbl">Active Tasks</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Memory -->
+    <div class="card">
+      <div class="card-header">
+        <h3>Memory Usage</h3>
+        <span id="heap_usage" class="badge badge-success">33.5%</span>
+      </div>
+      <p><strong>Free Heap</strong><span>86.2 KB</span></p>
+      <div class="heap-bar"><div class="heap-bar-fill" style="width:33.5%">33.5%</div></div>
+      <br>
+      <p><strong>Internal Heap</strong><span>82.1 KB</span></p>
+      <p><strong>SPIRAM</strong><span>Not Available</span></p>
+      <p><strong>Largest Free Block</strong><span>65.2 KB</span></p>
+      <p><strong>App Partition</strong><span>1536 KB (71.2% used)</span></p>
+      <p><strong>NVS Partition</strong><span>40 KB (45.3% used)</span></p>
+    </div>
+
+    <!-- Connectivity Grid -->
+    <div class="grid grid-2">
+
+      <!-- WiFi -->
+      <div class="card">
+        <div class="card-header">
+          <h3>WiFi Status</h3>
+          <span id="wifi_status" class="badge badge-success">CONNECTED</span>
+        </div>
+        <p><strong>SSID</strong><span id="ssid">FLUXGEN-2</span></p>
+        <p><strong>RSSI</strong><span id="rssi" class="status-good">-53 dBm</span></p>
+        <p><strong>IP Address</strong><span>192.168.1.42</span></p>
+        <p><strong>Gateway</strong><span>192.168.1.1</span></p>
+        <p><strong>Security</strong><span>WPA2-PSK</span></p>
+      </div>
+
+      <!-- SIM -->
+      <div class="card">
+        <div class="card-header">
+          <h3>SIM / Cellular Status</h3>
+          <span id="sim_status" class="badge badge-success">CONNECTED</span>
+        </div>
+        <p><strong>Operator</strong><span id="sim_network">Airtel</span></p>
+        <p><strong>Signal</strong><span id="sim_signal" class="status-good">-67 dBm (Good)</span></p>
+        <p><strong>IP Address</strong><span id="sim_ip">10.45.128.37</span></p>
+        <p><strong>APN</strong><span>airtelgprs.com</span></p>
+        <p><strong>Module</strong><span>A7670C</span></p>
+      </div>
+
+    </div>
+
+    <!-- Modbus Stats -->
+    <div class="card">
+      <div class="card-header">
+        <h3>Modbus RS485 Statistics</h3>
+        <span class="badge badge-success">99.5% SUCCESS RATE</span>
+      </div>
+      <div class="metrics-grid">
+        <div class="metric-card">
+          <div class="val" id="ov_modbus_total_reads">9,290</div>
+          <div class="lbl">Total Reads</div>
+        </div>
+        <div class="metric-card">
+          <div class="val" id="ov_modbus_success" style="color:var(--color-success)">9,245</div>
+          <div class="lbl">Successful</div>
+        </div>
+        <div class="metric-card">
+          <div class="val" id="ov_modbus_failed" style="color:var(--color-error)">45</div>
+          <div class="lbl">Failed</div>
+        </div>
+        <div class="metric-card">
+          <div class="val" id="ov_modbus_success_rate" class="status-good">99.5%</div>
+          <div class="lbl">Success Rate</div>
+        </div>
+        <div class="metric-card">
+          <div class="val" id="ov_modbus_crc_errors">3</div>
+          <div class="lbl">CRC Errors</div>
+        </div>
+        <div class="metric-card">
+          <div class="val" id="ov_modbus_timeout_errors">42</div>
+          <div class="lbl">Timeouts</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Azure IoT -->
+    <div class="card">
+      <div class="card-header">
+        <h3>Azure IoT Hub</h3>
+        <span id="ov_azure_connection" class="badge badge-success">CONNECTED</span>
+      </div>
+      <p><strong>Device ID</strong><span id="ov_azure_device_id">sssh_24</span></p>
+      <p><strong>Hub</strong><span>fluxgen-testhub.azure-devices.net</span></p>
+      <p><strong>Connection Uptime</strong><span id="ov_azure_uptime">8h 15m</span></p>
+      <p><strong>Messages Sent</strong><span id="ov_azure_messages">4,645</span></p>
+      <p><strong>Last Telemetry</strong><span><span class="live-dot"></span><span id="ov_azure_last_telemetry">12s ago</span></span></p>
+      <p><strong>Reconnects</strong><span id="ov_azure_reconnects">2</span></p>
+    </div>
+
+    <!-- Sensor Cards in Overview -->
+    <h3 style="margin:var(--space-xl) 0 var(--space-md);color:var(--color-primary);font-family:Orbitron,monospace">Active Sensors</h3>
+
+    <div class="sensor-card">
+      <div class="card-header">
+        <h3>Residential OHT Inlet</h3>
+        <span class="badge badge-success">ONLINE</span>
+      </div>
+      <p><strong>Unit ID</strong><span>FG24027F</span></p>
+      <p><strong>Slave ID</strong><span>1</span></p>
+      <p><strong>Type</strong><span>Flow-Meter</span></p>
+      <p><strong>Data Format</strong><span>UINT32_3412</span></p>
+      <p><strong>Baud Rate</strong><span>9600</span></p>
+      <p><strong>Registers</strong><span>2 from 0x0008</span></p>
+      <p><strong>Last Reading</strong><span style="font-family:Orbitron,monospace;font-size:1.1rem;color:var(--color-primary);font-weight:700">1,337,348 L</span></p>
+    </div>
+
+    <div class="sensor-card">
+      <div class="card-header">
+        <h3>Residential OHT Outlet</h3>
+        <span class="badge badge-success">ONLINE</span>
+      </div>
+      <p><strong>Unit ID</strong><span>FG24028F</span></p>
+      <p><strong>Slave ID</strong><span>2</span></p>
+      <p><strong>Type</strong><span>Flow-Meter</span></p>
+      <p><strong>Data Format</strong><span>UINT32_3412</span></p>
+      <p><strong>Baud Rate</strong><span>9600</span></p>
+      <p><strong>Registers</strong><span>2 from 0x0008</span></p>
+      <p><strong>Last Reading</strong><span style="font-family:Orbitron,monospace;font-size:1.1rem;color:var(--color-primary);font-weight:700">892,156 L</span></p>
+    </div>
+
+  </div>
+  <!-- /overview -->
+
+  <!-- ========== NETWORK CONFIG SECTION ========== -->
+  <div id="wifi" class="section">
+    <div class="section-title">
+      <i><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="6" cy="6" r="3"/><circle cx="18" cy="6" r="3"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="18" r="3"/><path d="M6 9v6M18 9v6M9 6h6M9 18h6"/></svg></i>
+      Network Configuration
+    </div>
+
+    <!-- Connection Mode -->
+    <div class="card">
+      <h3>Connection Mode</h3>
+      <div class="radio-group">
+        <label>
+          <input type="radio" id="mode_wifi" name="network_mode" value="wifi" checked onchange="toggleNetworkMode()">
+          WiFi
+        </label>
+        <label>
+          <input type="radio" id="mode_sim" name="network_mode" value="sim" onchange="toggleNetworkMode()">
+          SIM / Cellular
+        </label>
+      </div>
+    </div>
+
+    <!-- WiFi Panel -->
+    <div id="wifi_panel" class="card">
+      <h3>WiFi Configuration</h3>
+      <div class="wifi-grid">
+        <label>SSID</label>
+        <input type="text" id="wifi_ssid" value="FLUXGEN-2" placeholder="Enter WiFi SSID">
+        <label>Password</label>
+        <input type="password" id="wifi_password" value="fluxgen2024" placeholder="Enter WiFi Password">
+      </div>
+      <div style="margin-top:var(--space-md)">
+        <button class="scan-button" onclick="scanWifi()">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M1.42 9a16 16 0 0121.16 0"/><path d="M5 12.55a11 11 0 0114.08 0"/><path d="M10.54 17.1a6 6 0 012.92 0"/><circle cx="12" cy="20" r="1"/></svg>
+          Scan WiFi Networks
+        </button>
+      </div>
+      <div id="wifi-scan-results" style="display:none;margin-top:var(--space-md);max-height:200px;overflow-y:auto;border:1px solid var(--color-border-light);border-radius:var(--radius-md);padding:var(--space-sm)"></div>
+      <div id="wifi-network-status" style="margin-top:var(--space-lg)">
+        <div class="status-box success">
+          <div class="status-title success">WiFi Connected</div>
+          <p style="margin:0;color:var(--gray-600)">SSID: FLUXGEN-2 &nbsp;|&nbsp; RSSI: -53 dBm &nbsp;|&nbsp; IP: 192.168.1.42</p>
+        </div>
+      </div>
+    </div>
+
+    <!-- SIM Panel -->
+    <div id="sim_panel" class="card" style="display:none">
+      <h3>SIM / Cellular Configuration</h3>
+      <div class="wifi-grid">
+        <label>APN</label>
+        <input type="text" id="sim_apn" value="airtelgprs.com" placeholder="Enter APN">
+        <label>Username</label>
+        <input type="text" id="sim_user" value="" placeholder="APN Username (optional)">
+        <label>Password</label>
+        <input type="password" id="sim_pass" value="" placeholder="APN Password (optional)">
+      </div>
+      <div id="sim-network-status" style="margin-top:var(--space-lg)">
+        <div class="status-box success">
+          <div class="status-title success">Cellular Connected</div>
+          <p style="margin:0;color:var(--gray-600)">Operator: Airtel &nbsp;|&nbsp; Signal: -67 dBm &nbsp;|&nbsp; IP: 10.45.128.37</p>
+        </div>
+      </div>
+    </div>
+
+    <!-- SD Card -->
+    <div class="card">
+      <h3>SD Card — Offline Data Cache</h3>
+      <div class="check-row">
+        <input type="checkbox" id="sd_enabled" checked>
+        <label for="sd_enabled">Enable SD Card logging</label>
+      </div>
+      <div id="sd_options" style="margin-top:var(--space-md)">
+        <div class="check-row">
+          <input type="checkbox" id="sd_cache_on_fail" checked>
+          <label for="sd_cache_on_fail">Cache telemetry on network failure</label>
+        </div>
+        <p style="margin-top:var(--space-md)"><strong>Messages Cached</strong><span style="font-family:Orbitron,monospace;font-weight:700;color:var(--color-primary)">10</span></p>
+      </div>
+    </div>
+
+    <!-- RTC -->
+    <div class="card">
+      <h3>RTC — Real Time Clock</h3>
+      <div class="check-row">
+        <input type="checkbox" id="rtc_enabled" checked>
+        <label for="rtc_enabled">Enable DS3231 RTC module</label>
+      </div>
+      <div id="rtc_options" style="margin-top:var(--space-md)">
+        <p><strong>Current Time</strong><span style="font-family:monospace;color:var(--color-primary);font-weight:600">2026-03-26 14:37:52 UTC</span></p>
+        <p><strong>Temperature</strong><span>28.5 &deg;C</span></p>
+      </div>
+    </div>
+
+    <!-- Modem Reset -->
+    <div class="card">
+      <h3>Modem Reset Configuration</h3>
+      <div class="check-row">
+        <input type="checkbox" id="modem_reset_enabled" checked>
+        <label for="modem_reset_enabled">Enable automatic modem reset</label>
+      </div>
+      <div class="wifi-grid" style="margin-top:var(--space-md)">
+        <label>Reset GPIO</label>
+        <input type="number" value="2" min="0" max="39">
+        <label>Reset Interval</label>
+        <input type="number" value="3600" placeholder="Seconds">
+      </div>
+    </div>
+
+    <button onclick="saveNetworkConfig()" style="width:100%;margin-top:var(--space-lg)">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M19 21H5a2 2 0 01-2-2V5a2 2 0 012-2h11l5 5v11a2 2 0 01-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/></svg>
+      Save Network Configuration
+    </button>
+  </div>
+  <!-- /wifi -->
+
+  <!-- ========== AZURE IOT HUB SECTION ========== -->
+  <div id="azure" class="section">
+    <div class="section-title">
+      <i><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 10h-1.26A8 8 0 109 20h9a5 5 0 000-10z"/></svg></i>
+      Azure IoT Hub Configuration
+    </div>
+
+    <!-- Connection Status -->
+    <div class="card">
+      <div class="card-header">
+        <h3>Connection Status</h3>
+        <span id="azure_connection" class="badge badge-success">CONNECTED</span>
+      </div>
+      <p><strong>Connection Uptime</strong><span id="azure_uptime">8h 15m</span></p>
+      <p><strong>Messages Sent</strong><span id="azure_messages">4,645</span></p>
+      <p><strong>Last Telemetry</strong><span><span class="live-dot"></span><span id="azure_last_telemetry">12s ago</span></span></p>
+      <p><strong>Reconnect Attempts</strong><span id="azure_reconnects">2</span></p>
+      <p><strong>Device ID</strong><span id="azure_device_id">sssh_24</span></p>
+    </div>
+
+    <!-- Hub Config -->
+    <div class="card">
+      <h3>Hub Settings</h3>
+      <div class="form-grid">
+        <label>Hub FQDN</label>
+        <input type="text" id="azure_hub_fqdn" value="fluxgen-testhub.azure-devices.net" placeholder="yourhub.azure-devices.net">
+        <label>Device ID</label>
+        <input type="text" id="azure_device_id_input" value="sssh_24" placeholder="Device ID">
+        <label>Device Key</label>
+        <div style="display:flex;gap:8px;align-items:center">
+          <input type="password" id="azure_device_key" value="dGhpcyBpcyBhIGZha2Uga2V5IGZvciBkZW1v" placeholder="Base64 encoded SAS key" style="flex:1">
+          <button onclick="toggleAzurePassword()" style="padding:10px 16px;min-width:70px">SHOW</button>
+        </div>
+        <label>Telemetry Interval</label>
+        <input type="number" id="azure_telemetry_interval" value="300" min="10" max="3600" placeholder="Seconds">
+      </div>
+    </div>
+
+    <!-- Telemetry Preview -->
+    <div class="card">
+      <h3>Sample Telemetry Payload</h3>
+      <div style="background:var(--gray-900);border-radius:var(--radius-md);padding:var(--space-lg);font-family:monospace;font-size:13px;color:#a5f3fc;overflow-x:auto">
+        <pre style="margin:0;white-space:pre-wrap;word-break:break-all">[
+  {
+    "unit_id": "FG24027F",
+    "params_data": {
+      "totalizer": "1337348",
+      "flow_rate": "24.7",
+      "status": "1"
+    },
+    "created_on": "2026-03-26T14:37:40.000Z"
+  },
+  {
+    "unit_id": "FG24028F",
+    "params_data": {
+      "totalizer": "892156",
+      "flow_rate": "18.3",
+      "status": "1"
+    },
+    "created_on": "2026-03-26T14:37:40.000Z"
+  }
+]</pre>
+      </div>
+    </div>
+
+    <button onclick="saveAzureConfig()" style="width:100%;margin-top:var(--space-lg)">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M19 21H5a2 2 0 01-2-2V5a2 2 0 012-2h11l5 5v11a2 2 0 01-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/></svg>
+      Save Azure Configuration
+    </button>
+  </div>
+  <!-- /azure -->
+
+  <!-- ========== MODBUS SENSORS SECTION ========== -->
+  <div id="sensors" class="section">
+    <div class="section-title">
+      <i><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="4" y="4" width="16" height="16" rx="2"/><path d="M9 9h6v6H9z"/><path d="M9 2v2M15 2v2M9 20v2M15 20v2M2 9h2M2 15h2M20 9h2M20 15h2"/></svg></i>
+      Modbus Sensors
+    </div>
+
+    <!-- Sensor 1 -->
+    <div class="sensor-card">
+      <div class="card-header">
+        <h3>Residential OHT Inlet</h3>
+        <span class="badge badge-success">ONLINE</span>
+      </div>
+      <p><strong>Unit ID</strong><span>FG24027F</span></p>
+      <p><strong>Slave ID</strong><span>1</span></p>
+      <p><strong>Type</strong><span>Flow-Meter</span></p>
+      <p><strong>Data Format</strong><span>UINT32_3412</span></p>
+      <p><strong>Baud Rate</strong><span>9600 baud</span></p>
+      <p><strong>Register Start</strong><span>0x0008</span></p>
+      <p><strong>Register Count</strong><span>2</span></p>
+      <p><strong>Scale Factor</strong><span>1.0</span></p>
+      <p><strong>Last Reading</strong><span style="font-family:Orbitron,monospace;font-size:1.1rem;color:var(--color-primary);font-weight:700">1,337,348 L</span></p>
+      <div class="sensor-actions">
+        <button class="btn-success btn-small" onclick="demoAlert('Testing Sensor 1: Residential OHT Inlet\n\nSlave ID 1 — Function Code 0x03\nRegister: 0x0008, Count: 2\n\nRaw: [0x00, 0x14, 0x6E, 0x44]\nDecoded (UINT32_3412): 1,337,348')">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>
+          Test
+        </button>
+        <button class="btn-secondary btn-small" onclick="demoAlert('Edit sensor — in demo mode, configuration editing is disabled.')">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 013 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
+          Edit
+        </button>
+        <button class="btn-danger btn-small" onclick="demoAlert('Delete sensor — in demo mode, deletion is disabled.')">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14H6L5 6"/><path d="M10 11v6M14 11v6M9 6V4h6v2"/></svg>
+          Delete
+        </button>
+      </div>
+    </div>
+
+    <!-- Sensor 2 -->
+    <div class="sensor-card">
+      <div class="card-header">
+        <h3>Residential OHT Outlet</h3>
+        <span class="badge badge-success">ONLINE</span>
+      </div>
+      <p><strong>Unit ID</strong><span>FG24028F</span></p>
+      <p><strong>Slave ID</strong><span>2</span></p>
+      <p><strong>Type</strong><span>Flow-Meter</span></p>
+      <p><strong>Data Format</strong><span>UINT32_3412</span></p>
+      <p><strong>Baud Rate</strong><span>9600 baud</span></p>
+      <p><strong>Register Start</strong><span>0x0008</span></p>
+      <p><strong>Register Count</strong><span>2</span></p>
+      <p><strong>Scale Factor</strong><span>1.0</span></p>
+      <p><strong>Last Reading</strong><span style="font-family:Orbitron,monospace;font-size:1.1rem;color:var(--color-primary);font-weight:700">892,156 L</span></p>
+      <div class="sensor-actions">
+        <button class="btn-success btn-small" onclick="demoAlert('Testing Sensor 2: Residential OHT Outlet\n\nSlave ID 2 — Function Code 0x03\nRegister: 0x0008, Count: 2\n\nRaw: [0x00, 0x0D, 0x98, 0x5C]\nDecoded (UINT32_3412): 892,156')">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>
+          Test
+        </button>
+        <button class="btn-secondary btn-small" onclick="demoAlert('Edit sensor — in demo mode, configuration editing is disabled.')">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 013 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
+          Edit
+        </button>
+        <button class="btn-danger btn-small" onclick="demoAlert('Delete sensor — in demo mode, deletion is disabled.')">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14H6L5 6"/><path d="M10 11v6M14 11v6M9 6V4h6v2"/></svg>
+          Delete
+        </button>
+      </div>
+    </div>
+
+    <!-- Add Sensor -->
+    <button onclick="demoAlert('Add New Sensor\n\nIn production, this opens a form to configure a new Modbus sensor.\n\nParameters: Name, Unit ID, Slave ID, Type, Data Format, Baud Rate, Register, Count, Scale Factor.')" style="width:100%;margin-bottom:var(--space-2xl)">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="16"/><line x1="8" y1="12" x2="16" y2="12"/></svg>
+      Add New Sensor
+    </button>
+
+    <!-- Modbus Explorer -->
+    <div class="sub-section">
+      <div class="sub-section-title">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><path d="M21 21l-4.35-4.35"/><path d="M11 8v6M8 11h6"/></svg>
+        Modbus Explorer
+      </div>
+      <p class="hint" style="margin-bottom:var(--space-lg)">Read raw register values directly from any Modbus slave device connected to the RS485 bus.</p>
+      <div class="explorer-form">
+        <div>
+          <label style="display:block;font-weight:600;margin-bottom:6px;font-size:14px">Function Code</label>
+          <select id="exp_fc">
+            <option value="3">FC 03 — Read Holding Registers</option>
+            <option value="4">FC 04 — Read Input Registers</option>
+            <option value="1">FC 01 — Read Coils</option>
+            <option value="2">FC 02 — Read Discrete Inputs</option>
+          </select>
+        </div>
+        <div>
+          <label style="display:block;font-weight:600;margin-bottom:6px;font-size:14px">Slave ID</label>
+          <input type="number" id="exp_slave" value="1" min="1" max="247" placeholder="1-247">
+        </div>
+        <div>
+          <label style="display:block;font-weight:600;margin-bottom:6px;font-size:14px">Start Register</label>
+          <input type="number" id="exp_register" value="8" min="0" max="65535" placeholder="0x0000">
+        </div>
+        <div>
+          <label style="display:block;font-weight:600;margin-bottom:6px;font-size:14px">Quantity</label>
+          <input type="number" id="exp_quantity" value="2" min="1" max="125" placeholder="1-125">
+        </div>
+      </div>
+      <button onclick="modbusExplore()">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>
+        Read Registers
+      </button>
+    </div>
+  </div>
+  <!-- /sensors -->
+
+  <!-- ========== WRITE OPERATIONS SECTION ========== -->
+  <div id="write_ops" class="section">
+    <div class="section-title">
+      <i><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 013 3L12 15l-4 1 1-4 9.5-9.5z"/></svg></i>
+      Write Operations
+    </div>
+
+    <div class="alert alert-warning" style="margin-bottom:var(--space-xl)">
+      <strong>Caution:</strong> Writing Modbus registers directly can affect device operation. Ensure you are writing to the correct register and slave device before proceeding.
+    </div>
+
+    <!-- Write Single Register -->
+    <div class="card">
+      <h3>Write Single Register (FC 06)</h3>
+      <p class="hint" style="margin-bottom:var(--space-lg)">Write a single 16-bit value to a holding register on the specified slave device.</p>
+      <div class="write-form">
+        <div>
+          <label style="display:block;font-weight:600;margin-bottom:6px;font-size:14px">Slave ID</label>
+          <input type="number" id="wr_slave" value="1" min="1" max="247">
+        </div>
+        <div>
+          <label style="display:block;font-weight:600;margin-bottom:6px;font-size:14px">Register Address</label>
+          <input type="number" id="wr_register" value="0" min="0" max="65535">
+        </div>
+        <div>
+          <label style="display:block;font-weight:600;margin-bottom:6px;font-size:14px">Value (0–65535)</label>
+          <input type="number" id="wr_value" value="0" min="0" max="65535">
+        </div>
+      </div>
+      <button onclick="writeRegister()">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M19 21H5a2 2 0 01-2-2V5a2 2 0 012-2h11l5 5v11a2 2 0 01-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/></svg>
+        Write Register
+      </button>
+    </div>
+
+    <!-- Write Multiple Registers -->
+    <div class="card">
+      <h3>Write Multiple Registers (FC 16)</h3>
+      <p class="hint" style="margin-bottom:var(--space-lg)">Write multiple consecutive 16-bit registers. Enter values separated by commas.</p>
+      <div class="write-form">
+        <div>
+          <label style="display:block;font-weight:600;margin-bottom:6px;font-size:14px">Slave ID</label>
+          <input type="number" id="wrm_slave" value="1" min="1" max="247">
+        </div>
+        <div>
+          <label style="display:block;font-weight:600;margin-bottom:6px;font-size:14px">Start Register</label>
+          <input type="number" id="wrm_register" value="0" min="0" max="65535">
+        </div>
+      </div>
+      <div style="margin-bottom:var(--space-lg)">
+        <label style="display:block;font-weight:600;margin-bottom:6px;font-size:14px">Values (comma-separated, decimal)</label>
+        <textarea id="wrm_values" rows="3" placeholder="e.g. 100, 200, 300, 400">100, 200</textarea>
+      </div>
+      <button onclick="demoAlert('Write Multiple Registers\n\nFC 16: Write Multiple Holding Registers\n\nSlave: ' + document.getElementById('wrm_slave').value + '\nStart Register: ' + document.getElementById('wrm_register').value + '\nValues: ' + document.getElementById('wrm_values').value + '\n\nDemo mode — no actual write performed.')">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M19 21H5a2 2 0 01-2-2V5a2 2 0 012-2h11l5 5v11a2 2 0 01-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/></svg>
+        Write Multiple Registers
+      </button>
+    </div>
+
+    <!-- Modbus Scan -->
+    <div class="card">
+      <h3>Modbus Bus Scan</h3>
+      <p class="hint" style="margin-bottom:var(--space-lg)">Scan the RS485 bus to discover active slave devices. Scans slave IDs 1 through 247.</p>
+      <div class="write-form">
+        <div>
+          <label style="display:block;font-weight:600;margin-bottom:6px;font-size:14px">Scan From</label>
+          <input type="number" value="1" min="1" max="247">
+        </div>
+        <div>
+          <label style="display:block;font-weight:600;margin-bottom:6px;font-size:14px">Scan To</label>
+          <input type="number" value="20" min="1" max="247">
+        </div>
+        <div>
+          <label style="display:block;font-weight:600;margin-bottom:6px;font-size:14px">Timeout (ms)</label>
+          <input type="number" value="200" min="50" max="2000">
+        </div>
+      </div>
+      <button onclick="demoAlert('Modbus Bus Scan\n\nScanning slave IDs 1 to 20 with 200ms timeout...\n\n[Demo Result]\nSlave 1 — RESPONDING (Flow Meter: FG24027F)\nSlave 2 — RESPONDING (Flow Meter: FG24028F)\nSlaves 3-20 — No response\n\nDemo mode — no actual scan performed.')">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><path d="M21 21l-4.35-4.35"/></svg>
+        Scan Bus
+      </button>
+    </div>
+  </div>
+  <!-- /write_ops -->
+
+  <!-- ========== OTA UPDATE SECTION ========== -->
+  <div id="ota" class="section">
+    <div class="section-title">
+      <i><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg></i>
+      OTA Firmware Update
+    </div>
+
+    <!-- Current Status -->
+    <div class="card">
+      <div class="card-header">
+        <h3>Firmware Status</h3>
+        <span class="ota-status-badge" id="ota_status">IDLE</span>
+      </div>
+      <div class="metrics-grid">
+        <div class="metric-card">
+          <div class="val" id="ota_current_version">v1.3.8</div>
+          <div class="lbl">Current Version</div>
+        </div>
+        <div class="metric-card">
+          <div class="val" style="font-size:1rem" id="ota_current_partition">factory</div>
+          <div class="lbl">Running Partition</div>
+        </div>
+        <div class="metric-card">
+          <div class="val" style="font-size:1rem" id="ota_last_update">2026-03-13</div>
+          <div class="lbl">Last Update</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Partition Map -->
+    <div class="card">
+      <h3>Partition Layout</h3>
+      <p class="hint" style="margin-bottom:var(--space-md)">Partition table is frozen. Do not modify after deployment.</p>
+      <table>
+        <thead>
+          <tr><th>Name</th><th>Type</th><th>Size</th><th>Offset</th><th>Status</th></tr>
+        </thead>
+        <tbody>
+          <tr><td>NVS</td><td>data/nvs</td><td>40 KB</td><td>0x9000</td><td><span class="badge badge-success">Active</span></td></tr>
+          <tr><td>otadata</td><td>data/ota</td><td>8 KB</td><td>0x13000</td><td><span class="badge badge-success">Active</span></td></tr>
+          <tr><td>phy_init</td><td>data/phy</td><td>4 KB</td><td>0x15000</td><td><span class="badge badge-success">Active</span></td></tr>
+          <tr><td>factory</td><td>app/factory</td><td>1536 KB</td><td>0x20000</td><td><span class="badge badge-info">Running</span></td></tr>
+          <tr><td>ota_0</td><td>app/ota_0</td><td>1536 KB</td><td>0x1A0000</td><td><span class="badge badge-warning">Standby</span></td></tr>
+          <tr><td>ota_1</td><td>app/ota_1</td><td>1536 KB</td><td>0x320000</td><td><span class="badge badge-warning">Standby</span></td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <!-- OTA Trigger -->
+    <div class="card">
+      <h3>Trigger OTA Update</h3>
+      <p class="hint" style="margin-bottom:var(--space-lg)">Enter the URL to a binary firmware file (.bin) hosted on GitHub Releases or an accessible HTTPS server. The device will download, verify, and apply the update automatically.</p>
+      <div style="margin-bottom:var(--space-lg)">
+        <label style="display:block;font-weight:600;margin-bottom:8px;font-family:Orbitron,monospace;font-size:13px">Firmware URL</label>
+        <input type="url" id="ota_url" placeholder="https://github.com/your-org/your-repo/releases/download/v1.3.9/fluxgen_gateway.bin" value="">
+      </div>
+
+      <div class="alert alert-warning" style="margin-bottom:var(--space-lg)">
+        <strong>Important:</strong> The device will reboot after a successful update. Ensure the firmware file is valid and compatible with this hardware revision. MQTT will be disconnected during the update to free heap memory.
+      </div>
+
+      <button onclick="startOtaUpdate()" style="width:100%;background:linear-gradient(135deg,#059669,#10b981)">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
+        Start OTA Update
+      </button>
+    </div>
+
+    <!-- Release Notes -->
+    <div class="card">
+      <h3>Release Notes — v1.3.8</h3>
+      <div style="background:var(--color-bg-secondary);border-radius:var(--radius-md);padding:var(--space-lg);font-family:Rajdhani,sans-serif;font-size:15px;line-height:1.7;color:var(--color-text-secondary)">
+        <p><strong style="color:var(--color-primary)">Memory Optimizations (v1.3.8)</strong></p>
+        <ul style="padding-left:20px;margin-top:8px">
+          <li>Max sensors reduced from 15 to 10 (saves ~9KB heap)</li>
+          <li>Task stack sizes optimized across modbus, telemetry, modem tasks</li>
+          <li>Static buffer sizes reduced for MQTT URIs and topics</li>
+          <li>Eliminated heap fragmentation in batch telemetry assembly</li>
+        </ul>
+        <p style="margin-top:12px"><strong style="color:var(--color-primary)">Reliability Fixes (v1.3.8)</strong></p>
+        <ul style="padding-left:20px;margin-top:8px">
+          <li>SD card I/O retry logic with 3 attempts + RAM buffer fallback</li>
+          <li>Telemetry timeout no longer triggers restart when SD card is caching</li>
+          <li>SPI bus properly freed on SD card mount failure</li>
+          <li>Fixed wrong timestamps on SD card cached messages</li>
+        </ul>
+      </div>
+    </div>
+  </div>
+  <!-- /ota -->
+
+</div>
+<!-- /main-content -->
+</div>
+<!-- /container -->
+</body>
+</html>

@@ -1,0 +1,97 @@
+# Network Disruption Test - 60 minutes
+# Simulates WiFi drops, verifies SD caching and replay
+# REQUIRES: Run as Administrator for firewall rules
+name: "Network Disruption (60min)"
+duration_minutes: 60
+steps:
+  # Baseline - verify normal operation
+  - at: 0
+    action: print_status
+
+  - at: 2
+    action: assert_mqtt_connected
+
+  - at: 2
+    action: assert_heap_above
+    params: { threshold: 40000 }
+
+  # First outage: 5 minutes
+  - at: 5
+    action: block_network
+    params: { duration_sec: 300 }
+
+  - at: 6
+    action: assert_serial_pattern
+    params:
+      pattern: "MQTT event MQTT_EVENT_DISCONNECTED|MQTT.*DISCONNECTED"
+      timeout: 120
+
+  # Verify SD caching kicks in
+  - at: 8
+    action: assert_serial_pattern
+    params:
+      pattern: "SD card.*saved|Cached.*SD|saved to SD"
+      timeout: 180
+
+  # Network restored automatically after 5 min block
+  - at: 11
+    action: assert_heap_above
+    params: { threshold: 30000 }
+
+  # Wait for MQTT reconnect
+  - at: 13
+    action: assert_serial_pattern
+    params:
+      pattern: "MQTT event MQTT_EVENT_CONNECTED|MQTT.*CONNECTED"
+      timeout: 180
+
+  # Check for SD replay
+  - at: 15
+    action: assert_serial_pattern
+    params:
+      pattern: "replay|Replay|replaying"
+      timeout: 300
+
+  - at: 18
+    action: print_status
+
+  # Second outage: 10 minutes (longer)
+  - at: 20
+    action: block_network
+    params: { duration_sec: 600 }
+
+  - at: 31
+    action: assert_heap_above
+    params: { threshold: 30000 }
+
+  # After second restoration
+  - at: 33
+    action: assert_serial_pattern
+    params:
+      pattern: "MQTT event MQTT_EVENT_CONNECTED"
+      timeout: 180
+
+  - at: 35
+    action: print_status
+
+  # Rapid flapping: 2min on / 30s off x 5
+  - at: 40
+    action: flap_network
+    params: { on_seconds: 120, off_seconds: 30, cycles: 5 }
+
+  - at: 53
+    action: assert_heap_above
+    params: { threshold: 25000 }
+
+  - at: 55
+    action: assert_no_crashes
+
+  - at: 58
+    action: check_heap_trend
+    params: { max_decline_kb: 10, window_minutes: 50 }
+
+  - at: 59
+    action: print_status
+
+  - at: 59
+    action: assert_no_reboots

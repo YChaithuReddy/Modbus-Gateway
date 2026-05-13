@@ -1,0 +1,29 @@
+======================================================================
+  ESP32 MODBUS IOT GATEWAY - FULL TEST REPORT
+======================================================================
+  Date:     2026-03-10 19:40:35
+  Duration: 0:00:10
+  Verdict:  FAILED - CRITICAL ISSUES FOUND
+  Issues:   1 total (1 critical, 0 high, 0 medium, 0 low)
+======================================================================
+
+  DEVICE FINAL STATUS
+  ----------------------------------------
+
+  CRITICAL ISSUES (1)
+  --------------------------------------------------
+  [19:40:35] [FLASH] Flash failed
+           is in the C:\Users\chath\Documents\Python code\modbus_iot_gateway\build\log\idf_py_stderr_output_415
+
+  ISSUES BY CATEGORY
+  --------------------------------------------------
+  FLASH: 1 issues
+
+  RECOMMENDATIONS
+  --------------------------------------------------
+  1. Fix all CRITICAL issues before deploying to production
+
+  Serial log CSV: N/A
+  Report saved to: C:\Users\chath\Documents\Python code\modbus_iot_gateway\tests\reports\FULL_TEST_REPORT_20260310_194035.txt
+
+======================================================================

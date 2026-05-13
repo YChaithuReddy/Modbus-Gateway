@@ -1,0 +1,85 @@
+# Web UI Stress Test - 30 minutes
+# Escalating concurrent connections + form fuzzing
+name: "Web UI Stress (30min)"
+duration_minutes: 30
+steps:
+  - at: 0
+    action: print_status
+
+  - at: 0
+    action: assert_heap_above
+    params: { threshold: 40000 }
+
+  # Light load: 1 concurrent
+  - at: 1
+    action: web_stress
+    params: { concurrent: 1, duration_sec: 60 }
+
+  - at: 3
+    action: assert_heap_above
+    params: { threshold: 35000 }
+
+  - at: 3
+    action: assert_no_crashes
+
+  # Medium load: 3 concurrent
+  - at: 5
+    action: web_stress
+    params: { concurrent: 3, duration_sec: 60 }
+
+  - at: 7
+    action: assert_heap_above
+    params: { threshold: 30000 }
+
+  - at: 7
+    action: print_status
+
+  # Heavy load: 5 concurrent
+  - at: 10
+    action: web_stress
+    params: { concurrent: 5, duration_sec: 60 }
+
+  - at: 12
+    action: assert_heap_above
+    params: { threshold: 25000 }
+
+  # Recovery check - heap should recover
+  - at: 14
+    action: wait
+    params: { seconds: 30 }
+
+  - at: 15
+    action: assert_heap_above
+    params: { threshold: 35000 }
+
+  # Form fuzzing
+  - at: 16
+    action: web_fuzz
+
+  - at: 18
+    action: assert_no_crashes
+
+  - at: 18
+    action: assert_heap_above
+    params: { threshold: 30000 }
+
+  # Max concurrent (7 = max_open_sockets)
+  - at: 20
+    action: web_stress
+    params: { concurrent: 7, duration_sec: 30 }
+
+  - at: 22
+    action: print_status
+
+  - at: 25
+    action: check_heap_trend
+    params: { max_decline_kb: 8, window_minutes: 20 }
+
+  - at: 28
+    action: assert_no_crashes
+
+  - at: 28
+    action: assert_no_reboots
+
+  - at: 29
+    action: print_status

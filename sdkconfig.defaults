@@ -76,3 +76,7 @@ CONFIG_FATFS_IMMEDIATE_FSYNC=y
 # Must NOT set CONFIG_ESP_WIFI_SOFTAP_SUPPORT=n - gateway uses SoftAP for initial setup.
 CONFIG_WIREGUARD_ESP_NETIF=y
 CONFIG_WIREGUARD_MAX_PEERS=4
+
+# IPv6 — enables global address autoconfiguration for direct P2P over IPv6 (bypasses NAT)
+CONFIG_LWIP_IPV6=y
+CONFIG_LWIP_IPV6_AUTOCONFIG=y

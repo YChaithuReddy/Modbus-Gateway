@@ -1,0 +1,192 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Reset Sensor Configurations</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 800px;
+            margin: 50px auto;
+            padding: 20px;
+            background: #f5f5f5;
+        }
+        .container {
+            background: white;
+            padding: 30px;
+            border-radius: 10px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        }
+        h1 {
+            color: #333;
+            border-bottom: 3px solid #007bff;
+            padding-bottom: 10px;
+        }
+        .warning {
+            background: #fff3cd;
+            border: 1px solid #ffc107;
+            border-radius: 5px;
+            padding: 15px;
+            margin: 20px 0;
+        }
+        .info {
+            background: #d1ecf1;
+            border: 1px solid #0dcaf0;
+            border-radius: 5px;
+            padding: 15px;
+            margin: 20px 0;
+        }
+        button {
+            background: #28a745;
+            color: white;
+            border: none;
+            padding: 15px 30px;
+            font-size: 16px;
+            border-radius: 5px;
+            cursor: pointer;
+            margin: 10px 5px;
+        }
+        button:hover {
+            background: #218838;
+        }
+        button.danger {
+            background: #dc3545;
+        }
+        button.danger:hover {
+            background: #c82333;
+        }
+        .status {
+            margin-top: 20px;
+            padding: 15px;
+            border-radius: 5px;
+            display: none;
+        }
+        .status.success {
+            background: #d4edda;
+            border: 1px solid #28a745;
+            color: #155724;
+            display: block;
+        }
+        .status.error {
+            background: #f8d7da;
+            border: 1px solid #dc3545;
+            color: #721c24;
+            display: block;
+        }
+        ul {
+            line-height: 1.8;
+        }
+        code {
+            background: #f8f9fa;
+            padding: 2px 6px;
+            border-radius: 3px;
+            font-family: 'Courier New', monospace;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🔧 Reset Sensor Configurations</h1>
+
+        <div class="warning">
+            <strong>⚠️ Warning:</strong> This will reset sensor calculations to fix the corrupted configuration that's showing all sensors as 100.00.
+        </div>
+
+        <div class="info">
+            <h3>What this reset will do:</h3>
+            <ul>
+                <li>✅ Remove invalid <code>CALC_SCALE_OFFSET</code> calculations (scale=0, offset=100)</li>
+                <li>✅ Restore <strong>Sensor 1 (FG24769L)</strong>: SensorHeight=950.0, TankHeight=1000.0</li>
+                <li>✅ Restore <strong>Sensor 2 (FG24770L)</strong>: SensorHeight=820.0, TankHeight=900.0</li>
+                <li>✅ Keep all other sensor configurations intact</li>
+            </ul>
+        </div>
+
+        <div style="margin-top: 30px;">
+            <button onclick="resetSensors()">🔧 Reset Sensor Configurations</button>
+            <button class="danger" onclick="rebootDevice()">🔄 Reboot Device</button>
+        </div>
+
+        <div id="status" class="status"></div>
+
+        <div class="info" style="margin-top: 30px;">
+            <h3>📋 Instructions:</h3>
+            <ol>
+                <li>Click <strong>"Reset Sensor Configurations"</strong> button above</li>
+                <li>Wait for success message</li>
+                <li>Click <strong>"Reboot Device"</strong> to apply changes</li>
+                <li>After reboot, verify sensor readings are correct</li>
+            </ol>
+        </div>
+    </div>
+
+    <script>
+        const DEVICE_IP = '192.168.4.1';  // Change this if your device has a different IP
+
+        function resetSensors() {
+            const statusDiv = document.getElementById('status');
+            statusDiv.className = 'status';
+            statusDiv.style.display = 'block';
+            statusDiv.innerHTML = '⏳ Resetting sensor configurations...';
+
+            fetch(`http://${DEVICE_IP}/reset_sensors`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                }
+            })
+            .then(response => response.json())
+            .then(data => {
+                if (data.status === 'success') {
+                    statusDiv.className = 'status success';
+                    statusDiv.innerHTML = '<strong>✅ Success!</strong><br>' +
+                                         data.message.replace(/\\n/g, '<br>');
+                } else {
+                    statusDiv.className = 'status error';
+                    statusDiv.innerHTML = '<strong>❌ Error!</strong><br>' + data.message;
+                }
+            })
+            .catch(error => {
+                statusDiv.className = 'status error';
+                statusDiv.innerHTML = '<strong>❌ Connection Error!</strong><br>' +
+                                     'Failed to connect to device. Please check:<br>' +
+                                     '• Device IP is correct (currently: ' + DEVICE_IP + ')<br>' +
+                                     '• You are connected to the device WiFi<br>' +
+                                     '• Web server is running<br><br>' +
+                                     'Error: ' + error.message;
+            });
+        }
+
+        function rebootDevice() {
+            if (!confirm('⚠️ Are you sure you want to reboot the device?\n\nMake sure you have reset the sensors first!')) {
+                return;
+            }
+
+            const statusDiv = document.getElementById('status');
+            statusDiv.className = 'status';
+            statusDiv.style.display = 'block';
+            statusDiv.innerHTML = '🔄 Rebooting device...';
+
+            fetch(`http://${DEVICE_IP}/reboot`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                }
+            })
+            .then(response => response.json())
+            .then(data => {
+                statusDiv.className = 'status success';
+                statusDiv.innerHTML = '<strong>✅ Rebooting!</strong><br>' +
+                                     'Device is restarting. Please wait 30 seconds and reconnect.';
+            })
+            .catch(error => {
+                // Reboot will disconnect, so error is expected
+                statusDiv.className = 'status success';
+                statusDiv.innerHTML = '<strong>✅ Rebooting!</strong><br>' +
+                                     'Device is restarting. Please wait 30 seconds and reconnect.';
+            });
+        }
+    </script>
+</body>
+</html>

@@ -1,0 +1,8 @@
+pyserial>=3.5
+pymodbus[serial]>=3.6
+aiohttp>=3.9
+requests>=2.31
+azure-eventhub>=5.11
+pyyaml>=6.0
+matplotlib>=3.8
+jinja2>=3.1

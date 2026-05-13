@@ -1,0 +1,1 @@
+timestamp,elapsed_sec,heap_free,heap_min,mqtt_status,telemetry_sent,telemetry_failed,error_count,sd_errors,sd_saves,sensor_count,web_status,event

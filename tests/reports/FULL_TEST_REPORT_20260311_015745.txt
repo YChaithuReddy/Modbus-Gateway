@@ -1,0 +1,56 @@
+======================================================================
+  ESP32 MODBUS IOT GATEWAY - FULL TEST REPORT
+======================================================================
+  Date:     2026-03-11 01:57:45
+  Duration: 6:02:47
+  Verdict:  FAILED - HIGH PRIORITY ISSUES
+  Issues:   6 total (0 critical, 5 high, 0 medium, 1 low)
+======================================================================
+
+  DEVICE FINAL STATUS
+  ----------------------------------------
+  Heap Free:        147,320 bytes
+  Heap Min:         128,152 bytes
+  MQTT Status:      UNKNOWN
+  MQTT Connects:    0
+  MQTT Disconnects: 0
+  Telemetry Sent:   0
+  Telemetry Failed: 0
+  Crashes:          0
+  Reboots:          2
+  SD Saves:         0
+  SD Errors:        0
+  SD Replays:       0
+  Error Count:      0
+
+  HEAP LEAK CHECK: OK
+  Not enough data
+
+  HIGH ISSUES (5)
+  --------------------------------------------------
+  [20:02:13] [BOOT] WiFi did not connect within 60s
+  [20:04:13] [BOOT] MQTT did not connect within 120s
+  [20:17:18] [MQTT] MQTT not connected after baseline period
+  [20:17:18] [TELEMETRY] No telemetry sent during baseline
+           Expected at least 1 message in 12 minutes
+  [01:57:45] [TELEMETRY] No telemetry sent during entire soak period
+
+  LOW ISSUES (1)
+  --------------------------------------------------
+  [20:17:18] [NETWORK] Network tests skipped - not running as Administrator
+
+  ISSUES BY CATEGORY
+  --------------------------------------------------
+  BOOT: 2 issues
+  MQTT: 1 issues
+  NETWORK: 1 issues
+  TELEMETRY: 2 issues
+
+  RECOMMENDATIONS
+  --------------------------------------------------
+  3. Review MQTT reconnection and SD caching logic
+
+  Serial log CSV: C:\Users\chath\Documents\Python code\modbus_iot_gateway\tests\reports\serial_log_20260310_195549.csv
+  Report saved to: C:\Users\chath\Documents\Python code\modbus_iot_gateway\tests\reports\FULL_TEST_REPORT_20260311_015745.txt
+
+======================================================================

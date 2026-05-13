@@ -5,38 +5,106 @@
       "Bash(rg:*)",
       "Bash(find:*)",
       "Bash(ls:*)",
-      "Read(/C:\\Users\\fluxg\\Documents\\Python code\\modbus_iot_gateway_stable_prefinal\\modbus_iot_gateway_stable 13\\modbus_iot_gateway_stable 3\\modbus_iot_gateway_stable\\main/**)",
-      "Read(/C:\\Users\\fluxg\\Documents\\Python code\\modbus_iot_gateway_stable_prefinal\\modbus_iot_gateway_stable 13\\modbus_iot_gateway_stable 3\\modbus_iot_gateway_stable\\main/**)",
-      "Read(/C:\\Users\\fluxg\\Documents\\Python code\\modbus_iot_gateway_stable_prefinal\\modbus_iot_gateway_stable 13\\modbus_iot_gateway_stable 3\\modbus_iot_gateway_stable\\main/**)",
-      "Read(/C:\\Users\\fluxg\\Documents\\Python code\\modbus_iot_gateway_stable_prefinal\\modbus_iot_gateway_stable 13\\modbus_iot_gateway_stable 3\\modbus_iot_gateway_stable\\main/**)",
-      "Read(/C:\\Users\\fluxg\\Documents\\Python code\\modbus_iot_gateway_stable_prefinal\\modbus_iot_gateway_stable 13\\modbus_iot_gateway_stable 3\\modbus_iot_gateway_stable\\main/**)",
-      "Read(/C:\\Users\\fluxg\\Documents\\Python code\\modbus_iot_gateway_stable_prefinal\\modbus_iot_gateway_stable 13\\modbus_iot_gateway_stable 3\\modbus_iot_gateway_stable\\main/**)",
-      "Bash(idf.py build:*)",
-      "Bash(cmd.exe:*)",
-      "Bash(powershell -Command \"Get-PnpDevice -PresentOnly | Where-Object { $_Class -eq ''Ports'' } | Select-Object FriendlyName, InstanceID | Format-List\")",
-      "Read(//c/Users/chath/OneDrive/Documents/Python code/expense tracker/**)",
-      "Bash(dir:*)",
-      "Bash(if not exist skills mkdir skills)",
-      "Bash(mkdir:*)",
-      "Read(//c/Users/chath/OneDrive/Documents/Python code/**)",
       "Bash(git add:*)",
       "Bash(git commit:*)",
       "Bash(git push:*)",
-      "Bash(md5sum:*)",
-      "Bash(cat:*)",
-      "Bash(chmod:*)",
-      "Bash(bash update_energy_quality.sh:*)",
-      "Bash(python3:*)",
-      "Bash(bash:*)",
-      "Bash(awk:*)",
-      "Bash(git init:*)",
-      "Bash(git remote add:*)",
+      "Bash(git log:*)",
+      "Bash(git status:*)",
+      "Bash(git diff:*)",
       "Bash(git branch:*)",
       "Bash(git pull:*)",
       "Bash(git checkout:*)",
       "Bash(git reset:*)",
-      "Bash(du:*)"
+      "Bash(git init:*)",
+      "Bash(git remote add:*)",
+      "Bash(md5sum:*)",
+      "Bash(cat:*)",
+      "Bash(chmod:*)",
+      "Bash(bash:*)",
+      "Bash(awk:*)",
+      "Bash(dir:*)",
+      "Bash(du:*)",
+      "Bash(mkdir:*)",
+      "Bash(python3:*)",
+      "Read(//c/Users/chath/OneDrive/Documents/Python code/**)",
+      "WebSearch",
+      "Bash(powershell -Command \"Get-ChildItem -Path ''$env:USERPROFILE\\\\OneDrive'' -Directory | ForEach-Object { $size = \\(Get-ChildItem $_FullName -Recurse -File -ErrorAction SilentlyContinue | Measure-Object -Property Length -Sum\\).Sum; [PSCustomObject]@{Folder=$_Name; SizeMB=[math]::Round\\($size/1MB,1\\)} } | Sort-Object SizeMB -Descending | Format-Table -AutoSize\")",
+      "Bash(/tmp/cleanup_round2.ps1:*)",
+      "Bash(powershell.exe -NoProfile -ExecutionPolicy Bypass -File /tmp/cleanup_round2.ps1)"
     ],
-    "deny": []
+    "deny": [],
+    "ask": []
+  },
+  "hooks": {
+    "SessionStart": [
+      {
+        "matcher": "",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash .claude/hooks/session-start-context.sh",
+            "timeout": 5
+          }
+        ]
+      }
+    ],
+    "UserPromptSubmit": [
+      {
+        "matcher": "",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash .claude/hooks/workflow-enforcer.sh",
+            "timeout": 5
+          }
+        ]
+      }
+    ],
+    "PreToolUse": [
+      {
+        "matcher": "Edit|Write",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash .claude/hooks/block-partition-edits.sh",
+            "timeout": 5
+          }
+        ]
+      },
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash .claude/hooks/pre-commit-gate.sh",
+            "timeout": 10
+          }
+        ]
+      }
+    ],
+    "PreCompact": [
+      {
+        "matcher": "",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash .claude/hooks/pre-compact-save.sh",
+            "timeout": 5
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "matcher": "",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash .claude/hooks/stop-learning-reminder.sh",
+            "timeout": 5
+          }
+        ]
+      }
+    ]
   }
 }

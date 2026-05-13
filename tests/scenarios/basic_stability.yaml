@@ -1,0 +1,50 @@
+# Basic Stability Test - 30 minute baseline
+# Checks: heap stability, no crashes, MQTT connected, telemetry flowing
+name: "Basic Stability (30min)"
+duration_minutes: 30
+steps:
+  - at: 0
+    action: print_status
+
+  - at: 1
+    action: assert_heap_above
+    params: { threshold: 40000 }
+
+  - at: 1
+    action: assert_mqtt_connected
+
+  - at: 5
+    action: assert_heap_above
+    params: { threshold: 40000 }
+
+  - at: 5
+    action: assert_no_crashes
+
+  - at: 10
+    action: print_status
+
+  - at: 10
+    action: assert_heap_above
+    params: { threshold: 40000 }
+
+  - at: 15
+    action: assert_serial_pattern
+    params:
+      pattern: "Message published successfully|Telemetry sent"
+      timeout: 360
+
+  - at: 20
+    action: print_status
+
+  - at: 20
+    action: assert_no_crashes
+
+  - at: 25
+    action: check_heap_trend
+    params: { max_decline_kb: 5, window_minutes: 20 }
+
+  - at: 29
+    action: assert_no_reboots
+
+  - at: 29
+    action: print_status

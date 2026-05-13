@@ -1,0 +1,13 @@
+{
+  "name": "FluxGen Modbus IoT Gateway",
+  "version": "1.3.9",
+  "new_install_prompt_erase": true,
+  "builds": [
+    {
+      "chipFamily": "ESP32",
+      "parts": [
+        { "path": "firmware/merged_firmware.bin", "offset": 0 }
+      ]
+    }
+  ]
+}

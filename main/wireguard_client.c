@@ -27,6 +27,8 @@
 
 #include "esp_netif.h"
 #include "lwip/ip_addr.h"
+#include "lwip/ip6_addr.h"
+#include "lwip/sockets.h"
 
 #include "wireguard_client.h"
 #include "web_config.h"  // for web_config_get_server() lazy handler registration
@@ -47,10 +49,10 @@ static const char *TAG = "WG_CLIENT";
 #define WG_MIN_HEAP_FOR_REGISTER  40000
 
 // P2P peer discovery (polls relay server via WG tunnel for direct device peers)
-#define P2P_MAX_DIRECT_PEERS  3
-#define COORD_PEERS_URL       "http://10.100.0.1:3200/wg/api/coord/peers"
-#define MESH_REPORT_URL       "http://10.100.0.1:3200/wg/api/mesh/report"
-#define P2P_POLL_MS           30000
+#define P2P_MAX_DIRECT_PEERS    3
+#define COORD_PEERS_URL         "http://10.100.0.1:3200/wg/api/coord/peers"
+#define COORD_ENDPOINTS_URL     "http://10.100.0.1:3200/wg/api/coord/endpoints"
+#define P2P_POLL_MS             30000
 
 // ── Identity (loaded from NVS or assigned by server) ─────────────────
 static char s_device_name[32]   = {0};
@@ -669,18 +671,41 @@ static void p2p_discovery_task(void *arg)
             }
         }
 
-        // ── Step 2: report own LAN IP to the mesh ─────────────────────
+        // ── Step 2: report own LAN IP + IPv6 to coord/endpoints ──────
         {
-            char lan_ip[20] = {0};
-            if (get_lan_ip(lan_ip, sizeof(lan_ip))) {
-                char report[256];
+            char lan_ip[20]   = {0};
+            char ipv6_str[48] = {0};
+
+            get_lan_ip(lan_ip, sizeof(lan_ip));
+
+            // Try to get global IPv6 address (available when CONFIG_LWIP_IPV6=y)
+            esp_netif_t *sta6 = esp_netif_get_handle_from_ifkey("WIFI_STA_DEF");
+            if (sta6) {
+                esp_ip6_addr_t ip6 = {0};
+                if (esp_netif_get_ip6_global(sta6, &ip6) == ESP_OK) {
+                    // ntohl each word: lwIP stores IPv6 in network byte order as uint32_t
+                    uint32_t w0 = lwip_ntohl(ip6.addr[0]);
+                    uint32_t w1 = lwip_ntohl(ip6.addr[1]);
+                    uint32_t w2 = lwip_ntohl(ip6.addr[2]);
+                    uint32_t w3 = lwip_ntohl(ip6.addr[3]);
+                    snprintf(ipv6_str, sizeof(ipv6_str),
+                        "%04x:%04x:%04x:%04x:%04x:%04x:%04x:%04x",
+                        (unsigned int)((w0 >> 16) & 0xffff), (unsigned int)(w0 & 0xffff),
+                        (unsigned int)((w1 >> 16) & 0xffff), (unsigned int)(w1 & 0xffff),
+                        (unsigned int)((w2 >> 16) & 0xffff), (unsigned int)(w2 & 0xffff),
+                        (unsigned int)((w3 >> 16) & 0xffff), (unsigned int)(w3 & 0xffff));
+                }
+            }
+
+            if (lan_ip[0] || ipv6_str[0]) {
+                char report[384];
                 snprintf(report, sizeof(report),
                     "{\"public_key\":\"%s\",\"preshared_key\":\"%s\","
-                    "\"lan_ip\":\"%s\",\"wg_port\":0}",
-                    s_wg_pubkey, s_wg_psk, lan_ip);
+                    "\"lan_ip\":\"%s\",\"ipv6\":\"%s\",\"wg_port\":0}",
+                    s_wg_pubkey, s_wg_psk, lan_ip, ipv6_str);
 
                 esp_http_client_config_t rcfg = {
-                    .url        = MESH_REPORT_URL,
+                    .url        = COORD_ENDPOINTS_URL,
                     .method     = HTTP_METHOD_POST,
                     .timeout_ms = 5000,
                     .buffer_size      = 256,
@@ -692,7 +717,7 @@ static void p2p_discovery_task(void *arg)
                     esp_http_client_set_post_field(rc, report, strlen(report));
                     esp_http_client_perform(rc);
                     esp_http_client_cleanup(rc);
-                    ESP_LOGD(TAG, "[P2P] Reported LAN IP %s", lan_ip);
+                    ESP_LOGD(TAG, "[P2P] Reported lan=%s ipv6=%s", lan_ip, ipv6_str);
                 }
             }
         }
@@ -708,6 +733,101 @@ static void p2p_discovery_task(void *arg)
         }
 
         vTaskDelay(pdMS_TO_TICKS(P2P_POLL_MS));
+    }
+}
+
+// ── Browser-to-wake task ─────────────────────────────────────────────
+// When the web server is down, holds port 80 with a minimal TCP socket.
+// First browser request gets a "starting..." page with a 2-second
+// auto-refresh; the full web server is started behind the scenes and
+// is ready by the time the browser follows the refresh.
+// Auto-stops the web server after 5 minutes to reclaim ~64 KB heap.
+#define WAKE_WEB_SERVER_TIMEOUT_MS (30 * 60 * 1000)
+
+static const char WAKE_HTML[] =
+    "HTTP/1.1 200 OK\r\n"
+    "Content-Type: text/html\r\n"
+    "Connection: close\r\n\r\n"
+    "<!DOCTYPE html><html><head>"
+    "<meta http-equiv='refresh' content='2;url=/'>"
+    "<title>FluxGen Gateway</title></head><body>"
+    "<p><b>FluxGen Gateway</b> &mdash; web interface is starting, "
+    "please wait...</p>"
+    "</body></html>";
+
+static void tcp_wake_task(void *arg)
+{
+    // Wait for registration + tunnel before touching port 80
+    while (!s_registered || s_wg_ctx.netif == NULL) {
+        vTaskDelay(pdMS_TO_TICKS(5000));
+    }
+    vTaskDelay(pdMS_TO_TICKS(10000)); // let tunnel stabilise
+
+    for (;;) {
+        // Only hold port 80 when the full web server is not running
+        while (!wireguard_tunnel_is_up() || web_config_get_server() != NULL) {
+            vTaskDelay(pdMS_TO_TICKS(5000));
+        }
+
+        int srv = socket(AF_INET, SOCK_STREAM, 0);
+        if (srv < 0) {
+            vTaskDelay(pdMS_TO_TICKS(10000));
+            continue;
+        }
+
+        int opt = 1;
+        setsockopt(srv, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt));
+
+        struct sockaddr_in addr = {
+            .sin_family      = AF_INET,
+            .sin_addr.s_addr = htonl(INADDR_ANY),
+            .sin_port        = htons(80),
+        };
+
+        if (bind(srv, (struct sockaddr *)&addr, sizeof(addr)) != 0 ||
+            listen(srv, 1) != 0) {
+            ESP_LOGW(TAG, "[WAKE] bind/listen port 80 failed (%d) — retry 15s", errno);
+            close(srv);
+            vTaskDelay(pdMS_TO_TICKS(15000));
+            continue;
+        }
+
+        ESP_LOGI(TAG, "[WAKE] Ready — open http://%s/ in browser to start web UI",
+                 s_wg_local_ip);
+
+        // Accept loop — exit when web server comes up or tunnel drops
+        while (wireguard_tunnel_is_up() && web_config_get_server() == NULL) {
+            struct timeval tv = {.tv_sec = 5, .tv_usec = 0};
+            setsockopt(srv, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
+
+            int cli = accept(srv, NULL, NULL);
+            if (cli < 0) continue; // 5s timeout — loop and re-check conditions
+
+            // Drain the browser's HTTP request (we don't need its content)
+            char buf[256];
+            recv(cli, buf, sizeof(buf) - 1, 0);
+
+            // Reply with auto-refresh page; browser waits 2s then reloads /
+            send(cli, WAKE_HTML, sizeof(WAKE_HTML) - 1, 0);
+            close(cli);
+
+            // Release port 80 before httpd grabs it
+            close(srv);
+            srv = -1;
+
+            ESP_LOGI(TAG, "[WAKE] Browser hit — starting web server");
+            web_config_start_server_only();
+
+            // Auto-stop after 5 min to reclaim heap
+            vTaskDelay(pdMS_TO_TICKS(WAKE_WEB_SERVER_TIMEOUT_MS));
+            if (web_config_get_server() != NULL) {
+                ESP_LOGI(TAG, "[WAKE] 5-min timeout — stopping web server");
+                web_config_stop();
+            }
+            break; // back to outer loop — reopen wake listener
+        }
+
+        if (srv >= 0) close(srv);
     }
 }
 
@@ -816,7 +936,8 @@ void wireguard_start_keepalive_task(void)
     spawned = true;
     xTaskCreate(wireguard_keepalive_task, "wg_keepalive", 5120, NULL, 4, NULL);
     xTaskCreate(p2p_discovery_task,       "wg_p2p",       6144, NULL, 3, NULL);
-    ESP_LOGI(TAG, "WG keepalive + P2P discovery tasks spawned");
+    xTaskCreate(tcp_wake_task,            "wg_wake",      3072, NULL, 3, NULL);
+    ESP_LOGI(TAG, "WG keepalive + P2P discovery + browser-wake tasks spawned");
 }
 
 // ── /vpn-status HTTP handler ─────────────────────────────────────────

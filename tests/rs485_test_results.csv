@@ -1,0 +1,20 @@
+timestamp,port,board_label,status,details
+2026-03-23 15:39:22,COM5,PCB-001,FAIL,Flash failed
+2026-03-23 15:41:02,COM5,PCB-001,FAIL,Flash failed
+2026-03-23 15:42:12,COM5,PCB-001,FAIL,Flash failed
+2026-03-23 15:43:56,COM5,PCB-001,UNKNOWN,No Modbus activity in timeout
+2026-03-23 15:44:06,COM5,PCB-002,FAIL,Flash failed
+2026-03-23 15:45:33,COM5,PCB-003,UNKNOWN,No Modbus activity in timeout
+2026-03-23 15:51:14,COM5,PCB-001,FAIL,No boot
+2026-03-23 15:53:35,PCB-001,FAIL,Connection error: <urlopen error [WinError 10061] No connection could be made because the target machine actively refused it>
+2026-03-23 16:02:15,PCB-001,UNKNOWN,No Modbus result
+2026-03-23 16:17:43,PCB-001,UNKNOWN,No Modbus result
+2026-03-23 16:24:14,PCB-001,UNKNOWN,No response to TEST command
+2026-03-23 16:26:32,PCB-001,UNKNOWN,No response to TEST command
+2026-03-23 16:33:00,PCB-001,PASS,hi=1337348.00
+2026-03-23 16:35:36,PCB-002,FAIL,Modbus timeout - no response from flow meter
+2026-03-23 16:40:29,PCB-001,FAIL,Failed all 3 attempts
+2026-03-23 16:45:48,PCB-002,PASS,Attempt 1
+2026-03-23 16:47:02,PCB-003,PASS,Attempt 1
+2026-03-23 16:48:28,PCB-004,PASS,Attempt 1
+2026-03-23 16:49:38,PCB-005,PASS,Attempt 1

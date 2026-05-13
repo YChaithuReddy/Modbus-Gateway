@@ -1,0 +1,123 @@
+# Full Soak Test - 8 hours comprehensive
+# Combines network disruption, web stress, and heap monitoring
+name: "Full Soak Test (8hr)"
+duration_minutes: 480
+steps:
+  # === Baseline (0-10 min) ===
+  - at: 0
+    action: print_status
+
+  - at: 5
+    action: assert_mqtt_connected
+
+  - at: 5
+    action: assert_heap_above
+    params: { threshold: 40000 }
+
+  - at: 10
+    action: assert_serial_pattern
+    params:
+      pattern: "Message published successfully|Telemetry sent"
+      timeout: 360
+
+  # === First network disruption (30 min) ===
+  - at: 30
+    action: block_network
+    params: { duration_sec: 300 }
+
+  - at: 36
+    action: print_status
+
+  - at: 38
+    action: assert_heap_above
+    params: { threshold: 30000 }
+
+  # === Light web stress (60 min) ===
+  - at: 60
+    action: web_stress
+    params: { concurrent: 2, duration_sec: 30 }
+
+  - at: 62
+    action: assert_no_crashes
+
+  # === Second disruption (90 min) ===
+  - at: 90
+    action: block_network
+    params: { duration_sec: 600 }
+
+  - at: 102
+    action: print_status
+
+  # === Heap check at 2 hours ===
+  - at: 120
+    action: check_heap_trend
+    params: { max_decline_kb: 8, window_minutes: 60 }
+
+  - at: 120
+    action: print_status
+
+  # === Network flap at 2.5 hours ===
+  - at: 150
+    action: flap_network
+    params: { on_seconds: 120, off_seconds: 60, cycles: 3 }
+
+  - at: 160
+    action: assert_no_crashes
+
+  # === Web fuzz at 3 hours ===
+  - at: 180
+    action: web_fuzz
+
+  - at: 182
+    action: assert_heap_above
+    params: { threshold: 25000 }
+
+  # === Third disruption (4 hours) ===
+  - at: 240
+    action: block_network
+    params: { duration_sec: 900 }
+
+  - at: 256
+    action: print_status
+
+  - at: 258
+    action: check_heap_trend
+    params: { max_decline_kb: 10, window_minutes: 120 }
+
+  # === Web stress at 5 hours ===
+  - at: 300
+    action: web_stress
+    params: { concurrent: 5, duration_sec: 60 }
+
+  - at: 302
+    action: assert_no_crashes
+
+  # === Fourth disruption (6 hours) ===
+  - at: 360
+    action: block_network
+    params: { duration_sec: 1200 }
+
+  - at: 382
+    action: print_status
+
+  # === Final checks (7.5 hours) ===
+  - at: 450
+    action: check_heap_trend
+    params: { max_decline_kb: 15, window_minutes: 240 }
+
+  - at: 450
+    action: assert_no_crashes
+
+  - at: 450
+    action: assert_no_reboots
+
+  # === End ===
+  - at: 478
+    action: print_status
+
+  - at: 479
+    action: assert_heap_above
+    params: { threshold: 25000 }
+
+  - at: 479
+    action: assert_no_crashes

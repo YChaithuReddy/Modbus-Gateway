@@ -1,0 +1,61 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<title>Aquadax Card Preview</title>
+<style>
+body { font-family: 'Segoe UI', Arial, sans-serif; background: #f0f4f8; margin: 0; padding: 20px; }
+.sensor-card {
+    background: white;
+    border: 1px solid #dee2e6;
+    border-radius: 12px;
+    padding: 20px;
+    margin: 15px auto;
+    max-width: 750px;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.08);
+}
+h2 { color: #17a2b8; margin-bottom: 5px; }
+.divider { height: 3px; background: linear-gradient(90deg, #17a2b8, #20c997, #0d6efd); border-radius: 2px; margin-bottom: 20px; }
+button { width: 100%; padding: 10px; border: none; border-radius: 6px; color: white; font-weight: 700; font-size: 14px; cursor: pointer; margin: 3px 0; letter-spacing: 1px; }
+</style>
+</head>
+<body>
+
+<h2>Water Quality Sensors</h2>
+<div class="divider"></div>
+
+<div class="sensor-card">
+    <!-- Header -->
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;padding-bottom:10px;border-bottom:2px solid #17a2b8">
+        <h3 style="margin:0;font-size:18px">Borewell-7 <span style="color:#888;font-weight:normal">(Sensor 1)</span></h3>
+        <span style="background:linear-gradient(135deg,#17a2b8,#20c997);color:white;padding:4px 14px;border-radius:20px;font-size:12px;font-weight:600;letter-spacing:0.5px">AQUADAX QUALITY</span>
+    </div>
+
+    <!-- Info grid -->
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px 20px;margin-bottom:12px;padding:12px;background:#f8f9fa;border-radius:8px;font-size:13px">
+        <div><strong style="color:#555">Unit ID:</strong> <span style="color:#0d6efd">ehbcijwd</span></div>
+        <div><strong style="color:#555">Slave ID:</strong> 1</div>
+        <div><strong style="color:#555">Register:</strong> 1280 (0x0500)</div>
+        <div><strong style="color:#555">Baud Rate:</strong> 9600 bps</div>
+        <div><strong style="color:#555">Quantity:</strong> 12 registers</div>
+        <div><strong style="color:#555">Data Format:</strong> FLOAT32 CDAB</div>
+    </div>
+
+    <!-- Parameter badges -->
+    <div style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:10px">
+        <span style="background:#d4edda;color:#155724;padding:4px 10px;border-radius:12px;font-size:12px;font-weight:600;border:1px solid #c3e6cb">COD (mg/L)</span>
+        <span style="background:#d4edda;color:#155724;padding:4px 10px;border-radius:12px;font-size:12px;font-weight:600;border:1px solid #c3e6cb">BOD (mg/L)</span>
+        <span style="background:#d4edda;color:#155724;padding:4px 10px;border-radius:12px;font-size:12px;font-weight:600;border:1px solid #c3e6cb">TSS (mg/L)</span>
+        <span style="background:#d4edda;color:#155724;padding:4px 10px;border-radius:12px;font-size:12px;font-weight:600;border:1px solid #c3e6cb">pH</span>
+        <span style="background:#cce5ff;color:#004085;padding:4px 10px;border-radius:12px;font-size:12px;font-weight:600;border:1px solid #b8daff">Temp (&deg;C)</span>
+        <span style="background:#f8d7da;color:#721c24;padding:4px 10px;border-radius:12px;font-size:11px;border:1px solid #f5c6cb">Reg 8-9: Unused</span>
+    </div>
+
+    <!-- Buttons -->
+    <button style="background:linear-gradient(135deg,#17a2b8,#20c997)">EDIT</button>
+    <button style="background:linear-gradient(135deg,#007bff,#0056b3)">TEST RS485</button>
+    <button style="background:linear-gradient(135deg,#dc3545,#c82333)">DELETE</button>
+</div>
+
+</body>
+</html>

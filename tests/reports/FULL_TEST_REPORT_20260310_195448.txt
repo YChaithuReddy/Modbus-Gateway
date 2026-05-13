@@ -1,0 +1,45 @@
+======================================================================
+  ESP32 MODBUS IOT GATEWAY - FULL TEST REPORT
+======================================================================
+  Date:     2026-03-10 19:54:48
+  Duration: 0:01:48
+  Verdict:  FAILED - CRITICAL ISSUES FOUND
+  Issues:   1 total (1 critical, 0 high, 0 medium, 0 low)
+======================================================================
+
+  DEVICE FINAL STATUS
+  ----------------------------------------
+  Heap Free:        0 bytes
+  Heap Min:         999,999 bytes
+  MQTT Status:      UNKNOWN
+  MQTT Connects:    0
+  MQTT Disconnects: 0
+  Telemetry Sent:   0
+  Telemetry Failed: 0
+  Crashes:          0
+  Reboots:          0
+  SD Saves:         0
+  SD Errors:        0
+  SD Replays:       0
+  Error Count:      0
+
+  HEAP LEAK CHECK: OK
+  Not enough data
+
+  CRITICAL ISSUES (1)
+  --------------------------------------------------
+  [19:54:48] [BOOT] ESP32 did not boot within timeout
+           No boot message detected in 90s
+
+  ISSUES BY CATEGORY
+  --------------------------------------------------
+  BOOT: 1 issues
+
+  RECOMMENDATIONS
+  --------------------------------------------------
+  1. Fix all CRITICAL issues before deploying to production
+
+  Serial log CSV: C:\Users\chath\Documents\Python code\modbus_iot_gateway\tests\reports\serial_log_20260310_195318.csv
+  Report saved to: C:\Users\chath\Documents\Python code\modbus_iot_gateway\tests\reports\FULL_TEST_REPORT_20260310_195448.txt
+
+======================================================================
