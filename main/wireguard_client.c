@@ -416,6 +416,9 @@ esp_err_t wireguard_setup(void)
     }
 
     // Step 2: Bring up tunnel
+    // Give the server 3s to apply the new PSK to its WireGuard interface
+    // before sending the Initiation packet — avoids PSK-mismatch on first handshake.
+    vTaskDelay(pdMS_TO_TICKS(3000));
     esp_err_t err = wg_start();
     s_setup_done = true;
     if (err != ESP_OK) {
@@ -481,7 +484,7 @@ static void p2p_discovery_task(void *arg)
     vTaskDelay(pdMS_TO_TICKS(30000));
 
     while (1) {
-        if (!s_registered || s_wg_ctx.netif == NULL) {
+        if (!s_registered || !wireguard_tunnel_is_up()) {
             vTaskDelay(pdMS_TO_TICKS(P2P_POLL_MS));
             continue;
         }
